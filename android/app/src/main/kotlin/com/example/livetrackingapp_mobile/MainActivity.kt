@@ -1,4 +1,4 @@
-package com.example.livetrackingapp_mobile
+package com.kbp.livetracking
 
 import io.flutter.embedding.android.FlutterActivity
 

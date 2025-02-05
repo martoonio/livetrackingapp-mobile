@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "743103917081",
+    "project_id": "trackingsystem-kbp",
+    "storage_bucket": "trackingsystem-kbp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:743103917081:android:c76cd3639d6e4296a78e88",
+        "android_client_info": {
+          "package_name": "com.kbp.livetracking"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD9WUQoUb3AM_YPWwShgvu2YI5coWwSx0Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
