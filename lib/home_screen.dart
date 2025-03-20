@@ -37,7 +37,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadPatrolHistory();
   }
 
-
 // Replace existing _buildPatrolHistory with this
   Widget _buildPatrolHistory() {
     return Column(
@@ -138,29 +137,36 @@ class _HomeScreenState extends State<HomeScreen> {
 // Add method to show patrol summary
   void _showPatrolSummary(PatrolTask task) {
     try {
-      print('Route path raw data: ${task.routePath}'); // Debug print
+      print('=== Converting Route Path ===');
+      print('Original route path: ${task.routePath}');
 
       List<List<double>> convertedPath = [];
 
       if (task.routePath != null && task.routePath is Map) {
         final map = task.routePath as Map;
 
-        // Sort entries by timestamp to maintain path order
+        // Sort entries by timestamp
         final sortedEntries = map.entries.toList()
           ..sort((a, b) => (a.value['timestamp'] as String)
               .compareTo(b.value['timestamp'] as String));
 
+        print('Sorted entries count: ${sortedEntries.length}');
+
+        // Convert coordinates - KEEP SAME ORDER as MapScreen
         convertedPath = sortedEntries.map((entry) {
-          final coordinates = (entry.value['coordinates'] as List);
-          // Note: Firebase stores coordinates as [longitude, latitude]
+          final coordinates = entry.value['coordinates'] as List;
+          print('Processing coordinates: $coordinates');
           return [
-            (coordinates[1] as num).toDouble(), // latitude
-            (coordinates[0] as num).toDouble(), // longitude
+            (coordinates[0] as num).toDouble(), // latitude comes first
+            (coordinates[1] as num).toDouble(), // longitude comes second
           ];
         }).toList();
-      }
 
-      print('Converted path length: ${convertedPath.length}'); // Debug print
+        if (convertedPath.isNotEmpty) {
+          print('First point: ${convertedPath.first}');
+          print('Last point: ${convertedPath.last}');
+        }
+      }
 
       if (convertedPath.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -181,8 +187,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     } catch (e, stackTrace) {
-      print('Error showing patrol summary: $e'); // Debug print
-      print('Stack trace: $stackTrace'); // Debug print
+      print('Error showing patrol summary: $e');
+      print('Stack trace: $stackTrace');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error loading patrol summary: $e')),
       );

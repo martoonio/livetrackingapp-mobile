@@ -1,32 +1,47 @@
+-Info.plist
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>API_KEY</key>
-	<string>AIzaSyB4mwCKLi6AqidBrM1rDaQHcPDeiMTMDxE</string>
-	<key>GCM_SENDER_ID</key>
-	<string>743103917081</string>
-	<key>PLIST_VERSION</key>
-	<string>1</string>
-	<key>BUNDLE_ID</key>
-	<string>com.example.livetrackingappMobile</string>
-	<key>PROJECT_ID</key>
-	<string>trackingsystem-kbp</string>
-	<key>STORAGE_BUCKET</key>
-	<string>trackingsystem-kbp.firebasestorage.app</string>
-	<key>IS_ADS_ENABLED</key>
-	<false></false>
-	<key>IS_ANALYTICS_ENABLED</key>
-	<false></false>
-	<key>IS_APPINVITE_ENABLED</key>
-	<true></true>
-	<key>IS_GCM_ENABLED</key>
-	<true></true>
-	<key>IS_SIGNIN_ENABLED</key>
-	<true></true>
-	<key>GOOGLE_APP_ID</key>
-	<string>1:743103917081:ios:a15c55854b4e4db1a78e88</string>
-	<key>DATABASE_URL</key>
-	<string>https://trackingsystem-kbp-default-rtdb.asia-southeast1.firebasedatabase.app</string>
+    <key>API_KEY</key>
+    <string>AIzaSyB4mwCKLi6AqidBrM1rDaQHcPDeiMTMDxE</string>
+    <key>GCM_SENDER_ID</key>
+    <string>743103917081</string>
+    <key>PLIST_VERSION</key>
+    <string>1</string>
+    <key>BUNDLE_ID</key>
+    <string>com.example.livetrackingappMobile</string>
+    <key>PROJECT_ID</key>
+    <string>trackingsystem-kbp</string>
+    <key>STORAGE_BUCKET</key>
+    <string>trackingsystem-kbp.firebasestorage.app</string>
+    <key>IS_ADS_ENABLED</key>
+    <false></false>
+    <key>IS_ANALYTICS_ENABLED</key>
+    <false></false>
+    <key>IS_APPINVITE_ENABLED</key>
+    <true></true>
+    <key>IS_GCM_ENABLED</key>
+    <true></true>
+    <key>IS_SIGNIN_ENABLED</key>
+    <true></true>
+    <key>GOOGLE_APP_ID</key>
+    <string>1:743103917081:ios:a15c55854b4e4db1a78e88</string>
+    <key>DATABASE_URL</key>
+    <string>https://trackingsystem-kbp-default-rtdb.asia-southeast1.firebasedatabase.app</string>
+    
+    <!-- Add required location permissions -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>This app needs access to location when open to show your current position on map.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>This app needs access to location when in background for tracking patrols.</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>This app needs access to location when in background for tracking patrols.</string>
+    
+    <!-- Firebase specific configurations -->
+    <key>FirebaseAppDelegateProxyEnabled</key>
+    <true/>
+    <key>FirebaseDatabaseUrl</key>
+    <string>https://trackingsystem-kbp-default-rtdb.asia-southeast1.firebasedatabase.app</string>
 </dict>
 </plist>

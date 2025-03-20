@@ -4,16 +4,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:get_it/get_it.dart';
 import 'package:livetrackingapp/firebase_options.dart';
 import 'package:livetrackingapp/home_screen.dart';
-import 'package:livetrackingapp/map_screen.dart';
 import 'package:livetrackingapp/presentation/auth/login_screen.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:livetrackingapp/data/repositories/route_repositoryImpl.dart';
-import 'package:livetrackingapp/data/source/mapbox_service.dart';
 import 'data/repositories/auth_repositoryImpl.dart';
 import 'domain/repositories/auth_repository.dart';
 import 'domain/repositories/route_repository.dart';
@@ -23,20 +19,12 @@ import 'presentation/routing/bloc/patrol_bloc.dart';
 final getIt = GetIt.instance;
 
 void setupLocator() {
-  // Register MapboxService for route calculations
-  getIt.registerLazySingleton(() => MapboxService());
+  // Remove MapboxService registration
 
   // Register RouteRepository implementation
   getIt.registerLazySingleton<RouteRepository>(
-    () => RouteRepositoryImpl(
-      mapboxService: getIt(),
-    ),
+    () => RouteRepositoryImpl(),
   );
-
-  // Register AuthRepository implementation
-  // getIt.registerLazySingleton<AuthRepository>(
-  //   () => AuthRepositoryImpl(),
-  // );
 
   getIt.registerLazySingleton<AuthRepository>(
     () => AuthRepositoryImpl(
@@ -45,32 +33,38 @@ void setupLocator() {
   );
 }
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Initialize Firebase first
+Future<void> initializeApp() async {
+  // Initialize Firebase with platform-specific options
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  try {
-    print('Enabling database persistence...');
-    FirebaseDatabase.instance.setPersistenceEnabled(true);
-    print('Database persistence enabled');
-  } catch (e) {
-    print('Error enabling persistence: $e');
+  // Wait for auth state to be determined
+  await Future.delayed(const Duration(seconds: 1));
+
+  if (FirebaseAuth.instance.currentUser != null) {
+    try {
+      // Enable persistence only after authentication
+      FirebaseDatabase.instance.setPersistenceEnabled(true);
+      print(
+          'Database persistence enabled for user: ${FirebaseAuth.instance.currentUser?.uid}');
+    } catch (e) {
+      print('Error enabling persistence: $e');
+    }
   }
 
-  // Setup dependency injection
-  setupLocator();
-
-  // Load environment variables
-  await dotenv.load(fileName: '.env');
-  MapboxOptions.setAccessToken(dotenv.env['MAPBOX_TOKEN']!);
-
-  // Request necessary permissions
-  if (Platform.isAndroid) {
+  // Request permissions based on platform
+  if (Platform.isIOS) {
+    await Permission.location.request();
+  } else if (Platform.isAndroid) {
     await Permission.notification.request();
     await Permission.location.request();
   }
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await initializeApp();
+  setupLocator();
 
   runApp(const MyApp());
 }
@@ -87,17 +81,12 @@ class MyApp extends StatelessWidget {
             repository: getIt<AuthRepository>(),
           )..add(CheckAuthStatus()),
         ),
-        BlocProvider<PatrolBloc>(
-          create: (context) => PatrolBloc(
-            repository: getIt<RouteRepository>(),
-          ),
-        ),
+        // Remove duplicate PatrolBloc provider
         BlocProvider<PatrolBloc>(
           create: (context) {
             final bloc = PatrolBloc(
               repository: getIt<RouteRepository>(),
             );
-            // Initialize with loading state
             bloc.emit(PatrolLoading());
             return bloc;
           },
@@ -105,12 +94,14 @@ class MyApp extends StatelessWidget {
       ],
       child: BlocBuilder<AuthBloc, AuthState>(
         builder: (context, state) {
+          print('Current auth state: $state'); // Debug print
           return MaterialApp(
             title: 'Live Tracking App',
             theme: ThemeData(
-                scaffoldBackgroundColor: Colors.white,
-                primarySwatch: Colors.green,
-                fontFamily: 'Plus Jakarta Sans'),
+              scaffoldBackgroundColor: Colors.white,
+              primarySwatch: Colors.green,
+              fontFamily: 'Plus Jakarta Sans',
+            ),
             home: (state is AuthAuthenticated)
                 ? const HomeScreen()
                 : const LoginScreen(),

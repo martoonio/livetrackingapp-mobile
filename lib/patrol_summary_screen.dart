@@ -1,7 +1,6 @@
-import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mp;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../domain/entities/patrol_task.dart';
 
 class PatrolSummaryScreen extends StatefulWidget {
@@ -23,171 +22,248 @@ class PatrolSummaryScreen extends StatefulWidget {
 }
 
 class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
-  mp.MapboxMap? mapboxMapController;
+  GoogleMapController? mapController;
   bool _isMapReady = false;
+  final Set<Marker> _markers = {};
+  final Set<Polyline> _polylines = {};
 
-  static var _defaultCenter = mp.Point(
-    coordinates: mp.Position(107.76911107969532, -6.927727934898599),
-  );
+  static const _defaultCenter = LatLng(-6.927727934898599, 107.76911107969532);
 
   @override
   void initState() {
     super.initState();
     _initializeMap();
+    print('route path isinya apa? ${widget.routePath}');
   }
 
   void _initializeMap() {
     setState(() {
       _isMapReady = true;
     });
+    _prepareRouteAndMarkers();
   }
 
-  void _onMapCreated(mp.MapboxMap controller) async {
-    try {
-      mapboxMapController = controller;
-      await Future.delayed(const Duration(seconds: 1));
-      await _drawRouteAndMarkers();
-    } catch (e) {
-      print('Error initializing map: $e');
-    }
+  void _onMapCreated(GoogleMapController controller) async {
+    print('Map created, initializing camera...');
+    setState(() {
+      mapController = controller;
+    });
+
+    // Wait for markers and polylines to be ready
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // if (widget.routePath.isNotEmpty) {
+    //   print('Setting camera to first route point: ${widget.routePath.first}');
+    //   await controller.animateCamera(
+    //     CameraUpdate.newLatLngZoom(
+    //       LatLng(widget.routePath.first[0], widget.routePath.first[1]),
+    //       15.0,
+    //     ),
+    //   );
+    // }
+
+    // Then fit to full route
+    // _fitMapToRoute();
   }
 
-  Future<void> _drawRouteAndMarkers() async {
-    if (!_isMapReady || mapboxMapController == null) return;
-
-    print(
-        'Drawing route with ${widget.routePath.length} points'); // Debug print
-
-    if (widget.routePath.isEmpty) {
-      print('No route path available');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No route data available')),
-      );
-      return;
-    }
-
+  void _prepareRouteAndMarkers() {
     try {
-      // Add delays between operations to prevent race conditions
-      await Future.delayed(const Duration(milliseconds: 500));
+      print('=== Route Data Debug ===');
+      print('Assigned Route: ${widget.task.assignedRoute}');
+      print('Route Path: ${widget.routePath}');
 
-      // Add route source
-      final lineSource = mp.GeoJsonSource(
-        id: "route-source",
-        data: jsonEncode({
-          "type": "Feature",
-          "properties": {},
-          "geometry": {
-            "type": "LineString",
-            "coordinates": widget.routePath
-                .map((coord) => [
-                      coord[1], // longitude
-                      coord[0], // latitude
-                    ])
-                .toList(),
-          }
-        }),
-      );
-
-      await mapboxMapController?.style.addSource(lineSource);
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      // Add route layer
-      final lineLayer = mp.LineLayer(
-        id: "route-layer",
-        sourceId: "route-source",
-      )
-        ..lineColor = Colors.blue.value
-        ..lineWidth = 5.0;
-
-      await mapboxMapController?.style.addLayer(lineLayer);
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      // Only add markers if we have route points
-      if (widget.routePath.length >= 2) {
-        await _addMarkers(widget.routePath.first, widget.routePath.last);
+      // Add assigned route markers and polyline
+      if (widget.task.assignedRoute != null) {
+        _addAssignedRouteMarkers();
+        _addAssignedRoutePolyline();
       }
 
-      // Fit map to show the entire route
-      final bounds = _getRouteBounds(widget.routePath);
-      await mapboxMapController?.cameraForCoordinateBounds(
-        bounds,
-        mp.MbxEdgeInsets(top: 50, left: 50, bottom: 50, right: 50),
-        null,
-        null,
-        0.0,
-        null,
-      );
+      // Add actual route path and markers
+      if (widget.routePath.isNotEmpty) {
+        print('Processing route path with ${widget.routePath.length} points');
+        _addActualRoutePath();
+        _addStartEndMarkers();
+      } else {
+        print('Route path is empty!');
+      }
+
+      setState(() {}); // Update UI
     } catch (e, stackTrace) {
-      print('Error drawing route and markers: $e');
+      print('Error preparing route and markers: $e');
       print('Stack trace: $stackTrace');
     }
   }
 
-  Future<void> _addMarkers(List<double> start, List<double> end) async {
-    try {
-      // Add start marker
-      final startSource = mp.GeoJsonSource(
-        id: "start-source",
-        data: jsonEncode({
-          "type": "Feature",
-          "geometry": {
-            "type": "Point",
-            "coordinates": [start[1], start[0]],
-          }
-        }),
+  void _addAssignedRouteMarkers() {
+    for (int i = 0; i < widget.task.assignedRoute!.length; i++) {
+      final coord = widget.task.assignedRoute![i];
+      _markers.add(
+        Marker(
+          markerId: MarkerId('checkpoint-$i'),
+          position: LatLng(coord[0], coord[1]),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: InfoWindow(title: 'Checkpoint ${i + 1}'),
+        ),
       );
-
-      await mapboxMapController?.style.addSource(startSource);
-      await mapboxMapController?.style.addLayer(
-        mp.SymbolLayer(
-          id: "start-layer",
-          sourceId: "start-source",
-        )
-          ..iconImage = "custom-marker" // Use a default marker image
-          ..iconSize = 1.0,
-      );
-
-      // Add end marker
-      final endSource = mp.GeoJsonSource(
-        id: "end-source",
-        data: jsonEncode({
-          "type": "Feature",
-          "geometry": {
-            "type": "Point",
-            "coordinates": [end[1], end[0]],
-          }
-        }),
-      );
-
-      await mapboxMapController?.style.addSource(endSource);
-      await mapboxMapController?.style.addLayer(
-        mp.SymbolLayer(
-          id: "end-layer",
-          sourceId: "end-source",
-        )
-          ..iconImage = "custom-marker"
-          ..iconSize = 1.0,
-      );
-    } catch (e) {
-      print('Error adding markers: $e');
     }
   }
 
-  mp.CoordinateBounds _getRouteBounds(List<List<double>> coordinates) {
+  void _addAssignedRoutePolyline() {
+    final assignedPoints = widget.task.assignedRoute!
+        .map((coord) => LatLng(coord[0], coord[1]))
+        .toList();
+
+    _polylines.add(
+      Polyline(
+        polylineId: const PolylineId('assigned_route'),
+        points: assignedPoints,
+        color: Colors.green.withOpacity(0.7),
+        width: 3,
+        patterns: [
+          PatternItem.dash(20),
+          PatternItem.gap(10),
+        ],
+      ),
+    );
+  }
+
+  void _addActualRoutePath() {
+    try {
+      print('=== Adding Actual Route Path ===');
+      final actualPoints = widget.routePath.map((coord) {
+        print('Processing coordinate: $coord');
+        return LatLng(coord[0], coord[1]);
+      }).toList();
+
+      print('Created ${actualPoints.length} LatLng points');
+
+      _polylines.add(
+        Polyline(
+          polylineId: const PolylineId('actual_route'),
+          points: actualPoints,
+          color: Colors.blue,
+          width: 5,
+          visible: true, // Explicitly set visible
+        ),
+      );
+
+      print('Added polyline to set. Total polylines: ${_polylines.length}');
+    } catch (e) {
+      print('Error in _addActualRoutePath: $e');
+    }
+  }
+
+  void _addStartEndMarkers() {
+    try {
+      if (widget.routePath.isEmpty) {
+        print('Route path empty, skipping start/end markers');
+        return;
+      }
+
+      print('=== Adding Start/End Markers ===');
+      print('First point: ${widget.routePath.first}');
+      print('Last point: ${widget.routePath.last}');
+
+      // Start marker
+      _markers.add(
+        Marker(
+          markerId: const MarkerId('start'),
+          position:
+              LatLng(widget.routePath.first[0], widget.routePath.first[1]),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+          infoWindow: const InfoWindow(title: 'Start Point'),
+          visible: true, // Explicitly set visible
+        ),
+      );
+
+      // End marker
+      _markers.add(
+        Marker(
+          markerId: const MarkerId('end'),
+          position: LatLng(widget.routePath.last[0], widget.routePath.last[1]),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: const InfoWindow(title: 'End Point'),
+          visible: true, // Explicitly set visible
+        ),
+      );
+
+      print('Added start and end markers. Total markers: ${_markers.length}');
+    } catch (e) {
+      print('Error in _addStartEndMarkers: $e');
+    }
+  }
+
+  void _fitMapToRoute() {
+    try {
+      if (mapController == null) {
+        print('Map controller not ready');
+        return;
+      }
+
+      final bounds = _calculateBounds();
+      print('Fitting map to bounds: $bounds');
+
+      mapController!
+          .animateCamera(
+        CameraUpdate.newLatLngBounds(bounds, 100.0),
+      )
+          .then((_) {
+        print('Camera updated to show full route');
+      }).catchError((e) {
+        print('Error updating camera: $e');
+      });
+    } catch (e) {
+      print('Error in _fitMapToRoute: $e');
+    }
+  }
+
+  LatLngBounds _calculateBounds() {
     double minLat = 90.0, maxLat = -90.0;
     double minLng = 180.0, maxLng = -180.0;
+    bool hasPoints = false;
 
-    for (var coord in coordinates) {
-      minLat = math.min(minLat, coord[0]);
-      maxLat = math.max(maxLat, coord[0]);
-      minLng = math.min(minLng, coord[1]);
-      maxLng = math.max(maxLng, coord[1]);
+    // Include assigned route points
+    if (widget.task.assignedRoute != null &&
+        widget.task.assignedRoute!.isNotEmpty) {
+      hasPoints = true;
+      for (var coord in widget.task.assignedRoute!) {
+        minLat = math.min(minLat, coord[0]);
+        maxLat = math.max(maxLat, coord[0]);
+        minLng = math.min(minLng, coord[1]);
+        maxLng = math.max(maxLng, coord[1]);
+      }
     }
 
-    return mp.CoordinateBounds(
-      southwest: mp.Point(coordinates: mp.Position(minLng, minLat)),
-      northeast: mp.Point(coordinates: mp.Position(maxLng, maxLat)),
-      infiniteBounds: false,
+    // Include actual route points
+    if (widget.routePath.isNotEmpty) {
+      hasPoints = true;
+      for (var coord in widget.routePath) {
+        minLat = math.min(minLat, coord[0]);
+        maxLat = math.max(maxLat, coord[0]);
+        minLng = math.min(minLng, coord[1]);
+        maxLng = math.max(maxLng, coord[1]);
+      }
+    }
+
+    if (!hasPoints) {
+      print('No points found, using default bounds');
+      return LatLngBounds(
+        southwest: LatLng(
+            _defaultCenter.latitude - 0.02, _defaultCenter.longitude - 0.02),
+        northeast: LatLng(
+            _defaultCenter.latitude + 0.02, _defaultCenter.longitude + 0.02),
+      );
+    }
+
+    // Add padding to bounds
+    final latPadding = (maxLat - minLat) * 0.1;
+    final lngPadding = (maxLng - minLng) * 0.1;
+
+    return LatLngBounds(
+      southwest: LatLng(minLat - latPadding, minLng - lngPadding),
+      northeast: LatLng(maxLat + latPadding, maxLng + lngPadding),
     );
   }
 
@@ -206,49 +282,61 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
       ),
       body: Column(
         children: [
-          // Summary card
-          Card(
-            margin: const EdgeInsets.all(16),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Task ID: ${widget.task.taskId}',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text('Vehicle: ${widget.task.vehicleId}'),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Duration: ${_formatDuration(widget.startTime, widget.endTime)}',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // Map
-          Expanded(
-            child: mp.MapWidget(
-              onMapCreated: _onMapCreated,
-              styleUri: mp.MapboxStyles.MAPBOX_STREETS,
-              cameraOptions: mp.CameraOptions(
-                center: widget.routePath.isNotEmpty
-                    ? mp.Point(
-                        coordinates: mp.Position(
-                          widget.routePath[0][1],
-                          widget.routePath[0][0],
-                        ),
-                      )
-                    : _defaultCenter,
-                zoom: 15.0,
-              ),
-            ),
-          ),
+          _buildSummaryCard(),
+          _buildMap(),
         ],
       ),
     );
+  }
+
+  Widget _buildSummaryCard() {
+    return Card(
+      margin: const EdgeInsets.all(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Task ID: ${widget.task.taskId}',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text('Vehicle: ${widget.task.vehicleId}'),
+            const SizedBox(height: 8),
+            Text(
+              'Duration: ${_formatDuration(widget.startTime, widget.endTime)}',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMap() {
+    return Expanded(
+      child: GoogleMap(
+        onMapCreated: _onMapCreated,
+        initialCameraPosition: CameraPosition(
+          target: widget.routePath.isNotEmpty
+              ? LatLng(widget.routePath[0][0], widget.routePath[0][1])
+              : _defaultCenter,
+          zoom: 15.0,
+        ),
+        markers: _markers,
+        polylines: _polylines,
+        myLocationEnabled: true,
+        myLocationButtonEnabled: true,
+        zoomControlsEnabled: true,
+        mapType: MapType.normal,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    mapController?.dispose();
+    super.dispose();
   }
 }

@@ -1,18 +1,24 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../../domain/entities/patrol_task.dart';
 import '../../domain/repositories/route_repository.dart';
 import '../source/mapbox_service.dart';
 
 class RouteRepositoryImpl implements RouteRepository {
-  final MapboxService mapboxService;
   final DatabaseReference _database = FirebaseDatabase.instance.ref();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  RouteRepositoryImpl({
-    required this.mapboxService,
-  });
+  RouteRepositoryImpl();
+
+  Future<void> _checkAuth() async {
+    if (_auth.currentUser == null) {
+      throw Exception('Not authenticated');
+    }
+  }
 
   @override
   Future<PatrolTask?> getCurrentTask(String userId) async {
+    await _checkAuth();
     final snapshot = await _database
         .child('tasks')
         .orderByChild('userId')
@@ -45,19 +51,56 @@ class RouteRepositoryImpl implements RouteRepository {
     List<double> coordinates,
     DateTime timestamp,
   ) async {
-    final taskRef = _database.child('tasks').child(taskId);
+    try {
+      print('=== UPDATE PATROL LOCATION ===');
+      print('TaskID: $taskId');
+      print('Coordinates: $coordinates');
+      print('Timestamp: $timestamp');
 
-    // Add new coordinates to route_path
-    await taskRef.child('route_path').push().set({
-      'coordinates': coordinates,
-      'timestamp': timestamp.toIso8601String(),
-    });
+      await _checkAuth();
+      final user = _auth.currentUser;
+      print('Authenticated as: ${user?.uid}');
 
-    // Update last known location
-    await taskRef.child('lastLocation').set({
-      'coordinates': coordinates,
-      'timestamp': timestamp.toIso8601String(),
-    });
+      final taskRef = _database.child('tasks').child(taskId);
+
+      // Verify task exists
+      final taskSnapshot = await taskRef.get();
+      if (!taskSnapshot.exists) {
+        throw Exception('Task not found: $taskId');
+      }
+      print('Task found in database');
+
+      // Create timestamp key
+      final timestampKey = timestamp.millisecondsSinceEpoch.toString();
+
+      // Update route_path
+      await taskRef
+          .child('route_path')
+          .child(timestampKey)
+          .set({
+            'coordinates': coordinates,
+            'timestamp': timestamp.toIso8601String(),
+          })
+          .then((_) => print('route_path updated successfully'))
+          .catchError((error) => print('Error updating route_path: $error'));
+
+      // Update lastLocation
+      await taskRef
+          .child('lastLocation')
+          .set({
+            'coordinates': coordinates,
+            'timestamp': timestamp.toIso8601String(),
+          })
+          .then((_) => print('lastLocation updated successfully'))
+          .catchError((error) => print('Error updating lastLocation: $error'));
+
+      print('=== UPDATE COMPLETE ===');
+    } catch (e, stackTrace) {
+      print('=== UPDATE FAILED ===');
+      print('Error: $e');
+      print('Stack trace: $stackTrace');
+      throw Exception('Failed to update location: $e');
+    }
   }
 
   @override

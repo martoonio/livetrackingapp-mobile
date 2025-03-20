@@ -28,7 +28,11 @@ class StartPatrol extends PatrolEvent {
 class UpdatePatrolLocation extends PatrolEvent {
   final Position position;
   final DateTime timestamp;
-  UpdatePatrolLocation({required this.position, required this.timestamp});
+
+  UpdatePatrolLocation({
+    required this.position,
+    required this.timestamp,
+  });
 }
 
 class StopPatrol extends PatrolEvent {
@@ -310,29 +314,26 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         try {
           final timestamp = event.timestamp.toIso8601String();
           final coordinates = [
-            event.position.longitude,
-            event.position.latitude
+            event.position.latitude,
+            event.position.longitude
           ];
 
-          // Create new route path entry
-          final newPathEntry = {
-            'timestamp': timestamp,
-            'coordinates': coordinates,
-          };
-
-          // Update existing route path or create new one
-          final updatedRoutePath =
-              Map<String, dynamic>.from(currentState.routePath ?? {});
-          updatedRoutePath[timestamp] = newPathEntry;
-
-          // Update repository
+          // Update repository with new location
           await repository.updatePatrolLocation(
             currentState.task!.taskId,
             coordinates,
             event.timestamp,
           );
 
-          // Update state with new path data
+          // Update local state with new path data
+          final updatedRoutePath =
+              Map<String, dynamic>.from(currentState.routePath ?? {});
+          updatedRoutePath[timestamp] = {
+            'timestamp': timestamp,
+            'coordinates': coordinates,
+          };
+
+          // Emit updated state
           emit(currentState.copyWith(
             currentPatrolPath: [
               ...?currentState.currentPatrolPath,
@@ -344,7 +345,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             ),
           ));
 
-          print('Updated route path: $updatedRoutePath'); // Debug print
+          print(
+              'Location updated: lat=${event.position.latitude}, lng=${event.position.longitude}');
         } catch (e) {
           print('Error updating location: $e');
         }
@@ -359,6 +361,10 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     if (state is PatrolLoaded) {
       final currentState = state as PatrolLoaded;
       try {
+        print('=== Stopping Patrol ===');
+        print('Task ID: ${currentState.task?.taskId}');
+        print('Current route path entries: ${currentState.routePath?.length}');
+
         // Update task status
         await repository.updateTaskStatus(
             currentState.task!.taskId, 'finished');
@@ -377,34 +383,78 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         final finishedTasks =
             await repository.getFinishedTasks(currentState.task!.userId);
 
+        // Save route path for summary
+        final routePath = currentState.routePath;
+        if (routePath != null && routePath.isNotEmpty) {
+          print('Converting route path with ${routePath.length} entries');
+
+          // Sort entries by timestamp
+          final sortedEntries = routePath.entries.toList()
+            ..sort((a, b) => a.key.compareTo(b.key));
+
+          // Convert to list of coordinates
+          final List<List<double>> convertedPath = sortedEntries.map((entry) {
+            final coordinates = entry.value['coordinates'] as List<double>;
+            return coordinates;
+          }).toList();
+
+          print('Converted to ${convertedPath.length} coordinate points');
+
+          // Update task with final path
+          await repository.updateTask(
+            currentState.task!.taskId,
+            {
+              'route_path': routePath,
+              'status': 'finished',
+            },
+          );
+        }
+
         // Emit new state
         emit(currentState.copyWith(
           isPatrolling: false,
           currentPatrolPath: null,
+          routePath: null,
           finishedTasks: finishedTasks,
         ));
 
-        print('Patrol stopped successfully'); // Debug print
-      } catch (e) {
-        print('Error stopping patrol: $e'); // Debug print
+        print('Patrol stopped successfully');
+      } catch (e, stackTrace) {
+        print('Error stopping patrol: $e');
+        print('Stack trace: $stackTrace');
         emit(PatrolError('Failed to stop patrol: $e'));
       }
     }
   }
 
   void _startLocationTracking() {
+    print('Starting location tracking service...'); // Debug log
+
     _locationSubscription?.cancel();
     _locationSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
+        distanceFilter: 10, // Update every 10 meters
+        // timeLimit: const Duration(seconds: 1), // Force update every second
       ),
-    ).listen((Position position) {
-      add(UpdatePatrolLocation(
-        position: position,
-        timestamp: DateTime.now(),
-      ));
-    });
+    ).listen(
+      (Position position) {
+        print(
+            'New position: ${position.latitude}, ${position.longitude}'); // Debug log
+        add(UpdatePatrolLocation(
+          position: position,
+          timestamp: DateTime.now(),
+        ));
+      },
+      onError: (error) {
+        print('Location tracking error: $error'); // Debug log
+        // Emit error state but don't stop tracking
+      },
+      cancelOnError: false, // Don't stop on errors
+      onDone: () {
+        print('Location tracking stopped'); // Debug log
+      },
+    );
   }
 
   // Future<void> _onUpdateTask(

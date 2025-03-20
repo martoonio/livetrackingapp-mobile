@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mp;
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
 
@@ -24,148 +22,117 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  mp.MapboxMap? mapboxMapController;
+  GoogleMapController? mapController;
   Position? userCurrentLocation;
   StreamSubscription<Position>? _positionStreamSubscription;
+  final Set<Marker> _markers = {};
   bool _isMapReady = false;
   late final currentState;
+
+  Timer? _patrolTimer;
+  Duration _elapsedTime = Duration.zero;
+  double _totalDistance = 0;
+  Position? _lastPosition;
+
+  // Add method to start timer
+  void _startPatrolTimer() {
+    _patrolTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          _elapsedTime += const Duration(seconds: 1);
+        });
+      }
+    });
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final hours = twoDigits(duration.inHours);
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$hours:$minutes:$seconds';
+  }
+
+  void _updateDistance(Position newPosition) {
+    if (_lastPosition != null) {
+      final distanceInMeters = Geolocator.distanceBetween(
+        _lastPosition!.latitude,
+        _lastPosition!.longitude,
+        newPosition.latitude,
+        newPosition.longitude,
+      );
+      _totalDistance += distanceInMeters;
+    }
+    _lastPosition = newPosition;
+  }
 
   @override
   void initState() {
     super.initState();
     currentState = context.read<PatrolBloc>().state;
-    print('Current state: $currentState');
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<PatrolBloc>().add(LoadRouteData(
-            userId: widget.task.userId,
-          ));
+      context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
     });
     _initializeMap();
+  }
+
+  Future<void> _addRouteMarkers(List<List<double>> coordinates) async {
+    if (!_isMapReady || mapController == null) return;
+
+    try {
+      setState(() {
+        _markers.clear();
+        for (int i = 0; i < coordinates.length; i++) {
+          final coord = coordinates[i];
+          _markers.add(
+            Marker(
+              markerId: MarkerId('route-$i'),
+              position: LatLng(coord[0], coord[1]),
+              infoWindow: InfoWindow(title: 'Point ${i + 1}'),
+            ),
+          );
+        }
+      });
+
+      // Fit map to show all markers
+      if (coordinates.isNotEmpty) {
+        final bounds = _getRouteBounds(coordinates);
+        mapController?.animateCamera(
+          CameraUpdate.newLatLngBounds(bounds, 50),
+        );
+      }
+    } catch (e) {
+      print('Error adding route markers: $e');
+    }
+  }
+
+  LatLngBounds _getRouteBounds(List<List<double>> coordinates) {
+    double minLat = 90.0, maxLat = -90.0;
+    double minLng = 180.0, maxLng = -180.0;
+
+    for (var coord in coordinates) {
+      minLat = minLat < coord[0] ? minLat : coord[0];
+      maxLat = maxLat > coord[0] ? maxLat : coord[0];
+      minLng = minLng < coord[1] ? minLng : coord[1];
+      maxLng = maxLng > coord[1] ? maxLng : coord[1];
+    }
+
+    return LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
   }
 
   Future<void> _initializeMap() async {
     await _getUserLocation();
     if (widget.task.assignedRoute != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _drawRoute(widget.task.assignedRoute!);
+        _addRouteMarkers(widget.task.assignedRoute!);
       });
     }
     setState(() {
       _isMapReady = true;
     });
-  }
-
-  void _onMapCreated(mp.MapboxMap controller) async {
-    try {
-      setState(() {
-        mapboxMapController = controller;
-      });
-
-      // Wait for map style to load
-      await Future.delayed(const Duration(seconds: 1));
-
-      // Enable location tracking
-      await controller.location.updateSettings(
-        mp.LocationComponentSettings(
-          enabled: true,
-          pulsingEnabled: true,
-        ),
-      );
-
-      setState(() {
-        _isMapReady = true;
-      });
-    } catch (e) {
-      print('Error initializing map: $e');
-    }
-  }
-
-  Future<void> _drawRoute(List<List<double>> coordinates) async {
-    if (!_isMapReady || mapboxMapController == null) {
-      print('Map not ready, skipping route draw');
-      return;
-    }
-
-    try {
-      // Clear existing route first
-      await _clearRoute();
-
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      // Add new source
-      final lineSource = mp.GeoJsonSource(
-        id: "route-source",
-        data: jsonEncode({
-          "type": "Feature",
-          "properties": {},
-          "geometry": {
-            "type": "LineString",
-            "coordinates":
-                coordinates.map((coord) => [coord[1], coord[0]]).toList(),
-          }
-        }),
-      );
-
-      await mapboxMapController?.style.addSource(lineSource);
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      // Add new layer
-      final lineLayer = mp.LineLayer(
-        id: "route-layer",
-        sourceId: "route-source",
-      )
-        ..lineColor = Colors.blue.value
-        ..lineWidth = 5.0
-        ..lineCap = mp.LineCap.ROUND
-        ..lineJoin = mp.LineJoin.ROUND;
-
-      await mapboxMapController?.style.addLayer(lineLayer);
-
-      // Fit map to show the route
-      final bounds = _getRouteBounds(coordinates);
-      await mapboxMapController?.cameraForCoordinateBounds(
-        bounds,
-        mp.MbxEdgeInsets(top: 50, left: 50, bottom: 50, right: 50),
-        null,
-        null,
-        0.0,
-        null,
-      );
-    } catch (e) {
-      print('Error drawing route: $e');
-    }
-  }
-
-  mp.CoordinateBounds _getRouteBounds(List<List<double>> coordinates) {
-    double minLat = 90.0, maxLat = -90.0;
-    double minLng = 180.0, maxLng = -180.0;
-
-    for (var coord in coordinates) {
-      minLat = math.min(minLat, coord[0]);
-      maxLat = math.max(maxLat, coord[0]);
-      minLng = math.min(minLng, coord[1]);
-      maxLng = math.max(maxLng, coord[1]);
-    }
-
-    return mp.CoordinateBounds(
-      southwest: mp.Point(coordinates: mp.Position(minLng, minLat)),
-      northeast: mp.Point(coordinates: mp.Position(maxLng, maxLat)),
-      infiniteBounds: false,
-    );
-  }
-
-  Future<void> _clearRoute() async {
-    if (!_isMapReady || mapboxMapController == null) return;
-
-    try {
-      await Future.delayed(const Duration(milliseconds: 100));
-      await mapboxMapController?.style.removeStyleLayer("route-layer");
-      await Future.delayed(const Duration(milliseconds: 50));
-      await mapboxMapController?.style.removeStyleSource("route-source");
-      print('Route cleared successfully');
-    } catch (e) {
-      print('Error clearing route: $e');
-    }
   }
 
   Future<Position?> _getUserLocation() async {
@@ -186,12 +153,25 @@ class _MapScreenState extends State<MapScreen> {
       return Future.error('Location permissions are permanently denied');
     }
 
-    _positionStreamSubscription = Geolocator.getPositionStream().listen(
+    _positionStreamSubscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      ),
+    ).listen(
       (Position position) {
         if (mounted) {
           setState(() {
             userCurrentLocation = position;
+            if (mapController != null) {
+              _updateUserMarker(position);
+            }
           });
+
+          final state = context.read<PatrolBloc>().state;
+          if (state is PatrolLoaded && state.isPatrolling) {
+            _updateDistance(position);
+          }
         }
       },
     );
@@ -199,21 +179,73 @@ class _MapScreenState extends State<MapScreen> {
     return await Geolocator.getCurrentPosition();
   }
 
-  @override
-  void dispose() {
-    _positionStreamSubscription?.cancel();
-    mapboxMapController = null; // Just set to null, don't clear route
-    super.dispose();
+  void _updateUserMarker(Position position) {
+    setState(() {
+      _markers.removeWhere(
+          (marker) => marker.markerId == const MarkerId('user-location'));
+      _markers.add(
+        Marker(
+          markerId: const MarkerId('user-location'),
+          position: LatLng(position.latitude, position.longitude),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+          infoWindow: const InfoWindow(title: 'Current Location'),
+        ),
+      );
+    });
+
+    // Update camera to follow user if patrolling
+    final state = context.read<PatrolBloc>().state;
+    if (state is PatrolLoaded && state.isPatrolling) {
+      mapController?.animateCamera(
+        CameraUpdate.newLatLng(
+          LatLng(position.latitude, position.longitude),
+        ),
+      );
+    }
   }
 
-  Future<void> _clearMapResources() async {
+  void _onMapCreated(GoogleMapController controller) {
+    print('Map creation started');
     try {
-      await _clearRoute();
-      await _positionStreamSubscription?.cancel();
-      mapboxMapController = null;
+      setState(() {
+        mapController = controller;
+        _isMapReady = true;
+      });
+      _debugMapStatus();
+
+      // Add initial position check
+      if (userCurrentLocation != null) {
+        controller.animateCamera(
+          CameraUpdate.newLatLngZoom(
+            LatLng(
+              userCurrentLocation!.latitude,
+              userCurrentLocation!.longitude,
+            ),
+            15,
+          ),
+        );
+      }
     } catch (e) {
-      print('Error clearing map resources: $e');
+      print('Error in map creation: $e');
     }
+  }
+
+  void _debugMapStatus() {
+    print('=== Google Maps Debug Info ===');
+    print('Map Controller: ${mapController != null ? 'Initialized' : 'Null'}');
+    print('Is Map Ready: $_isMapReady');
+    print('Markers Count: ${_markers.length}');
+    print('User Location: $userCurrentLocation');
+    print('Has Assigned Route: ${widget.task.assignedRoute != null}');
+    print('===========================');
+  }
+
+  @override
+  void dispose() {
+    _patrolTimer?.cancel();
+    _positionStreamSubscription?.cancel();
+    mapController?.dispose();
+    super.dispose();
   }
 
   @override
@@ -232,19 +264,23 @@ class _MapScreenState extends State<MapScreen> {
         ),
         body: Stack(
           children: [
-            mp.MapWidget(
+            GoogleMap(
               onMapCreated: _onMapCreated,
-              styleUri: mp.MapboxStyles.MAPBOX_STREETS,
-              cameraOptions: mp.CameraOptions(
-                center: mp.Point(
-                  coordinates: mp.Position(
-                    107.76911107969532,
-                    -6.927727934898599,
-                  ),
-                ),
-                zoom: 15.5,
-                bearing: -17.6,
+              initialCameraPosition: const CameraPosition(
+                target: LatLng(-6.927872391717073, 107.76910906700982),
+                zoom: 15,
               ),
+              markers: _markers,
+              myLocationEnabled: true,
+              myLocationButtonEnabled: true,
+              zoomControlsEnabled: true,
+              mapType: MapType.normal,
+              compassEnabled: true,
+              tiltGesturesEnabled: true,
+              zoomGesturesEnabled: true,
+              rotateGesturesEnabled: true,
+              trafficEnabled: false,
+              buildingsEnabled: true,
             ),
             // Task details card
             Positioned(
@@ -269,6 +305,35 @@ class _MapScreenState extends State<MapScreen> {
                 ),
               ),
             ),
+            if (context.watch<PatrolBloc>().state is PatrolLoaded &&
+                (context.watch<PatrolBloc>().state as PatrolLoaded)
+                    .isPatrolling)
+              Positioned(
+                top: 100,
+                left: 16,
+                right: 16,
+                child: Card(
+                  color: Colors.white.withOpacity(0.9),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Patrol Time: ${_formatDuration(_elapsedTime)}',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Distance: ${(_totalDistance / 1000).toStringAsFixed(2)} km',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             // Start/Stop button
             Positioned(
               bottom: 16,
@@ -305,34 +370,39 @@ class _MapScreenState extends State<MapScreen> {
                             if (state.task?.routePath != null &&
                                 state.task!.routePath is Map) {
                               final map = state.task!.routePath as Map;
+                              print(
+                                  'Original route_path map: $map'); // Debug log
 
-                              // Get all entries and sort by timestamp
+                              // Sort entries by timestamp
                               final sortedEntries = map.entries.toList()
                                 ..sort((a, b) => (a.value['timestamp']
                                         as String)
                                     .compareTo(b.value['timestamp'] as String));
 
                               print(
-                                  'Sorted entries length: ${sortedEntries.length}'); // Debug print
+                                  'Sorted entries count: ${sortedEntries.length}'); // Debug log
 
-                              // Convert coordinates
+                              // Convert coordinates - FIXED order
                               convertedPath = sortedEntries.map((entry) {
                                 final coordinates =
                                     entry.value['coordinates'] as List;
+                                print(
+                                    'Processing coordinates: $coordinates'); // Debug log
                                 return [
-                                  (coordinates[1] as num)
-                                      .toDouble(), // latitude
                                   (coordinates[0] as num)
-                                      .toDouble(), // longitude
+                                      .toDouble(), // latitude comes first
+                                  (coordinates[1] as num)
+                                      .toDouble(), // longitude comes second
                                 ];
                               }).toList();
 
                               print(
-                                  'Converted coordinates: $convertedPath'); // Debug print
+                                  'First point in path: ${convertedPath.first}'); // Debug log
+                              print(
+                                  'Last point in path: ${convertedPath.last}'); // Debug log
                             }
                           } catch (e) {
-                            print(
-                                'Error converting route path: $e'); // Debug print
+                            print('Error converting route path: $e');
                           }
 
                           // First stop patrol to update state
@@ -376,6 +446,12 @@ class _MapScreenState extends State<MapScreen> {
                                 ),
                               );
 
+                          _startPatrolTimer(); // Start timer when patrol starts
+                          // _startLocationTracking();
+                          _elapsedTime = Duration.zero; // Reset timer
+                          _totalDistance = 0; // Reset distance
+                          _lastPosition = null;
+
                           // Then start patrol
                           widget.onStart();
                         }
@@ -388,16 +464,19 @@ class _MapScreenState extends State<MapScreen> {
                     },
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       backgroundColor:
                           state is PatrolLoaded && state.isPatrolling
                               ? Colors.red
-                              : Colors.blue,
+                              : Colors.green,
                     ),
                     child: Text(
                       state is PatrolLoaded && state.isPatrolling
                           ? 'Stop Patrol'
                           : 'Start Patrol',
-                      style: const TextStyle(fontSize: 16),
+                      style: const TextStyle(fontSize: 16, color: Colors.white),
                     ),
                   );
                 },
