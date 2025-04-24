@@ -12,6 +12,16 @@ class LoginRequested extends AuthEvent {
   LoginRequested({required this.email, required this.password});
 }
 
+class CompleteProfile extends AuthEvent {
+  final String name;
+  final String role;
+
+  CompleteProfile({
+    required this.name,
+    required this.role,
+  });
+}
+
 class LogoutRequested extends AuthEvent {}
 
 class CheckAuthStatus extends AuthEvent {}
@@ -26,6 +36,12 @@ class AuthLoading extends AuthState {}
 class AuthAuthenticated extends AuthState {
   final User user;
   AuthAuthenticated(this.user);
+}
+
+class AuthNeedsProfile extends AuthState {
+  final String email;
+  
+  AuthNeedsProfile(this.email);
 }
 
 class AuthUnauthenticated extends AuthState {}
@@ -43,28 +59,37 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<LoginRequested>(_onLoginRequested);
     on<LogoutRequested>(_onLogoutRequested);
     on<CheckAuthStatus>(_onCheckAuthStatus);
+    on<CompleteProfile>(_onCompleteProfile);
   }
-
   Future<void> _onLoginRequested(
     LoginRequested event,
     Emitter<AuthState> emit,
   ) async {
-    print('Login event received'); // Debug print
+    print('Login event received');
     emit(AuthLoading());
 
     try {
       final user = await repository.login(event.email, event.password);
-      print('Repository returned user: ${user.email}'); // Debug print
+      print('Repository returned user: ${user.email}');
+
+      // Check if user profile exists in Firestore
+      final hasProfile = await repository.checkUserProfile(user.id);
+      
+      if (!hasProfile) {
+        print('User needs to complete profile');
+        emit(AuthNeedsProfile(user.email));
+        return;
+      }
 
       if (user != null) {
-        print('Emitting AuthAuthenticated state'); // Debug print
+        print('Emitting AuthAuthenticated state');
         emit(AuthAuthenticated(user));
       } else {
-        print('User is null after login'); // Debug print
+        print('User is null after login');
         emit(AuthError('Login failed: User is null'));
       }
     } catch (e) {
-      print('Login error in bloc: $e'); // Debug print
+      print('Login error in bloc: $e');
       emit(AuthError(e.toString()));
     }
   }
@@ -98,6 +123,25 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     } catch (e) {
       print('Check auth status error: $e'); // Debug print
       emit(AuthUnauthenticated());
+    }
+  }
+
+  Future<void> _onCompleteProfile(
+    CompleteProfile event,
+    Emitter<AuthState> emit,
+  ) async {
+    try {
+      emit(AuthLoading());
+      
+      final user = await repository.createUserProfile(
+        name: event.name,
+        role: event.role,
+      );
+
+      emit(AuthAuthenticated(user));
+    } catch (e) {
+      print('Error completing profile: $e');
+      emit(AuthError('Failed to complete profile: $e'));
     }
   }
 }

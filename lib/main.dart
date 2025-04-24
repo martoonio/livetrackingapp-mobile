@@ -7,6 +7,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:livetrackingapp/firebase_options.dart';
 import 'package:livetrackingapp/home_screen.dart';
+import 'package:livetrackingapp/main_nav_screen.dart';
+import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/auth/login_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:livetrackingapp/data/repositories/route_repositoryImpl.dart';
@@ -91,6 +93,12 @@ class MyApp extends StatelessWidget {
             return bloc;
           },
         ),
+        BlocProvider<AdminBloc>(
+          create: (context) => AdminBloc(
+            repository: getIt<RouteRepository>(),
+          )..add(LoadAllTasks()),
+          lazy: false, // Initialize immediately
+        ),
       ],
       child: BlocBuilder<AuthBloc, AuthState>(
         builder: (context, state) {
@@ -103,7 +111,7 @@ class MyApp extends StatelessWidget {
               fontFamily: 'Plus Jakarta Sans',
             ),
             home: (state is AuthAuthenticated)
-                ? const HomeScreen()
+                ? const MainNavigationScreen()
                 : const LoginScreen(),
           );
         },

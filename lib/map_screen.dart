@@ -68,13 +68,22 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void initState() {
-    super.initState();
-    currentState = context.read<PatrolBloc>().state;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
-    });
-    _initializeMap();
+  super.initState();
+  currentState = context.read<PatrolBloc>().state;
+  
+  // Check if this is a resumed patrol
+  if (currentState is PatrolLoaded && 
+      currentState.isPatrolling &&
+      currentState.startTime != null) {
+    print('Resuming patrol tracking...');
+    _resumePatrolTracking(currentState.startTime!);
   }
+  
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
+  });
+  _initializeMap();
+}
 
   Future<void> _addRouteMarkers(List<List<double>> coordinates) async {
     if (!_isMapReady || mapController == null) return;
@@ -239,6 +248,52 @@ class _MapScreenState extends State<MapScreen> {
     print('Has Assigned Route: ${widget.task.assignedRoute != null}');
     print('===========================');
   }
+
+  void _resumePatrolTracking(DateTime startTime) {
+  // Calculate elapsed time
+  _elapsedTime = DateTime.now().difference(startTime);
+  _startPatrolTimer();
+  
+  // Resume location tracking
+  _startLocationTracking();
+  
+  print('Patrol resumed - Elapsed time: $_elapsedTime');
+}
+
+void _startLocationTracking() {
+  print('Starting location tracking...');
+  _positionStreamSubscription?.cancel();
+  _positionStreamSubscription = Geolocator.getPositionStream(
+    locationSettings: const LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 10,
+    ),
+  ).listen(
+    (Position position) {
+      if (mounted) {
+        setState(() {
+          userCurrentLocation = position;
+          if (mapController != null) {
+            _updateUserMarker(position);
+          }
+        });
+
+        final state = context.read<PatrolBloc>().state;
+        if (state is PatrolLoaded && state.isPatrolling) {
+          // Update location in Firebase
+          context.read<PatrolBloc>().add(UpdatePatrolLocation(
+            position: position,
+            timestamp: DateTime.now(),
+          ));
+          _updateDistance(position);
+        }
+      }
+    },
+    onError: (error) {
+      print('Location tracking error: $error');
+    },
+  );
+}
 
   @override
   void dispose() {

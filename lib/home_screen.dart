@@ -33,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _checkOngoingPatrol();
     _startTaskStream();
     _loadPatrolHistory();
   }
@@ -260,6 +261,30 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _checkOngoingPatrol() {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is AuthAuthenticated) {
+      print('Checking for ongoing patrol...');
+      context.read<PatrolBloc>().add(
+            CheckOngoingPatrol(userId: authState.user.id),
+          );
+    }
+  }
+
+// Add handler for ongoing patrol
+  void _handleOngoingPatrol(PatrolTask task) {
+    print('Resuming ongoing patrol: ${task.taskId}');
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MapScreen(
+          task: task,
+          onStart: () {}, // Empty because patrol is already started
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _taskSubscription?.cancel();
@@ -268,28 +293,35 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Patrol Dashboard'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _startTaskStream,
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: () async => _startTaskStream(),
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildUpcomingPatrols(),
-              const SizedBox(height: 32),
-              _buildPatrolHistory(),
-            ],
+    return BlocListener<PatrolBloc, PatrolState>(
+      listener: (context, state) {
+        if (state is PatrolLoaded && state.isPatrolling && state.task != null) {
+          _handleOngoingPatrol(state.task!);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Patrol Dashboard'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _startTaskStream,
+            ),
+          ],
+        ),
+        body: RefreshIndicator(
+          onRefresh: () async => _startTaskStream(),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildUpcomingPatrols(),
+                const SizedBox(height: 32),
+                _buildPatrolHistory(),
+              ],
+            ),
           ),
         ),
       ),

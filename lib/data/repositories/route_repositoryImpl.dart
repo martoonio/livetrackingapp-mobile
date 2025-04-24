@@ -1,8 +1,10 @@
+// import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../../domain/entities/patrol_task.dart';
 import '../../domain/repositories/route_repository.dart';
 import '../source/mapbox_service.dart';
+import '../../domain/entities/user.dart' as UserModel;
 
 class RouteRepositoryImpl implements RouteRepository {
   final DatabaseReference _database = FirebaseDatabase.instance.ref();
@@ -279,6 +281,135 @@ class RouteRepositoryImpl implements RouteRepository {
     } catch (e) {
       print('Error updating task: $e'); // Debug print
       throw Exception('Failed to update task: $e');
+    }
+  }
+
+  // Add these methods after the existing ones
+  @override
+  Future<void> createTask({
+    required String vehicleId,
+    required List<List<double>> assignedRoute,
+    required String? assignedOfficerId,
+  }) async {
+    try {
+      await _checkAuth();
+      final taskRef = _database.child('tasks').push();
+
+      final newTask = {
+        'taskId': taskRef.key,
+        'vehicleId': vehicleId,
+        'userId': assignedOfficerId,
+        'assigned_route': assignedRoute,
+        'status': 'active',
+        'createdAt': DateTime.now().toIso8601String(),
+        'route_path': null,
+        'lastLocation': null,
+      };
+
+      await taskRef.set(newTask);
+      print('New task created with ID: ${taskRef.key}');
+    } catch (e) {
+      print('Error creating task: $e');
+      throw Exception('Failed to create task: $e');
+    }
+  }
+
+  @override
+  Future<List<PatrolTask>> getAllTasks() async {
+    try {
+      await _checkAuth();
+      final snapshot = await _database.child('tasks').get();
+
+      if (!snapshot.exists) {
+        return [];
+      }
+
+      final tasksMap = Map<String, dynamic>.from(snapshot.value as Map);
+      final tasks = tasksMap.entries.map((entry) {
+        return _convertToPatrolTask({
+          ...entry.value as Map<dynamic, dynamic>,
+          'taskId': entry.key,
+        });
+      }).toList();
+
+      // Sort by creation date, most recent first
+      tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+      print('Retrieved ${tasks.length} tasks');
+      return tasks;
+    } catch (e) {
+      print('Error getting all tasks: $e');
+      throw Exception('Failed to get tasks: $e');
+    }
+  }
+
+  @override
+  Future<List<UserModel.User>> getAllOfficers() async {
+    try {
+      await _checkAuth();
+      final snapshot = await _database
+          .child('users')
+          .orderByChild('role')
+          .equalTo('Officer')
+          .get();
+
+      if (!snapshot.exists) {
+        return [];
+      }
+
+      final usersMap = Map<String, dynamic>.from(snapshot.value as Map);
+      final officers = usersMap.entries.map((entry) {
+        final userData = entry.value as Map<dynamic, dynamic>;
+        return UserModel.User(
+          id: entry.key,
+          name: userData['name']?.toString() ?? '',
+          email: userData['email']?.toString() ?? '',
+          role: userData['role']?.toString() ?? 'officer',
+        );
+      }).toList();
+
+      print('Retrieved ${officers.length} officers');
+      return officers;
+    } catch (e) {
+      print('Error getting officers: $e');
+      throw Exception('Failed to get officers: $e');
+    }
+  }
+
+  @override
+  Future<List<String>> getAllVehicles() async {
+    try {
+      await _checkAuth();
+      final snapshot = await _database.child('vehicle').get();
+
+      if (!snapshot.exists) {
+        print('No vehicles found in database');
+        return [];
+      }
+
+      final value = snapshot.value;
+      print('Raw vehicle data type: ${value.runtimeType}');
+      print('Raw vehicle data: $value');
+
+      if (value is List) {
+        // Handle list format
+        return value
+            .whereType<String>()
+            .where((item) => item.isNotEmpty)
+            .toList();
+      } else if (value is Map) {
+        // Handle map format
+        return value.values
+            .where((item) => item != null)
+            .map((item) => item.toString())
+            .toList();
+      }
+
+      print('Unexpected data format for vehicles');
+      return [];
+    } catch (e) {
+      print('Error getting vehicles: $e');
+      throw Exception('Failed to get vehicles: $e');
     }
   }
 }

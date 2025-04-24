@@ -5,4 +5,9 @@ abstract class AuthRepository {
   Future<void> logout();
   Future<User?> getCurrentUser();
   Future<void> updateUserProfile(String userId, String name, String role);
+  Future<bool> checkUserProfile(String userId);
+  Future<User> createUserProfile({
+    required String name,
+    required String role,
+  });
 }

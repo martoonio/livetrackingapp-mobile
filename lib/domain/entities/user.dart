@@ -1,13 +1,15 @@
 class User {
   final String id;
   final String email;
-  // final String name;
-  // final String role;
+  final String name;
+  final String role;
 
   User({
     required this.id,
     required this.email,
-    // required this.name,
-    // required this.role,
+    required this.name,
+    required this.role,
   });
+
+  bool get hasProfile => name.isNotEmpty && role.isNotEmpty;
 }
