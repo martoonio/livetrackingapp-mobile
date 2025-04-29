@@ -1,3 +1,5 @@
+import 'package:firebase_database/firebase_database.dart';
+
 class PatrolTask {
   final String taskId;
   final String userId;
@@ -9,6 +11,9 @@ class PatrolTask {
   final DateTime createdAt;
   final Map<String, dynamic>? routePath;
   final Map<String, dynamic>? lastLocation;
+  String? _officerName;
+  String get officerName => _officerName ?? 'Loading...';
+  set officerName(String value) => _officerName = value;
 
   PatrolTask({
     required this.taskId,
@@ -21,6 +26,7 @@ class PatrolTask {
     required this.createdAt,
     this.routePath,
     this.lastLocation,
+    String? officerName,
   });
 
   factory PatrolTask.fromJson(Map<String, dynamic> json) {
@@ -50,6 +56,24 @@ class PatrolTask {
     );
   }
 
+  Future<void> fetchOfficerName(DatabaseReference database) async {
+    try {
+      if (userId == null) return;
+
+      final snapshot = await database.child('users').child(userId!).get();
+
+      if (snapshot.exists) {
+        final userData = Map<String, dynamic>.from(snapshot.value as Map);
+        _officerName = userData['name'] as String? ?? 'Unknown';
+      } else {
+        _officerName = 'Unknown Officer';
+      }
+    } catch (e) {
+      print('Error fetching officer name: $e');
+      _officerName = 'Error loading name';
+    }
+  }
+
   PatrolTask copyWith({
     String? taskId,
     String? userId,
@@ -61,6 +85,7 @@ class PatrolTask {
     DateTime? createdAt,
     Map<String, dynamic>? routePath,
     Map<String, dynamic>? lastLocation,
+    String? officerName,
   }) {
     return PatrolTask(
       taskId: taskId ?? this.taskId,
@@ -73,6 +98,7 @@ class PatrolTask {
       createdAt: createdAt ?? this.createdAt,
       routePath: routePath ?? this.routePath,
       lastLocation: lastLocation ?? this.lastLocation,
+      officerName: officerName ?? this.officerName,
     );
   }
 }

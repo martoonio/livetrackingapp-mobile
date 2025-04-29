@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
@@ -20,6 +21,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   String? _selectedOfficerId;
   List<User> _officers = [];
   List<String> _vehicles = [];
+  Position? userCurrentPosition;
 
   @override
   void initState() {
@@ -54,6 +56,47 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       print('Error loading officers: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to load officers: $e')),
+      );
+    }
+  }
+
+  Future<void> _getCurrentLocation() async {
+    try {
+      // Check location permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permission denied');
+        }
+      }
+
+      // Get current position
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      setState(() {
+        userCurrentPosition = position;
+      });
+
+      // Move camera to current location
+      if (_mapController != null) {
+        _mapController!.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(
+              target: LatLng(position.latitude, position.longitude),
+              zoom: 15,
+            ),
+          ),
+        );
+      }
+
+      print('Current location: ${position.latitude}, ${position.longitude}');
+    } catch (e) {
+      print('Error getting location: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to get location: $e')),
       );
     }
   }
@@ -119,9 +162,28 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     return SizedBox(
       height: MediaQuery.of(context).size.height * 0.5,
       child: GoogleMap(
-        onMapCreated: (controller) => _mapController = controller,
-        initialCameraPosition: const CameraPosition(
-          target: LatLng(-6.927727934898599, 107.76911107969532),
+        onMapCreated: (controller) {
+          _mapController = controller;
+          if (userCurrentPosition != null) {
+            controller.animateCamera(
+              CameraUpdate.newCameraPosition(
+                CameraPosition(
+                  target: LatLng(
+                    userCurrentPosition!.latitude,
+                    userCurrentPosition!.longitude,
+                  ),
+                  zoom: 15,
+                ),
+              ),
+            );
+          }
+        },
+        initialCameraPosition: CameraPosition(
+          target: userCurrentPosition != null
+              ? LatLng(
+                  userCurrentPosition!.latitude, userCurrentPosition!.longitude)
+              : const LatLng(
+                  -6.927727934898599, 107.76911107969532), // fallback
           zoom: 15,
         ),
         markers: _markers,
@@ -175,30 +237,49 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                 ),
                 child: _buildVehicleDropdown(),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 8),
 
               // Points Counter
               Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Jumlah Titik Patroli : ',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
+                  // Undo Button
+                  TextButton.icon(
+                    onPressed:
+                        _selectedPoints.isEmpty ? null : _removeLastPoint,
+                    icon: const Icon(Icons.undo, color: Colors.teal),
+                    label: const Text(
+                      'Undo Last Point',
+                      style: TextStyle(
+                        color: Colors.teal,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                  Text(
-                    '${_selectedPoints.length}',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.teal,
-                    ),
+                  // Points Counter
+                  Row(
+                    children: [
+                      const Text(
+                        'Jumlah Titik Patroli : ',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      Text(
+                        '${_selectedPoints.length}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.teal,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
+
               const Spacer(),
 
               // Create Task Button
@@ -283,7 +364,63 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     Navigator.pop(context);
   }
 
+  void _removeLastPoint() {
+    if (_selectedPoints.isEmpty) return;
+
+    setState(() {
+      // Remove last point
+      _selectedPoints.removeLast();
+
+      // Remove last marker
+      final lastMarkerId = MarkerId('point_${_selectedPoints.length + 1}');
+      _markers.removeWhere((marker) => marker.markerId == lastMarkerId);
+
+      // Update remaining markers to show correct numbering
+      _markers.clear();
+      for (int i = 0; i < _selectedPoints.length; i++) {
+        _markers.add(
+          Marker(
+            markerId: MarkerId('point_${i + 1}'),
+            position: _selectedPoints[i],
+            infoWindow: InfoWindow(title: 'Point ${i + 1}'),
+          ),
+        );
+      }
+    });
+  }
+
   void _handleMapTap(LatLng position) {
+    // Check if tapped near existing marker
+    for (int i = 0; i < _selectedPoints.length; i++) {
+      final point = _selectedPoints[i];
+      final distance = Geolocator.distanceBetween(
+        point.latitude,
+        point.longitude,
+        position.latitude,
+        position.longitude,
+      );
+
+      // If tap is within 20 meters of existing marker, remove it
+      if (distance < 20) {
+        setState(() {
+          _selectedPoints.removeAt(i);
+          _markers.clear();
+          // Rebuild all markers with updated numbering
+          for (int j = 0; j < _selectedPoints.length; j++) {
+            _markers.add(
+              Marker(
+                markerId: MarkerId('point_${j + 1}'),
+                position: _selectedPoints[j],
+                infoWindow: InfoWindow(title: 'Point ${j + 1}'),
+              ),
+            );
+          }
+        });
+        return;
+      }
+    }
+
+    // If not removing, add new point
     setState(() {
       _selectedPoints.add(position);
       _markers.add(

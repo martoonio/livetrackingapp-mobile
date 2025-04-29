@@ -1,6 +1,9 @@
 import 'dart:math' as math;
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:livetrackingapp/home_screen.dart';
+import 'package:livetrackingapp/main_nav_screen.dart';
 import '../../domain/entities/patrol_task.dart';
 
 class PatrolSummaryScreen extends StatefulWidget {
@@ -33,7 +36,16 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
   void initState() {
     super.initState();
     _initializeMap();
+    _loadOfficerName();
     print('route path isinya apa? ${widget.routePath}');
+  }
+
+  Future<void> _loadOfficerName() async {
+    final database = FirebaseDatabase.instance.ref();
+    await widget.task.fetchOfficerName(database);
+    if (mounted) {
+      setState(() {}); // Refresh UI with officer name
+    }
   }
 
   void _initializeMap() {
@@ -279,18 +291,26 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Patrol Summary'),
+        automaticallyImplyLeading: false,
       ),
-      body: Column(
-        children: [
-          _buildSummaryCard(),
-          _buildMap(),
-        ],
-      ),
+      body: _buildMap(),
     );
   }
 
   Widget _buildSummaryCard() {
-    return Card(
+    return Container(
+      height: 150,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       margin: const EdgeInsets.all(16),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -298,7 +318,12 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Task ID: ${widget.task.taskId}',
+              'Patrol Task Summary',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Officer: ${widget.task.officerName}',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
@@ -315,21 +340,40 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
   }
 
   Widget _buildMap() {
-    return Expanded(
-      child: GoogleMap(
-        onMapCreated: _onMapCreated,
-        initialCameraPosition: CameraPosition(
-          target: widget.routePath.isNotEmpty
-              ? LatLng(widget.routePath[0][0], widget.routePath[0][1])
-              : _defaultCenter,
-          zoom: 15.0,
-        ),
-        markers: _markers,
-        polylines: _polylines,
-        myLocationEnabled: true,
-        myLocationButtonEnabled: true,
-        zoomControlsEnabled: true,
-        mapType: MapType.normal,
+    return SizedBox(
+      height: MediaQuery.of(context).size.height,
+      child: Stack(
+        children: [
+          GoogleMap(
+            onMapCreated: _onMapCreated,
+            initialCameraPosition: CameraPosition(
+              target: widget.routePath.isNotEmpty
+                  ? LatLng(widget.routePath[0][0], widget.routePath[0][1])
+                  : _defaultCenter,
+              zoom: 15.0,
+            ),
+            markers: _markers,
+            polylines: _polylines,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: true,
+            zoomControlsEnabled: true,
+            mapType: MapType.normal,
+          ),
+          _buildSummaryCard(),
+          Positioned(
+            bottom: 50,
+            left: 16,
+            right: 16,
+            child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => MainNavigationScreen()));
+                },
+                child: const Text('Continue')),
+          ),
+        ],
       ),
     );
   }
