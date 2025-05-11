@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/domain/repositories/route_repository.dart';
 import '../../domain/entities/patrol_task.dart';
 
@@ -6,6 +7,8 @@ import '../../domain/entities/patrol_task.dart';
 abstract class AdminEvent {}
 
 class LoadAllTasks extends AdminEvent {}
+
+class LoadOfficersAndVehicles extends AdminEvent {}
 
 class CreateTask extends AdminEvent {
   final String vehicleId;
@@ -17,6 +20,15 @@ class CreateTask extends AdminEvent {
     required this.assignedRoute,
     required this.assignedOfficerId,
   });
+}
+
+class CreateTaskLoading extends AdminState {}
+
+class CreateTaskSuccess extends AdminState {}
+
+class CreateTaskError extends AdminState {
+  final String message;
+  CreateTaskError(this.message);
 }
 
 // States
@@ -45,6 +57,23 @@ class AdminError extends AdminState {
   AdminError(this.message);
 }
 
+class OfficersAndVehiclesLoaded extends AdminState {
+  final List<User> officers;
+  final List<String> vehicles;
+
+  OfficersAndVehiclesLoaded({
+    required this.officers,
+    required this.vehicles,
+  });
+}
+
+class OfficersAndVehiclesLoading extends AdminState {}
+
+class OfficersAndVehiclesError extends AdminState {
+  final String message;
+  OfficersAndVehiclesError(this.message);
+}
+
 // BLoC
 class AdminBloc extends Bloc<AdminEvent, AdminState> {
   final RouteRepository repository;
@@ -52,6 +81,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
   AdminBloc({required this.repository}) : super(AdminInitial()) {
     on<LoadAllTasks>(_onLoadAllTasks);
     on<CreateTask>(_onCreateTask);
+    on<LoadOfficersAndVehicles>(_onLoadOfficersAndVehicles);
   }
 
   Future<void> _onLoadAllTasks(
@@ -81,15 +111,33 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     Emitter<AdminState> emit,
   ) async {
     try {
+      emit(CreateTaskLoading());
+
       await repository.createTask(
         vehicleId: event.vehicleId,
         assignedRoute: event.assignedRoute,
         assignedOfficerId: event.assignedOfficerId,
       );
 
+      emit(CreateTaskSuccess());
       add(LoadAllTasks());
     } catch (e) {
-      emit(AdminError(e.toString()));
+      emit(CreateTaskError('Failed to create task: $e'));
+    }
+  }
+
+  Future<void> _onLoadOfficersAndVehicles(
+    LoadOfficersAndVehicles event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(OfficersAndVehiclesLoading());
+      final officers = await repository.getAllOfficers();
+      final vehicles = await repository.getAllVehicles();
+      emit(OfficersAndVehiclesLoaded(officers: officers, vehicles: vehicles));
+    } catch (e) {
+      emit(
+          OfficersAndVehiclesError('Failed to load officers and vehicles: $e'));
     }
   }
 }

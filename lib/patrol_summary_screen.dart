@@ -2,9 +2,9 @@ import 'dart:math' as math;
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:livetrackingapp/home_screen.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
 import '../../domain/entities/patrol_task.dart';
+import 'package:livetrackingapp/presentation/component/utils.dart';
 
 class PatrolSummaryScreen extends StatefulWidget {
   final PatrolTask task;
@@ -130,7 +130,7 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
       Polyline(
         polylineId: const PolylineId('assigned_route'),
         points: assignedPoints,
-        color: Colors.green.withOpacity(0.7),
+        color: successG200,
         width: 3,
         patterns: [
           PatternItem.dash(20),
@@ -154,7 +154,7 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         Polyline(
           polylineId: const PolylineId('actual_route'),
           points: actualPoints,
-          color: Colors.blue,
+          color: kbpBlue900,
           width: 5,
           visible: true, // Explicitly set visible
         ),
@@ -321,14 +321,14 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
               'Patrol Task Summary',
               style: Theme.of(context).textTheme.titleLarge,
             ),
-            const SizedBox(height: 8),
+            8.height,
             Text(
               'Officer: ${widget.task.officerName}',
               style: Theme.of(context).textTheme.titleMedium,
             ),
-            const SizedBox(height: 8),
+            8.height,
             Text('Vehicle: ${widget.task.vehicleId}'),
-            const SizedBox(height: 8),
+            8.height,
             Text(
               'Duration: ${_formatDuration(widget.startTime, widget.endTime)}',
               style: Theme.of(context).textTheme.titleSmall,

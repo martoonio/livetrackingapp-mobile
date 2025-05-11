@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:livetrackingapp/main.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
 import 'package:livetrackingapp/presentation/auth/profile_setup_screen.dart';
+import 'package:livetrackingapp/presentation/component/intExtension.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../../domain/repositories/route_repository.dart';
 import '../../home_screen.dart';
@@ -129,7 +130,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const SizedBox(height: 48),
+                    48.height,
                     TextFormField(
                       controller: _emailController,
                       decoration: const InputDecoration(
@@ -143,7 +144,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 16),
+                    16.height,
                     TextFormField(
                       controller: _passwordController,
                       decoration: const InputDecoration(
@@ -158,7 +159,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 24),
+                    24.height,
                     BlocBuilder<AuthBloc, AuthState>(
                       builder: (context, state) {
                         return ElevatedButton(

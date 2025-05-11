@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:livetrackingapp/presentation/component/intExtension.dart';
 
 class CompleteProfileDialog extends StatefulWidget {
   final Function(String name, String role) onSubmit;
@@ -45,7 +46,7 @@ class _CompleteProfileDialogState extends State<CompleteProfileDialog> {
                 return null;
               },
             ),
-            const SizedBox(height: 16),
+            16.height,
             DropdownButtonFormField<String>(
               value: _selectedRole,
               decoration: const InputDecoration(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:livetrackingapp/domain/entities/patrol_task.dart';
+import 'package:livetrackingapp/presentation/component/intExtension.dart';
 
 class PatrolHistoryScreen extends StatefulWidget {
   final PatrolTask task;
@@ -175,16 +176,16 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen> {
               'Vehicle ID: ${widget.task.vehicleId}',
               style: Theme.of(context).textTheme.titleMedium,
             ),
-            const SizedBox(height: 8),
+            8.height,
             Text('Status: ${widget.task.status}'),
             if (widget.task.startTime != null) ...[
-              const SizedBox(height: 8),
+              8.height,
               Text(
                 'Start: ${widget.task.startTime!.toString()}',
               ),
             ],
             if (duration != null) ...[
-              const SizedBox(height: 8),
+              8.height,
               Text(
                 'Duration: ${duration.inHours}h ${duration.inMinutes % 60}m',
               ),

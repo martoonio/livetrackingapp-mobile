@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:livetrackingapp/map_screen.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
+import 'package:livetrackingapp/presentation/component/utils.dart';
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/auth/bloc/auth_bloc.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
@@ -38,7 +39,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadPatrolHistory();
   }
 
-// Replace existing _buildPatrolHistory with this
   Widget _buildPatrolHistory() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -47,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'Patrol History',
           style: Theme.of(context).textTheme.titleLarge,
         ),
-        const SizedBox(height: 16),
+        16.height,
         BlocBuilder<PatrolBloc, PatrolState>(
           builder: (context, state) {
             print('Building history with state: $state'); // Debug print
@@ -109,7 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (state is PatrolError) {
               return Card(
                 child: ListTile(
-                  leading: const Icon(Icons.error, color: Colors.red),
+                  leading: const Icon(Icons.error, color: dangerR300),
                   title: const Text('Error loading history'),
                   subtitle: Text(state.message),
                 ),
@@ -319,7 +319,7 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildUpcomingPatrols(),
-                const SizedBox(height: 32),
+                32.height,
                 _buildPatrolHistory(),
               ],
             ),
@@ -337,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'Upcoming Patrols',
           style: Theme.of(context).textTheme.titleLarge,
         ),
-        const SizedBox(height: 16),
+        16.height,
         BlocBuilder<PatrolBloc, PatrolState>(
           builder: (context, state) {
             if (state is PatrolLoading) {

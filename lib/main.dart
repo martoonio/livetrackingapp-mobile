@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
 import 'package:livetrackingapp/firebase_options.dart';
-import 'package:livetrackingapp/home_screen.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/auth/login_screen.dart';
@@ -17,6 +16,7 @@ import 'domain/repositories/auth_repository.dart';
 import 'domain/repositories/route_repository.dart';
 import 'presentation/auth/bloc/auth_bloc.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
+import 'presentation/component/utils.dart';
 
 final getIt = GetIt.instance;
 
@@ -99,6 +99,12 @@ class MyApp extends StatelessWidget {
           )..add(LoadAllTasks()),
           lazy: false, // Initialize immediately
         ),
+        BlocProvider<AdminBloc>(
+          create: (context) => AdminBloc(
+            repository: getIt<RouteRepository>(),
+          )..add(LoadOfficersAndVehicles()),
+          lazy: false,
+        ),
       ],
       child: BlocBuilder<AuthBloc, AuthState>(
         builder: (context, state) {
@@ -106,8 +112,9 @@ class MyApp extends StatelessWidget {
           return MaterialApp(
             title: 'Live Tracking App',
             theme: ThemeData(
-              scaffoldBackgroundColor: Colors.white,
-              primarySwatch: Colors.green,
+              scaffoldBackgroundColor: neutralWhite,
+              primaryColor: successG300,
+              colorScheme: ColorScheme.fromSwatch().copyWith(primary: successG300),
               fontFamily: 'Plus Jakarta Sans',
             ),
             home: (state is AuthAuthenticated)

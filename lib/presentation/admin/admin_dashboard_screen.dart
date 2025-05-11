@@ -3,9 +3,21 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/admin/patrol_history_screen.dart';
 import 'create_task_screen.dart';
+import 'package:livetrackingapp/presentation/component/utils.dart';
 
-class AdminDashboardScreen extends StatelessWidget {
-  const AdminDashboardScreen({Key? key}) : super(key: key);
+class AdminDashboardScreen extends StatefulWidget {
+  const AdminDashboardScreen({super.key});
+
+  @override
+  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+}
+
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    context.read<AdminBloc>().add(LoadAllTasks());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -68,17 +80,14 @@ class AdminDashboardScreen extends StatelessWidget {
             _buildStatItem(
               'Active Tasks',
               state.activeTasks.length.toString(),
-              Colors.blue,
+              kbpBlue900,
             ),
-            _buildStatItem(
-              'Completed Tasks',
-              state.completedTasks.length.toString(),
-              Colors.green,
-            ),
+            _buildStatItem('Completed Tasks',
+                state.completedTasks.length.toString(), successG300),
             _buildStatItem(
               'Total Officers',
               state.totalOfficers.toString(),
-              Colors.orange,
+              warningY300,
             ),
           ],
         ),

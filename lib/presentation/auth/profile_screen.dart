@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:livetrackingapp/presentation/component/intExtension.dart';
 import '../auth/bloc/auth_bloc.dart';
 import 'login_screen.dart';
 
@@ -41,7 +42,7 @@ class ProfileScreen extends StatelessWidget {
                 radius: 50,
                 child: Icon(Icons.person, size: 50),
               ),
-              const SizedBox(height: 16),
+              16.height,
               Card(
                 child: ListTile(
                   title: Text(user.name),

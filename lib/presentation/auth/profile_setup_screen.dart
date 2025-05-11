@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:livetrackingapp/home_screen.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
 import 'package:livetrackingapp/presentation/auth/bloc/auth_bloc.dart';
+import 'package:livetrackingapp/presentation/component/intExtension.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   final String email;
@@ -59,7 +60,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   'Welcome ${widget.email}!',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const SizedBox(height: 24),
+                24.height,
                 TextFormField(
                   decoration: const InputDecoration(
                     labelText: 'Full Name',
@@ -73,7 +74,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   },
                   onSaved: (value) => _name = value ?? '',
                 ),
-                const SizedBox(height: 16),
+                16.height,
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(
                     labelText: 'Role',
@@ -92,7 +93,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     });
                   },
                 ),
-                const SizedBox(height: 24),
+                24.height,
                 ElevatedButton(
                   onPressed: _submitForm,
                   child: const Text('Complete Setup'),

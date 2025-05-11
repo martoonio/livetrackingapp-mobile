@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:livetrackingapp/presentation/component/intExtension.dart';
 import '../../domain/entities/patrol_task.dart';
 import '../../map_screen.dart';
 import '../routing/bloc/patrol_bloc.dart';
@@ -24,9 +25,9 @@ class TaskDetailDialog extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Task ID: ${task.taskId}'),
-          const SizedBox(height: 8),
+          8.height,
           Text('Vehicle: ${task.vehicleId}'),
-          const SizedBox(height: 8),
+          8.height,
           Text('Status: ${task.status}'),
         ],
       ),
