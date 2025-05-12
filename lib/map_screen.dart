@@ -75,9 +75,9 @@ class _MapScreenState extends State<MapScreen> {
     // Check if this is a resumed patrol
     if (currentState is PatrolLoaded &&
         currentState.isPatrolling &&
-        currentState.startTime != null) {
+        currentState.task?.startTime != null) {
       print('Resuming patrol tracking...');
-      _resumePatrolTracking(currentState.startTime!);
+      _resumePatrolTracking(currentState.task!.startTime!);
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {

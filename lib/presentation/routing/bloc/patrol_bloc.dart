@@ -79,6 +79,9 @@ class PatrolLoaded extends PatrolState {
   final PatrolTask? task;
   final bool isPatrolling;
   final List<Position>? currentPatrolPath;
+  // add startTime and endTime
+  final DateTime? startTime;
+  final DateTime? endTime;
   final Map<String, dynamic>? routePath; // Add this
   final List<PatrolTask> finishedTasks;
 
@@ -86,13 +89,15 @@ class PatrolLoaded extends PatrolState {
     this.task,
     this.isPatrolling = false,
     this.currentPatrolPath,
+    this.startTime,
+    this.endTime,
     this.routePath, // Add this
     this.finishedTasks = const [],
   });
 
   @override
   List<Object?> get props =>
-      [task, isPatrolling, currentPatrolPath, routePath, finishedTasks];
+      [task, isPatrolling, startTime, endTime, currentPatrolPath, routePath, finishedTasks];
 
   PatrolLoaded copyWith({
     PatrolTask? task,
@@ -105,6 +110,8 @@ class PatrolLoaded extends PatrolState {
       task: task ?? this.task,
       isPatrolling: isPatrolling ?? this.isPatrolling,
       currentPatrolPath: currentPatrolPath ?? this.currentPatrolPath,
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
       routePath: routePath ?? this.routePath, // Add this
       finishedTasks: finishedTasks ?? this.finishedTasks,
     );
@@ -298,6 +305,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       emit(PatrolLoaded(
         task: event.task,
         isPatrolling: true,
+        startTime: event.startTime,
       ));
 
       // Start location tracking
