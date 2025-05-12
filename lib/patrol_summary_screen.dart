@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -38,6 +39,30 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
     _initializeMap();
     _loadOfficerName();
     print('route path isinya apa? ${widget.routePath}');
+  }
+
+  Future<String?> _getUserRole() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        return null; // Pengguna belum login
+      }
+
+      // Referensi ke path pengguna di Realtime Database
+      final userRef = FirebaseDatabase.instance.ref('users/${user.uid}');
+      final snapshot = await userRef.get();
+
+      if (snapshot.exists) {
+        final data = snapshot.value as Map<dynamic, dynamic>;
+        return data['role'] as String?; // Ambil nilai role
+      } else {
+        print('User data not found in database');
+        return null;
+      }
+    } catch (e) {
+      print('Error fetching user role: $e');
+      return null;
+    }
   }
 
   Future<void> _loadOfficerName() async {
@@ -365,11 +390,13 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
             left: 16,
             right: 16,
             child: ElevatedButton(
-                onPressed: () {
+                onPressed: () async {
+                  final userRole = await _getUserRole();
                   Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(
-                          builder: (context) => MainNavigationScreen()));
+                          builder: (context) =>
+                              MainNavigationScreen(userRole: userRole ?? 'User')));
                 },
                 child: const Text('Continue')),
           ),

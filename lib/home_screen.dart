@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:livetrackingapp/map_screen.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
@@ -279,7 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(
         builder: (_) => MapScreen(
           task: task,
-          onStart: () {}, // Empty because patrol is already started
+          onStart: () {},
         ),
       ),
     );
@@ -295,8 +296,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return BlocListener<PatrolBloc, PatrolState>(
       listener: (context, state) {
-        if (state is PatrolLoaded && state.isPatrolling && state.task != null) {
-          _handleOngoingPatrol(state.task!);
+        if (state is PatrolLoaded && state.isPatrolling) {
+          if (state.task != null) {
+            _handleOngoingPatrol(state.task!);
+          } else {
+            print('No ongoing task found');
+          }
         }
       },
       child: Scaffold(
@@ -352,7 +357,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Vehicle: ${state.task!.vehicleId}'),
+                        rowInfo(state.task!.vehicleId, state.task!.vehicleId),
                         Text('Status: ${state.task!.status}'),
                       ],
                     ),

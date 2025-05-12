@@ -2,13 +2,18 @@ import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
+import 'package:livetrackingapp/data/repositories/report_repositoryImpl.dart';
+import 'package:livetrackingapp/domain/repositories/report_repository.dart';
+import 'package:livetrackingapp/domain/usecases/report_usecase.dart';
 import 'package:livetrackingapp/firebase_options.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/auth/login_screen.dart';
+import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:livetrackingapp/data/repositories/route_repositoryImpl.dart';
 import 'data/repositories/auth_repositoryImpl.dart';
@@ -19,6 +24,7 @@ import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'presentation/component/utils.dart';
 
 final getIt = GetIt.instance;
+final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 
 void setupLocator() {
   // Remove MapboxService registration
@@ -33,6 +39,40 @@ void setupLocator() {
       firebaseAuth: FirebaseAuth.instance,
     ),
   );
+  getIt.registerLazySingleton<ReportRepository>(
+    () => ReportRepositoryImpl(
+      firebaseStorage: FirebaseStorage.instance,
+      databaseReference: FirebaseDatabase.instance.ref(),
+    ),
+  );
+
+  getIt.registerLazySingleton<CreateReportUseCase>(
+    () => CreateReportUseCase(getIt<ReportRepository>()),
+  );
+}
+
+Future<void> requestLocationPermission() async {
+  final status = await Permission.location.request();
+  if (status.isGranted) {
+    print('Location permission granted');
+  } else if (status.isDenied) {
+    print('Location permission denied');
+  } else if (status.isPermanentlyDenied) {
+    print('Location permission permanently denied');
+    await openAppSettings(); // Buka pengaturan aplikasi jika izin ditolak permanen
+  }
+}
+
+Future<void> requestNotificationPermission() async {
+  final status = await Permission.notification.request();
+  if (status.isGranted) {
+    print('Notification permission granted');
+  } else if (status.isDenied) {
+    print('Notification permission denied');
+  } else if (status.isPermanentlyDenied) {
+    print('Notification permission permanently denied');
+    await openAppSettings(); // Buka pengaturan aplikasi jika izin ditolak permanen
+  }
 }
 
 Future<void> initializeApp() async {
@@ -53,12 +93,31 @@ Future<void> initializeApp() async {
     }
   }
 
-  // Request permissions based on platform
-  if (Platform.isIOS) {
-    await Permission.location.request();
-  } else if (Platform.isAndroid) {
-    await Permission.notification.request();
-    await Permission.location.request();
+  await requestLocationPermission();
+  await requestNotificationPermission();
+}
+
+Future<String?> getUserRole() async {
+  try {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return null; // Pengguna belum login
+    }
+
+    // Referensi ke path pengguna di Realtime Database
+    final userRef = FirebaseDatabase.instance.ref('users/${user.uid}');
+    final snapshot = await userRef.get();
+
+    if (snapshot.exists) {
+      final data = snapshot.value as Map<dynamic, dynamic>;
+      return data['role'] as String?; // Ambil nilai role
+    } else {
+      print('User data not found in database');
+      return null;
+    }
+  } catch (e) {
+    print('Error fetching user role: $e');
+    return null;
   }
 }
 
@@ -68,11 +127,14 @@ void main() async {
   await initializeApp();
   setupLocator();
 
+  final userRole = await getUserRole();
+
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final String? userRole;
+  const MyApp({super.key, this.userRole});
 
   @override
   Widget build(BuildContext context) {
@@ -105,6 +167,18 @@ class MyApp extends StatelessWidget {
           )..add(LoadOfficersAndVehicles()),
           lazy: false,
         ),
+        BlocProvider<AdminBloc>(
+          create: (context) => AdminBloc(
+            repository: RouteRepositoryImpl(),
+          )..add(LoadAllTasks()),
+          lazy: false,
+        ),
+        BlocProvider<ReportBloc>(
+          create: (context) => ReportBloc(
+            getIt<CreateReportUseCase>(),
+          ),
+          lazy: false,
+        ),
       ],
       child: BlocBuilder<AuthBloc, AuthState>(
         builder: (context, state) {
@@ -114,11 +188,12 @@ class MyApp extends StatelessWidget {
             theme: ThemeData(
               scaffoldBackgroundColor: neutralWhite,
               primaryColor: successG300,
-              colorScheme: ColorScheme.fromSwatch().copyWith(primary: successG300),
+              colorScheme:
+                  ColorScheme.fromSwatch().copyWith(primary: successG300),
               fontFamily: 'Plus Jakarta Sans',
             ),
             home: (state is AuthAuthenticated)
-                ? const MainNavigationScreen()
+                ? MainNavigationScreen(userRole: userRole ?? 'User')
                 : const LoginScreen(),
           );
         },

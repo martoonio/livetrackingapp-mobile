@@ -1,16 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:livetrackingapp/main.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
 import 'package:livetrackingapp/presentation/auth/profile_setup_screen.dart';
-import 'package:livetrackingapp/presentation/component/intExtension.dart';
-import '../../domain/repositories/auth_repository.dart';
-import '../../domain/repositories/route_repository.dart';
-import '../../home_screen.dart';
-import '../../map_screen.dart';
-import '../routing/bloc/patrol_bloc.dart';
+import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'bloc/auth_bloc.dart';
-import 'complete_profile_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -23,6 +16,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+
+  bool _isPasswordVisible = false;
 
   @override
   void dispose() {
@@ -44,145 +39,176 @@ class _LoginScreenState extends State<LoginScreen> {
         } else if (state is AuthAuthenticated) {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (_) => const MainNavigationScreen(),
+              builder: (_) => MainNavigationScreen(userRole: state.user.role),
             ),
           );
         } else if (state is AuthError) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.message)),
+          showCustomSnackbar(
+            context: context,
+            title: 'Login Failed',
+            subtitle: state.message,
+            type: SnackbarType.danger,
           );
         }
       },
       child: Scaffold(
-        body: BlocListener<AuthBloc, AuthState>(
-          listener: (context, state) async {
-            print('Auth state changed: $state');
-
-            if (state is AuthError) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(state.message)),
-              );
-            } else if (state is AuthAuthenticated) {
-              print('User authenticated: ${state.user.email}');
-
-              // Check if profile is incomplete
-              // if (state.user.name.isEmpty || state.user.role.isEmpty) {
-              //   // Show dialog to complete profile
-              //   await showDialog(
-              //     context: context,
-              //     barrierDismissible: false,
-              //     builder: (_) => CompleteProfileDialog(
-              //       onSubmit: (name, role) async {
-              //         try {
-              //           await getIt<AuthRepository>().updateUserProfile(
-              //             state.user.id,
-              //             name,
-              //             role,
-              //           );
-
-              //           // Navigate to home screen after profile completion
-              //           Navigator.of(context).pushReplacement(
-              //             MaterialPageRoute(
-              //               builder: (_) => BlocProvider(
-              //                 create: (context) => PatrolBloc(
-              //                   repository: getIt<RouteRepository>(),
-              //                 )..add(LoadRouteData(userId: state.user.id)),
-              //                 child: const HomeScreen(),
-              //               ),
-              //             ),
-              //           );
-              //         } catch (e) {
-              //           ScaffoldMessenger.of(context).showSnackBar(
-              //             SnackBar(content: Text('Failed to update profile: $e')),
-              //           );
-              //         }
-              //       },
-              //     ),
-              //   );
-              // }
-              // else {
-              // Navigate directly to home screen if profile is complete
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (_) => BlocProvider(
-                    create: (context) => PatrolBloc(
-                      repository: getIt<RouteRepository>(),
-                    )..add(LoadRouteData(userId: state.user.id)),
-                    child: const MainNavigationScreen(),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Title
+                  Text(
+                    'Live Tracking KBP',
+                    style: boldTextStyle(size: h4, color: kbpBlue900),
                   ),
-                ),
-              );
-              // }
-            }
-          },
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text(
-                      'Live Tracking KBP',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+                  const SizedBox(height: 48),
+                  // Email Field
+                  TextFormField(
+                    controller: _emailController,
+                    decoration: InputDecoration(
+                      labelText: 'Email',
+                      labelStyle:
+                          regularTextStyle(size: paragrafLG, color: neutral700),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color:
+                              kbpBlue900, // Warna border saat field tidak fokus
+                          width: 2,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: kbpBlue900, // Warna border saat field fokus
+                          width: 2,
+                        ),
+                      ),
+                      prefixIcon: const Icon(
+                        Icons.email,
+                        color: kbpBlue900,
                       ),
                     ),
-                    48.height,
-                    TextFormField(
-                      controller: _emailController,
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                        border: OutlineInputBorder(),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter your email';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  // Password Field
+                  TextFormField(
+                    controller: _passwordController,
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      labelStyle:
+                          regularTextStyle(size: paragrafLG, color: neutral700),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color:
+                              kbpBlue900, // Warna border saat field tidak fokus
+                          width: 2,
+                        ),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your email';
-                        }
-                        return null;
-                      },
-                    ),
-                    16.height,
-                    TextFormField(
-                      controller: _passwordController,
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
-                        border: OutlineInputBorder(),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color:
+                              kbpBlue900, // Warna border saat field tidak fokus
+                          width: 2,
+                        ),
                       ),
-                      obscureText: true,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your password';
-                        }
-                        return null;
-                      },
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: kbpBlue900, // Warna border saat field fokus
+                          width: 2,
+                        ),
+                      ),
+                      prefixIcon: const Icon(
+                        Icons.lock,
+                        color: kbpBlue900,
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(!_isPasswordVisible
+                            ? Icons.visibility
+                            : Icons.visibility_off), //
+                        color: kbpBlue900,
+                        onPressed: () {
+                          // Tindakan saat ikon mata ditekan
+                          setState(() {
+                            _isPasswordVisible = !_isPasswordVisible;
+                          });
+                        },
+                      ),
                     ),
-                    24.height,
-                    BlocBuilder<AuthBloc, AuthState>(
-                      builder: (context, state) {
-                        return ElevatedButton(
-                          onPressed: state is AuthLoading
-                              ? null
-                              : () {
-                                  if (_formKey.currentState!.validate()) {
-                                    context.read<AuthBloc>().add(
-                                          LoginRequested(
-                                            email: _emailController.text,
-                                            password: _passwordController.text,
-                                          ),
-                                        );
-                                  }
-                                },
-                          child: state is AuthLoading
-                              ? const CircularProgressIndicator()
-                              : const Text('Login'),
-                        );
-                      },
+                    obscureText: !_isPasswordVisible,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter your password';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  // Login Button
+                  BlocBuilder<AuthBloc, AuthState>(
+                    builder: (context, state) {
+                      return ElevatedButton(
+                        onPressed: state is AuthLoading
+                            ? null
+                            : () {
+                                if (_formKey.currentState!.validate()) {
+                                  context.read<AuthBloc>().add(
+                                        LoginRequested(
+                                          email: _emailController.text,
+                                          password: _passwordController.text,
+                                        ),
+                                      );
+                                }
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kbpBlue900,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: state is AuthLoading
+                            ? const CircularProgressIndicator(
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.white),
+                              )
+                            : Text(
+                                'Login',
+                                style: boldTextStyle(
+                                    size: paragrafLG, color: neutralWhite),
+                              ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  // Footer
+                  TextButton(
+                    onPressed: () {
+                      // Tambahkan navigasi ke halaman lupa password jika ada
+                    },
+                    child: Text(
+                      'Forgot Password?',
+                      style:
+                          regularTextStyle(size: paragrafLG, color: kbpBlue900),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),

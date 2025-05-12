@@ -89,8 +89,15 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     Emitter<AdminState> emit,
   ) async {
     try {
-      emit(AdminLoading());
-      // Implement repository methods to fetch tasks
+      // Pertahankan state sebelumnya jika ada
+      final currentState = state;
+      if (currentState is AdminLoaded) {
+        emit(currentState); // Emit state sebelumnya
+      } else {
+        emit(AdminLoading());
+      }
+
+      // Muat data baru
       final tasks = await repository.getAllTasks();
       final officers = await repository.getAllOfficers();
       final vehicles = await repository.getAllVehicles();

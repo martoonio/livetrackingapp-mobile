@@ -31,7 +31,10 @@ class RouteRepositoryImpl implements RouteRepository {
 
     final tasks = Map<String, dynamic>.from(snapshot.value as Map);
     final activeTask = tasks.values.firstWhere(
-      (task) => task['status'] == 'active' || task['status'] == 'ongoing',
+      (task) =>
+          task['status'] == 'active' ||
+          task['status'] == 'ongoing' ||
+          task['status'] == 'in_progress',
       orElse: () => null,
     );
 
@@ -162,14 +165,16 @@ class RouteRepositoryImpl implements RouteRepository {
         final tasksMap = event.snapshot.value as Map<dynamic, dynamic>;
         print('Tasks data: $tasksMap');
 
-        // Find active or in_progress task
+        // Find active or ongoing task
         MapEntry<dynamic, dynamic>? activeTaskEntry;
         try {
           activeTaskEntry = tasksMap.entries.firstWhere(
             (entry) {
               final task = entry.value as Map<dynamic, dynamic>;
               final status = task['status']?.toString();
-              return status == 'active' || status == 'in_progress';
+              return status == 'active' ||
+                  status == 'ongoing' ||
+                  status == 'in_progress';
             },
           );
         } catch (e) {
@@ -177,7 +182,7 @@ class RouteRepositoryImpl implements RouteRepository {
         }
 
         if (activeTaskEntry == null) {
-          print('No active/in-progress task found');
+          print('No active/ongoing task found');
           return null;
         }
 

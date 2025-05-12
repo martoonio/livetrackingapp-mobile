@@ -1,11 +1,8 @@
-import 'dart:developer';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:livetrackingapp/home_screen.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
-import 'package:livetrackingapp/presentation/auth/bloc/auth_bloc.dart';
-import 'package:livetrackingapp/presentation/component/intExtension.dart';
+import 'package:livetrackingapp/presentation/component/utils.dart';
+import 'bloc/auth_bloc.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   final String email;
@@ -31,16 +28,17 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     return BlocListener<AuthBloc, AuthState>(
       listener: (context, state) {
         if (state is AuthAuthenticated) {
-          // Navigate to home screen when profile is complete
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (_) => const MainNavigationScreen(),
+              builder: (_) => MainNavigationScreen(userRole: state.user.role),
             ),
           );
         } else if (state is AuthError) {
-          // Show error message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.message)),
+          showCustomSnackbar(
+            context: context,
+            title: 'Profile Setup Failed',
+            subtitle: state.message,
+            type: SnackbarType.danger,
           );
         }
       },
@@ -116,7 +114,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               role: _role,
             ),
           );
-      log('Profile setup completed: Name: $_name, Role: $_role');
     }
   }
 }
