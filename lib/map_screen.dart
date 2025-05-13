@@ -1,12 +1,19 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_svg/svg.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:livetrackingapp/domain/entities/report.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
+import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
+import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
+import 'package:image_picker/image_picker.dart';
 
 class MapScreen extends StatefulWidget {
   final PatrolTask task;
@@ -34,6 +41,36 @@ class _MapScreenState extends State<MapScreen> {
   Duration _elapsedTime = Duration.zero;
   double _totalDistance = 0;
   Position? _lastPosition;
+
+  double _longPressProgress = 0.0; // Progress untuk animasi long press
+  Timer? _longPressTimer;
+
+  List<File> selectedPhotos = [];
+
+  void _startLongPressAnimation(BuildContext context, PatrolState state) {
+    const duration = Duration(seconds: 3); // Durasi long press
+    const interval =
+        Duration(milliseconds: 50); // Interval untuk update animasi
+    double increment = interval.inMilliseconds / duration.inMilliseconds;
+
+    _longPressTimer = Timer.periodic(interval, (timer) {
+      setState(() {
+        _longPressProgress += increment;
+        if (_longPressProgress >= 1.0) {
+          _longPressProgress = 1.0;
+          timer.cancel();
+          _handlePatrolButtonPress(context, state); // Jalankan aksi
+        }
+      });
+    });
+  }
+
+  void _resetLongPressAnimation() {
+    _longPressTimer?.cancel();
+    setState(() {
+      _longPressProgress = 0.0;
+    });
+  }
 
   // Add method to start timer
   void _startPatrolTimer() {
@@ -63,6 +100,10 @@ class _MapScreenState extends State<MapScreen> {
         newPosition.longitude,
       );
       _totalDistance += distanceInMeters;
+      print('Distance updated: $_totalDistance meters');
+    } else {
+      print(
+          'First position set: ${newPosition.latitude}, ${newPosition.longitude}');
     }
     _lastPosition = newPosition;
   }
@@ -79,6 +120,13 @@ class _MapScreenState extends State<MapScreen> {
       print('Resuming patrol tracking...');
       _resumePatrolTracking(currentState.task!.startTime!);
     }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
+      if (mounted) {
+        setState(() {}); // Perbarui UI setelah officerName dimuat
+      }
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
@@ -166,7 +214,7 @@ class _MapScreenState extends State<MapScreen> {
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
+        distanceFilter: 10, // Update lokasi setiap 10 meter
       ),
     ).listen(
       (Position position) {
@@ -180,9 +228,15 @@ class _MapScreenState extends State<MapScreen> {
 
           final state = context.read<PatrolBloc>().state;
           if (state is PatrolLoaded && state.isPatrolling) {
+            print('Patrol is active, updating distance...');
             _updateDistance(position);
+          } else {
+            print('Patrol is not active, skipping distance update.');
           }
         }
+      },
+      onError: (error) {
+        print('Location tracking error: $error');
       },
     );
 
@@ -262,7 +316,8 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _startLocationTracking() {
-    print('Starting location tracking...');
+    String timeNow = DateTime.now().toIso8601String();
+    print('ini debug Starting location tracking... jam $timeNow');
     _positionStreamSubscription?.cancel();
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
@@ -280,6 +335,7 @@ class _MapScreenState extends State<MapScreen> {
           });
 
           final state = context.read<PatrolBloc>().state;
+          print('ini debug state sekarang $state jam $timeNow');
           if (state is PatrolLoaded && state.isPatrolling) {
             // Update location in Firebase
             context.read<PatrolBloc>().add(UpdatePatrolLocation(
@@ -296,10 +352,316 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  void _handlePatrolButtonPress(BuildContext context, PatrolState state) async {
+    if (state is PatrolLoaded) {
+      if (state.isPatrolling || state.task?.status == 'ongoing') {
+        await _stopPatrol(context, state);
+      } else {
+        print('Dispatching StartPatrol event...');
+        _startPatrol(context);
+      }
+    } else {
+      print('Dispatching LoadRouteData event...');
+      context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
+    }
+  }
+
+  Future<void> _stopPatrol(BuildContext context, PatrolLoaded state) async {
+    final endTime = DateTime.now();
+
+    // Convert route path
+    List<List<double>> convertedPath = [];
+    try {
+      if (state.task?.routePath != null && state.task!.routePath is Map) {
+        final map = state.task!.routePath as Map;
+
+        // Sort entries by timestamp
+        final sortedEntries = map.entries.toList()
+          ..sort((a, b) => (a.value['timestamp'] as String)
+              .compareTo(b.value['timestamp'] as String));
+
+        // Convert coordinates
+        convertedPath = sortedEntries.map((entry) {
+          final coordinates = entry.value['coordinates'] as List;
+          return [
+            (coordinates[0] as num).toDouble(),
+            (coordinates[1] as num).toDouble(),
+          ];
+        }).toList();
+      }
+    } catch (e) {
+      print('Error converting route path: $e');
+    }
+
+    // Stop patrol
+    context.read<PatrolBloc>().add(StopPatrol(endTime: endTime));
+
+    // Wait briefly for state to update
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    // Navigate to summary screen
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PatrolSummaryScreen(
+            task: widget.task,
+            routePath: convertedPath,
+            startTime: state.task?.startTime ?? DateTime.now(),
+            endTime: endTime,
+          ),
+        ),
+      );
+    }
+  }
+
+  void _startPatrol(BuildContext context) {
+    final startTime = DateTime.now();
+
+    print('Starting patrol at $startTime');
+
+    // Update task status
+    context.read<PatrolBloc>().add(UpdateTask(
+          taskId: widget.task.taskId,
+          updates: {
+            'status': 'ongoing',
+            'startTime': startTime.toIso8601String(),
+          },
+        ));
+
+    // Start patrol
+    context.read<PatrolBloc>().add(StartPatrol(
+          task: widget.task,
+          startTime: startTime,
+        ));
+
+    _startPatrolTimer(); // Start timer
+    _elapsedTime = Duration.zero; // Reset timer
+    _totalDistance = 0; // Reset distance
+    _lastPosition = null;
+    _startLocationTracking(); // Start location tracking
+    print('ini debug patroli udah mulai');
+
+    widget.onStart();
+  }
+
+  void _showReportDialog(BuildContext context) {
+    final TextEditingController kejadianController = TextEditingController();
+    final TextEditingController catatanController = TextEditingController();
+
+    Future<void> pickImagesFromCamera() async {
+      try {
+        final pickedFile = await ImagePicker().pickImage(
+          source: ImageSource.camera,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          imageQuality: 85, // Mengurangi ukuran file
+        );
+        if (pickedFile != null) {
+          setState(() {
+            selectedPhotos.add(File(pickedFile.path));
+          });
+        }
+      } catch (e) {
+        print('Error picking image: $e');
+      }
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: StatefulBuilder(
+            builder: (context, setState) {
+              return Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Title
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Laporan Kejadian',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            Navigator.pop(context);
+                            selectedPhotos.clear();
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    // Input Kejadian
+                    const Text('kejadian'),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: kejadianController,
+                      decoration: inputDecoration('Judul kejadian...'),
+                    ),
+                    const SizedBox(height: 16),
+                    // Input Catatan
+                    const Text('catatan'),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: catatanController,
+                      maxLines: 3,
+                      decoration: inputDecoration('Deskripsi kejadian...'),
+                    ),
+                    const SizedBox(height: 16),
+                    // Bukti Kejadian
+                    const Text('bukti kejadian'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        // Foto yang dipilih
+                        ...selectedPhotos.map((photo) {
+                          return Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.file(
+                                  photo,
+                                  width: 80,
+                                  height: 80,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              Positioned(
+                                top: 4,
+                                right: 4,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      selectedPhotos.remove(photo);
+                                    });
+                                  },
+                                  child: Container(
+                                    decoration: const BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.red,
+                                    ),
+                                    padding: const EdgeInsets.all(4),
+                                    child: const Icon(
+                                      Icons.close,
+                                      color: Colors.white,
+                                      size: 16,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        }).toList(),
+                        // Tombol untuk menambah foto
+                        GestureDetector(
+                          onTap: () async {
+                            await pickImagesFromCamera();
+                            setState(() {}); // Pastikan dialog diperbarui
+                          },
+                          child: Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Center(
+                              child: Icon(
+                                Icons.camera_alt,
+                                size: 32,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    // Button Kirim Laporan
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (kejadianController.text.isNotEmpty &&
+                              catatanController.text.isNotEmpty &&
+                              selectedPhotos.isNotEmpty) {
+                            // Simpan semua foto ke Firebase Storage
+                            final report = Report(
+                              id: DateTime.now()
+                                  .millisecondsSinceEpoch
+                                  .toString(),
+                              title: kejadianController.text,
+                              description: catatanController.text,
+                              photoUrl: selectedPhotos
+                                  .map((photo) => photo.path)
+                                  .join(','), // Gabungkan path foto
+                              timestamp: DateTime.now(),
+                              latitude: userCurrentLocation?.latitude ?? 0.0,
+                              longitude: userCurrentLocation?.longitude ?? 0.0,
+                              taskId: widget.task.taskId,
+                            );
+
+                            context
+                                .read<ReportBloc>()
+                                .add(CreateReportEvent(report));
+                            showCustomSnackbar(
+                              context: context,
+                              title: 'Laporan berhasil dikirim',
+                              subtitle: 'Terima kasih atas laporan Anda',
+                              type: SnackbarType.success,
+                            );
+                            selectedPhotos.clear();
+                            kejadianController.clear();
+                            catatanController.clear();
+                            Navigator.pop(context);
+                          } else {
+                            showCustomSnackbar(
+                              context: context,
+                              title: 'Data belum lengkap',
+                              subtitle: 'Silakan isi semua data laporan',
+                              type: SnackbarType.danger,
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        child: const Text(
+                          'kirim laporan',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     _patrolTimer?.cancel();
     _positionStreamSubscription?.cancel();
+    _longPressTimer?.cancel();
     mapController?.dispose();
     super.dispose();
   }
@@ -308,11 +670,12 @@ class _MapScreenState extends State<MapScreen> {
   Widget build(BuildContext context) {
     return BlocListener<PatrolBloc, PatrolState>(
       listener: (context, state) {
-        // if (state is PatrolLoaded && state.isPatrolling) {
-        //   ScaffoldMessenger.of(context).showSnackBar(
-        //     const SnackBar(content: Text('Patrol started successfully')),
-        //   );
-        // }
+        print('ini debug state patroli paling atas $state');
+        if (state is PatrolError) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: ${state.message}')),
+          );
+        }
       },
       child: Scaffold(
         appBar: AppBar(
@@ -343,53 +706,74 @@ class _MapScreenState extends State<MapScreen> {
               top: 16,
               left: 16,
               right: 16,
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Vehicle: ${widget.task.vehicleId}',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      8.height,
-                      Text('Status: ${widget.task.status}'),
-                    ],
+              child: Container(
+                decoration: BoxDecoration(
+                  color: kbpBlue300,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: kbpBlue500,
+                    width: 3,
                   ),
                 ),
-              ),
-            ),
-            if (context.watch<PatrolBloc>().state is PatrolLoaded &&
-                (context.watch<PatrolBloc>().state as PatrolLoaded)
-                    .isPatrolling)
-              Positioned(
-                top: 100,
-                left: 16,
-                right: 16,
-                child: Card(
-                  color: Colors.white.withOpacity(0.9),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Row(
                       children: [
-                        Text(
-                          'Patrol Time: ${_formatDuration(_elapsedTime)}',
-                          style: Theme.of(context).textTheme.titleMedium,
+                        SvgPicture.asset(
+                          'assets/icons/officer.svg',
+                          width: 50,
+                          height: 50,
                         ),
-                        8.height,
-                        Text(
-                          'Distance: ${(_totalDistance / 1000).toStringAsFixed(2)} km',
-                          style: Theme.of(context).textTheme.titleMedium,
+                        8.width,
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            rowInfo(
+                                widget.task.vehicleId, widget.task.vehicleId),
+                            4.height,
+                            rowInfo(widget.task.officerName, null),
+                          ],
                         ),
                       ],
                     ),
-                  ),
+                    8.height,
+                    if (context.watch<PatrolBloc>().state is PatrolLoaded &&
+                        (context.watch<PatrolBloc>().state as PatrolLoaded)
+                            .isPatrolling)
+                      Card(
+                        color: Colors.white.withOpacity(0.9),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              SvgPicture.asset(
+                                'assets/icons/stopwatch.svg',
+                                width: 50,
+                                height: 50,
+                              ),
+                              8.width,
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  rowInfo(_formatDuration(_elapsedTime), null),
+                                  8.height,
+                                  rowInfo(
+                                      '${(_totalDistance / 1000).toStringAsFixed(2)} km',
+                                      null),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
+            ),
+
             // Start/Stop button
             Positioned(
               bottom: 16,
@@ -397,143 +781,93 @@ class _MapScreenState extends State<MapScreen> {
               right: 16,
               child: BlocConsumer<PatrolBloc, PatrolState>(
                 listener: (context, state) {
-                  print('Button state changed: $state'); // Debug print
+                  print('ini debug state patroli bawah$state');
                   if (state is PatrolError) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Error: ${state.message}')),
                     );
+                    print('ini debug error mulai patroli ${state.message}');
                   }
                 },
                 builder: (context, state) {
-                  print('Building button with state: $state'); // Debug print
-
-                  return ElevatedButton(
-                    onPressed: () async {
-                      print('Button pressed with state: $state'); // Debug print
-                      if (state is PatrolLoaded) {
-                        // Update the button's onPressed handler for stop patrol
-                        if (state.isPatrolling) {
-                          final endTime = DateTime.now();
-
-                          print(
-                              'Current state task: ${state.task}'); // Debug print
-                          print(
-                              'Current route path: ${state.task?.routePath}'); // Debug print
-
-                          // Get route path from current state
-                          List<List<double>> convertedPath = [];
-                          try {
-                            if (state.task?.routePath != null &&
-                                state.task!.routePath is Map) {
-                              final map = state.task!.routePath as Map;
-                              print(
-                                  'Original route_path map: $map'); // Debug log
-
-                              // Sort entries by timestamp
-                              final sortedEntries = map.entries.toList()
-                                ..sort((a, b) => (a.value['timestamp']
-                                        as String)
-                                    .compareTo(b.value['timestamp'] as String));
-
-                              print(
-                                  'Sorted entries count: ${sortedEntries.length}'); // Debug log
-
-                              // Convert coordinates - FIXED order
-                              convertedPath = sortedEntries.map((entry) {
-                                final coordinates =
-                                    entry.value['coordinates'] as List;
-                                print(
-                                    'Processing coordinates: $coordinates'); // Debug log
-                                return [
-                                  (coordinates[0] as num)
-                                      .toDouble(), // latitude comes first
-                                  (coordinates[1] as num)
-                                      .toDouble(), // longitude comes second
-                                ];
-                              }).toList();
-
-                              print(
-                                  'First point in path: ${convertedPath.first}'); // Debug log
-                              print(
-                                  'Last point in path: ${convertedPath.last}'); // Debug log
-                            }
-                          } catch (e) {
-                            print('Error converting route path: $e');
-                          }
-
-                          // First stop patrol to update state
-                          context
-                              .read<PatrolBloc>()
-                              .add(StopPatrol(endTime: endTime));
-
-                          // Wait briefly for state to update
-                          await Future.delayed(
-                              const Duration(milliseconds: 100));
-
-                          // Then navigate to summary with the converted path
-                          if (mounted) {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => PatrolSummaryScreen(
-                                  task: widget.task,
-                                  routePath: convertedPath,
-                                  startTime:
-                                      state.task?.startTime ?? DateTime.now(),
-                                  endTime: endTime,
+                  return Row(
+                    mainAxisAlignment:
+                        state is PatrolLoaded && state.isPatrolling == true
+                            ? MainAxisAlignment.spaceBetween
+                            : MainAxisAlignment.center,
+                    children: [
+                      if (state is PatrolLoaded && state.isPatrolling == true)
+                        IconButton(
+                          icon: const Icon(Icons.report),
+                          onPressed: () {
+                            _showReportDialog(context);
+                          },
+                        ),
+                      GestureDetector(
+                        onLongPressStart: (_) {
+                          print('debug tekan lama mulai patroli');
+                          _startLongPressAnimation(context, state);
+                        },
+                        onLongPressEnd: (_) {
+                          _resetLongPressAnimation();
+                        },
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // Background circle with animation
+                            TweenAnimationBuilder<double>(
+                              tween: Tween<double>(
+                                begin: 0.0,
+                                end: _longPressProgress,
+                              ),
+                              duration: const Duration(milliseconds: 50),
+                              builder: (context, value, child) {
+                                return SizedBox(
+                                  width: 80,
+                                  height: 80,
+                                  child: CircularProgressIndicator(
+                                    value: value,
+                                    strokeWidth: 6.0,
+                                    color: state is PatrolLoaded &&
+                                            state.isPatrolling
+                                        ? dangerR300
+                                        : successG300,
+                                  ),
+                                );
+                              },
+                            ),
+                            // Icon button
+                            Container(
+                              width: 70,
+                              height: 70,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color:
+                                    state is PatrolLoaded && state.isPatrolling
+                                        ? dangerR300
+                                        : successG300,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Icon(
+                                  state is PatrolLoaded && state.isPatrolling
+                                      ? Icons.stop
+                                      : Icons.play_arrow,
+                                  color: Colors.white,
+                                  size: 32,
                                 ),
                               ),
-                            );
-                          }
-                        } else {
-                          // Ensure we're updating task status before starting patrol
-                          context.read<PatrolBloc>().add(UpdateTask(
-                                taskId: widget.task.taskId,
-                                updates: {
-                                  'status': 'ongoing',
-                                  'startTime': DateTime.now().toIso8601String(),
-                                },
-                              ));
-
-                          context.read<PatrolBloc>().add(
-                                StartPatrol(
-                                  task: widget.task,
-                                  startTime: DateTime.now(),
-                                ),
-                              );
-
-                          _startPatrolTimer(); // Start timer when patrol starts
-                          // _startLocationTracking();
-                          _elapsedTime = Duration.zero; // Reset timer
-                          _totalDistance = 0; // Reset distance
-                          _lastPosition = null;
-
-                          // Then start patrol
-                          widget.onStart();
-                        }
-                      } else {
-                        // If state isn't loaded yet, try loading it first
-                        context.read<PatrolBloc>().add(LoadRouteData(
-                              userId: widget.task.userId,
-                            ));
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                            ),
+                          ],
+                        ),
                       ),
-                      backgroundColor:
-                          state is PatrolLoaded && state.isPatrolling
-                              ? dangerR300
-                              : successG300,
-                    ),
-                    child: Text(
-                      state is PatrolLoaded && state.isPatrolling
-                          ? 'Stop Patrol'
-                          : 'Start Patrol',
-                      style: const TextStyle(fontSize: 16, color: Colors.white),
-                    ),
+                    ],
                   );
                 },
               ),
