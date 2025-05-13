@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:livetrackingapp/presentation/admin/admin_dashboard_screen.dart';
-import 'package:livetrackingapp/presentation/auth/bloc/auth_bloc.dart';
-import 'package:livetrackingapp/presentation/auth/profile_screen.dart';
-import '../../home_screen.dart';
+import 'package:livetrackingapp/presentation/component/customNavBar.dart';
+
+import 'home_screen.dart';
+import 'presentation/admin/admin_dashboard_screen.dart';
+import 'presentation/auth/profile_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
-  const MainNavigationScreen({Key? key}) : super(key: key);
+  final String userRole; // Tambahkan parameter untuk role pengguna
+
+  const MainNavigationScreen({
+    Key? key,
+    required this.userRole, // Role pengguna harus diberikan
+  }) : super(key: key);
 
   @override
   State<MainNavigationScreen> createState() => _MainNavigationScreenState();
@@ -15,54 +20,55 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _selectedIndex = 0;
 
+  late final List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Tentukan halaman berdasarkan role pengguna
+    _pages = [
+      const HomeScreen(),
+      if (widget.userRole == 'Admin')
+        const AdminDashboardScreen(), // Tampilkan hanya jika role adalah Admin
+      const ProfileScreen(),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<AuthBloc, AuthState>(
-      builder: (context, state) {
-        if (state is! AuthAuthenticated) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final isAdmin = state.user.role == 'Admin';
-        final pages = [
-          const HomeScreen(),
-          if (isAdmin) const AdminDashboardScreen(),
-          const ProfileScreen(),
-        ];
-
-        return Scaffold(
-          body: IndexedStack(
-            index: _selectedIndex,
-            children: pages,
+    return Scaffold(
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: _pages,
+      ),
+      bottomNavigationBar: CustomNavBar(
+        items: [
+          const NavBarItem(
+            activeIcon: Icons.home,
+            inactiveIcon: Icons.home_outlined,
+            label: 'Home',
           ),
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: _selectedIndex,
-            onDestinationSelected: (index) {
-              setState(() {
-                _selectedIndex = index;
-              });
-            },
-            destinations: [
-              const NavigationDestination(
-                icon: Icon(Icons.home_outlined),
-                selectedIcon: Icon(Icons.home),
-                label: 'Patrol',
-              ),
-              if (isAdmin)
-                const NavigationDestination(
-                  icon: Icon(Icons.admin_panel_settings_outlined),
-                  selectedIcon: Icon(Icons.admin_panel_settings),
-                  label: 'Admin',
-                ),
-              const NavigationDestination(
-                icon: Icon(Icons.person_outline),
-                selectedIcon: Icon(Icons.person),
-                label: 'Profile',
-              ),
-            ],
+          if (widget.userRole ==
+              'Admin') // Tampilkan hanya jika role adalah Admin
+            const NavBarItem(
+              activeIcon: Icons.dashboard,
+              inactiveIcon: Icons.dashboard_outlined,
+              label: 'Admin',
+            ),
+          const NavBarItem(
+            activeIcon: Icons.person,
+            inactiveIcon: Icons.person_outline,
+            label: 'Profile',
           ),
-        );
-      },
+        ],
+        initialIndex: _selectedIndex,
+        onItemSelected: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+      ),
     );
   }
 }

@@ -14,12 +14,6 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
-  void initState() {
-    super.initState();
-    context.read<AdminBloc>().add(LoadAllTasks());
-  }
-
-  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -52,7 +46,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             );
           }
 
-          return const Center(child: Text('No data available'));
+          return Center(child: Text('No data available $state'));
         },
       ),
       floatingActionButton: FloatingActionButton(

@@ -58,15 +58,18 @@ class PatrolTask {
 
   Future<void> fetchOfficerName(DatabaseReference database) async {
     try {
-      if (userId == null) return;
+      print('Fetching officer name for userId: $userId');
+      if (userId.isEmpty) return;
 
-      final snapshot = await database.child('users').child(userId!).get();
+      final snapshot = await database.child('users').child(userId).get();
 
       if (snapshot.exists) {
         final userData = Map<String, dynamic>.from(snapshot.value as Map);
         _officerName = userData['name'] as String? ?? 'Unknown';
+        print('Officer name loaded: $_officerName');
       } else {
         _officerName = 'Unknown Officer';
+        print('Officer not found in database');
       }
     } catch (e) {
       print('Error fetching officer name: $e');

@@ -199,7 +199,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       emit(PatrolLoaded(
         task: currentTask,
         finishedTasks: finishedTasks,
-        isPatrolling: currentTask?.status == 'in_progress',
+        isPatrolling: currentTask?.status ==
+            'ongoing', // Changed from 'in_progress' to 'ongoing'
       ));
     } catch (e) {
       print('Error in _onLoadPatrolHistory: $e'); // Debug print
@@ -230,12 +231,14 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         final currentState = state as PatrolLoaded;
         emit(currentState.copyWith(
           task: event.task,
-          isPatrolling: event.task?.status == 'in_progress',
+          isPatrolling: event.task?.status ==
+              'ongoing', // Changed from 'in_progress' to 'ongoing'
         ));
       } else {
         emit(PatrolLoaded(
           task: event.task,
-          isPatrolling: event.task?.status == 'in_progress',
+          isPatrolling: event.task?.status ==
+              'ongoing', // Changed from 'in_progress' to 'ongoing'
           finishedTasks: const [], // Initialize empty list
         ));
       }
@@ -301,9 +304,15 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         },
       );
 
-      // Then emit new state with isPatrolling = true
+      // Create updated task object with the new status
+      final updatedTask = event.task.copyWith(
+        status: 'ongoing',
+        startTime: event.startTime,
+      );
+
+      // Then emit new state with isPatrolling = true and the updated task
       emit(PatrolLoaded(
-        task: event.task,
+        task: updatedTask,
         isPatrolling: true,
         startTime: event.startTime,
       ));

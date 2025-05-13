@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:livetrackingapp/map_screen.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
@@ -34,7 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _checkOngoingPatrol();
+    // _checkOngoingPatrol();
     _startTaskStream();
     _loadPatrolHistory();
   }
@@ -261,29 +262,29 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _checkOngoingPatrol() {
-    final authState = context.read<AuthBloc>().state;
-    if (authState is AuthAuthenticated) {
-      print('Checking for ongoing patrol...');
-      context.read<PatrolBloc>().add(
-            CheckOngoingPatrol(userId: authState.user.id),
-          );
-    }
-  }
+//   void _checkOngoingPatrol() {
+//     final authState = context.read<AuthBloc>().state;
+//     if (authState is AuthAuthenticated) {
+//       print('Checking for ongoing patrol...');
+//       context.read<PatrolBloc>().add(
+//             CheckOngoingPatrol(userId: authState.user.id),
+//           );
+//     }
+//   }
 
-// Add handler for ongoing patrol
-  void _handleOngoingPatrol(PatrolTask task) {
-    print('Resuming ongoing patrol: ${task.taskId}');
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MapScreen(
-          task: task,
-          onStart: () {}, // Empty because patrol is already started
-        ),
-      ),
-    );
-  }
+// // Add handler for ongoing patrol
+//   void _handleOngoingPatrol(PatrolTask task) {
+//     print('Resuming ongoing patrol: ${task.taskId}');
+//     Navigator.pushReplacement(
+//       context,
+//       MaterialPageRoute(
+//         builder: (_) => MapScreen(
+//           task: task,
+//           onStart: () {},
+//         ),
+//       ),
+//     );
+//   }
 
   @override
   void dispose() {
@@ -295,9 +296,13 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return BlocListener<PatrolBloc, PatrolState>(
       listener: (context, state) {
-        if (state is PatrolLoaded && state.isPatrolling && state.task != null) {
-          _handleOngoingPatrol(state.task!);
-        }
+        // if (state is PatrolLoaded && state.isPatrolling) {
+        //   if (state.task != null) {
+        //     _handleOngoingPatrol(state.task!);
+        //   } else {
+        //     print('No ongoing task found');
+        //   }
+        // }
       },
       child: Scaffold(
         appBar: AppBar(
@@ -352,7 +357,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Vehicle: ${state.task!.vehicleId}'),
+                        rowInfo(state.task!.vehicleId, state.task!.vehicleId),
                         Text('Status: ${state.task!.status}'),
                       ],
                     ),

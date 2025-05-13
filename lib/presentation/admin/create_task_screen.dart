@@ -56,10 +56,11 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                         onMapTap: _handleMapTap,
                       ),
                       Positioned(
-                        top: 16,
+                        top: 50,
                         left: 16,
                         child: leadingButton(context, "Back", () {
                           Navigator.pop(context);
+                          context.read<AdminBloc>().add(LoadAllTasks());
                         }),
                       ),
                     ],
@@ -193,7 +194,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
                 // Create Task Button
                 SizedBox(
-                  height: 56,
+                  height: 50,
                   child: ElevatedButton(
                     onPressed: _submitForm,
                     style: ElevatedButton.styleFrom(
