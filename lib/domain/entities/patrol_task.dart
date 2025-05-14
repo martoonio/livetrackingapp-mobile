@@ -7,6 +7,7 @@ class PatrolTask {
   final String status;
   final DateTime? startTime;
   final DateTime? endTime;
+  final double? distance;
   final List<List<double>>? assignedRoute;
   final DateTime createdAt;
   final Map<String, dynamic>? routePath;
@@ -22,6 +23,7 @@ class PatrolTask {
     required this.status,
     this.startTime,
     this.endTime,
+    this.distance,
     this.assignedRoute,
     required this.createdAt,
     this.routePath,
@@ -49,6 +51,9 @@ class PatrolTask {
                   .map((coord) => (coord as num).toDouble())
                   .toList())
               .toList()
+          : null,
+      distance: json['distance'] != null
+          ? (json['distance'] as num).toDouble()
           : null,
       createdAt: DateTime.parse(json['createdAt'] as String),
       routePath: json['route_path'] as Map<String, dynamic>?,
@@ -84,6 +89,7 @@ class PatrolTask {
     String? status,
     DateTime? startTime,
     DateTime? endTime,
+    double? distance,
     List<List<double>>? assignedRoute,
     DateTime? createdAt,
     Map<String, dynamic>? routePath,
@@ -97,6 +103,7 @@ class PatrolTask {
       status: status ?? this.status,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
+      distance: distance ?? this.distance,
       assignedRoute: assignedRoute ?? this.assignedRoute,
       createdAt: createdAt ?? this.createdAt,
       routePath: routePath ?? this.routePath,

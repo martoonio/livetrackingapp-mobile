@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../../domain/entities/patrol_task.dart';
 import '../../domain/repositories/route_repository.dart';
-import '../source/mapbox_service.dart';
 import '../../domain/entities/user.dart' as UserModel;
 
 class RouteRepositoryImpl implements RouteRepository {
@@ -20,7 +19,7 @@ class RouteRepositoryImpl implements RouteRepository {
 
   @override
   Future<PatrolTask?> getCurrentTask(String userId) async {
-    await _checkAuth();
+    // await _checkAuth();
     final snapshot = await _database
         .child('tasks')
         .orderByChild('userId')
@@ -248,6 +247,9 @@ class RouteRepositoryImpl implements RouteRepository {
                 .toList()
             : null,
         status: data['status']?.toString() ?? 'active',
+        distance: data['distance'] != null
+            ? (data['distance'] as num).toDouble()
+            : null,
         routePath: data['route_path'] != null
             ? Map<String, dynamic>.from(data['route_path'] as Map)
             : null,

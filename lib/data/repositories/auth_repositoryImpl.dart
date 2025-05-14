@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:livetrackingapp/notification_utils.dart';
 import '../../domain/entities/user.dart';
 import '../../domain/repositories/auth_repository.dart';
 
@@ -29,26 +30,33 @@ class AuthRepositoryImpl implements AuthRepository {
       }
 
       // Check if user profile exists
-      final snapshot = await _database.child('users').child(credential.user!.uid).get();
-      
+      final snapshot =
+          await _database.child('users').child(credential.user!.uid).get();
+
+      User user;
       if (!snapshot.exists) {
         // Return basic user info if profile doesn't exist
-        return User(
+        user = User(
           id: credential.user!.uid,
           email: credential.user!.email!,
           name: '',
           role: '',
         );
+      } else {
+        // Convert and return full user profile
+        final userData = Map<String, dynamic>.from(snapshot.value as Map);
+        user = User(
+          id: credential.user!.uid,
+          email: credential.user!.email!,
+          name: userData['name'] as String? ?? '',
+          role: userData['role'] as String? ?? '',
+        );
       }
 
-      // Convert and return full user profile
-      final userData = Map<String, dynamic>.from(snapshot.value as Map);
-      return User(
-        id: credential.user!.uid,
-        email: credential.user!.email!,
-        name: userData['name'] as String? ?? '',
-        role: userData['role'] as String? ?? '',
-      );
+      // Execute getFirebaseMessagingToken to save push token
+      await getFirebaseMessagingToken(user);
+
+      return user;
     } catch (e) {
       print('Login error in repository: $e');
       throw Exception('Login failed: ${e.toString()}');
@@ -97,7 +105,8 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<void> updateUserProfile(String userId, String name, String role) async {
+  Future<void> updateUserProfile(
+      String userId, String name, String role) async {
     try {
       await _database.child('users').child(userId).update({
         'name': name,
@@ -127,7 +136,8 @@ class AuthRepositoryImpl implements AuthRepository {
       final currentUser = _firebaseAuth.currentUser;
       if (currentUser == null) return null;
 
-      final snapshot = await _database.child('users').child(currentUser.uid).get();
+      final snapshot =
+          await _database.child('users').child(currentUser.uid).get();
 
       if (!snapshot.exists) {
         return User(

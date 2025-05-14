@@ -6,11 +6,13 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:livetrackingapp/data/repositories/report_repositoryImpl.dart';
 import 'package:livetrackingapp/domain/repositories/report_repository.dart';
 import 'package:livetrackingapp/domain/usecases/report_usecase.dart';
 import 'package:livetrackingapp/firebase_options.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
+import 'package:livetrackingapp/notification_utils.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/auth/login_screen.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
@@ -82,6 +84,8 @@ Future<void> initializeApp() async {
   // Wait for auth state to be determined
   await Future.delayed(const Duration(seconds: 1));
 
+  await initializeDateFormatting('id_ID', null);
+
   if (FirebaseAuth.instance.currentUser != null) {
     try {
       // Enable persistence only after authentication
@@ -125,6 +129,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await initializeApp();
+  await initNotification();
   setupLocator();
 
   final userRole = await getUserRole();

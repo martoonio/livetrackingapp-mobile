@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_svg/flutter_svg.dart';
+import 'package:flutter_svg/svg.dart';
 import 'package:livetrackingapp/map_screen.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
@@ -9,6 +9,7 @@ import '../../domain/entities/patrol_task.dart';
 import 'presentation/auth/bloc/auth_bloc.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'presentation/task/task_dialog.dart';
+import 'package:intl/intl.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,7 +20,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _taskSubscription;
-  StreamSubscription? _historySubscription;
 
   // Add this method to fetch patrol history
   void _loadPatrolHistory() {
@@ -44,11 +44,8 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Patrol History',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        16.height,
+        Text('Riwayat Patroli', style: boldTextStyle(size: 20)),
+        8.height,
         BlocBuilder<PatrolBloc, PatrolState>(
           builder: (context, state) {
             print('Building history with state: $state'); // Debug print
@@ -64,18 +61,47 @@ class _HomeScreenState extends State<HomeScreen> {
 
             if (state is PatrolLoaded) {
               if (state.finishedTasks.isEmpty) {
-                return const Card(
-                  child: ListTile(
-                    title: Text('No patrol history'),
-                    subtitle: Text('Completed patrols will appear here'),
+                return Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    // height: MediaQuery.of(context).size.height * 0.2,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: neutral500, width: 3),
+                      color: neutral300,
+                    ),
+                    child: Column(
+                      children: [
+                        SvgPicture.asset(
+                          'assets/nodata.svg',
+                          height: 150,
+                          width: 150,
+                        ),
+                        Text(
+                          'Tidak ada riwayat patroli',
+                          style: boldTextStyle(
+                            size: 16,
+                            color: neutral900,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               }
 
               return Container(
-                height: 300,
-                child: ListView.builder(
+                height: MediaQuery.of(context).size.height * 0.6,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey),
+                  color: Colors.white,
+                ),
+                padding: const EdgeInsets.all(8),
+                child: ListView.separated(
                   itemCount: state.finishedTasks.length,
+                  separatorBuilder: (context, index) => 4.height,
                   itemBuilder: (context, index) {
                     final task = state.finishedTasks[index];
                     final duration =
@@ -83,17 +109,29 @@ class _HomeScreenState extends State<HomeScreen> {
                             ? task.endTime!.difference(task.startTime!)
                             : Duration.zero;
 
-                    return Card(
+                    return Container(
                       margin: const EdgeInsets.symmetric(
                           vertical: 4, horizontal: 0),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.white,
+                        border: Border.all(
+                          color: Colors.grey,
+                          width: 1,
+                        ),
+                      ),
                       child: ListTile(
-                        title: Text('Task: ${task.taskId}'),
+                        title: rowInfo(
+                            formatDateFromString(task.createdAt.toString()),
+                            null),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Vehicle: ${task.vehicleId}'),
-                            Text('Date: ${_formatDate(task.startTime)}'),
-                            Text('Duration: ${_formatDuration(duration)}'),
+                            rowInfo(task.vehicleId, task.vehicleId),
+                            Text(
+                                '${formatTimeFromString(task.startTime.toString())} - ${task.endTime != null ? formatTimeFromString(task.endTime.toString()) : 'N/A'}'),
+                            Text(
+                                '${_formatDuration(duration)} ${(task.distance! / 1000).toStringAsFixed(2)} km'),
                           ],
                         ),
                         trailing: IconButton(
@@ -125,15 +163,30 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 // Add helper methods for formatting
-  String _formatDate(DateTime? date) {
-    if (date == null) return 'N/A';
-    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute}';
+  String formatDateFromString(String isoString) {
+    final date = DateTime.parse(isoString);
+    return DateFormat('d MMM yyyy', 'id_ID')
+        .format(date); // Output: 13 May 2025
+  }
+
+  String formatTimeFromString(String isoString) {
+    final date = DateTime.parse(isoString);
+    return DateFormat('HH:mm').format(date); // Output: 11:42
   }
 
   String _formatDuration(Duration duration) {
     final hours = duration.inHours;
     final minutes = duration.inMinutes % 60;
-    return '${hours}h ${minutes}m';
+    if (hours == 0 && minutes == 0) {
+      return '0 Menit';
+    }
+    if (hours == 0) {
+      return '${minutes} Menit';
+    }
+    if (minutes == 0) {
+      return '${hours} Jam';
+    }
+    return '${hours} Jam ${minutes} Menit';
   }
 
 // Add method to show patrol summary
@@ -185,6 +238,7 @@ class _HomeScreenState extends State<HomeScreen> {
             routePath: convertedPath,
             startTime: task.startTime ?? DateTime.now(),
             endTime: task.endTime ?? DateTime.now(),
+            distance: task.distance ?? 0,
           ),
         ),
       );
@@ -213,8 +267,9 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       },
       onError: (error) {
-        print('Task stream error: $error');
-        _showErrorSnackBar('Failed to load task: $error');
+        // stop the stream if there's an error
+        _taskSubscription?.cancel();
+        _taskSubscription = null;
       },
     );
   }
@@ -306,11 +361,18 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Patrol Dashboard'),
+          title: Text(
+            'Patrol Dashboard',
+            style: boldTextStyle(size: 20, color: Colors.white),
+          ),
+          backgroundColor: kbpBlue900,
           automaticallyImplyLeading: false,
           actions: [
             IconButton(
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(
+                Icons.refresh,
+                color: neutralWhite,
+              ),
               onPressed: _startTaskStream,
             ),
           ],
@@ -324,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildUpcomingPatrols(),
-                32.height,
+                16.height,
                 _buildPatrolHistory(),
               ],
             ),
@@ -339,10 +401,10 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Upcoming Patrols',
-          style: Theme.of(context).textTheme.titleLarge,
+          'Patroli Mendatang',
+          style: boldTextStyle(size: 20),
         ),
-        16.height,
+        8.height,
         BlocBuilder<PatrolBloc, PatrolState>(
           builder: (context, state) {
             if (state is PatrolLoading) {
@@ -351,29 +413,98 @@ class _HomeScreenState extends State<HomeScreen> {
 
             if (state is PatrolLoaded) {
               if (state.task != null) {
-                return Card(
-                  child: ListTile(
-                    title: Text('Task: ${state.task!.taskId}'),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        rowInfo(state.task!.vehicleId, state.task!.vehicleId),
-                        Text('Status: ${state.task!.status}'),
-                      ],
+                return Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: kbpBlue900,
+                      width: 3,
                     ),
-                    trailing: ElevatedButton(
-                      onPressed: () => _showTaskDialog(state.task!),
-                      child: const Text('View Details'),
-                    ),
+                    color: neutralWhite,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          rowInfo(state.task!.vehicleId, state.task!.vehicleId),
+                          rowInfo(
+                              formatDateFromString(
+                                  state.task!.createdAt.toString()),
+                              null),
+                        ],
+                      ),
+                      rowInfo(
+                          "${state.task!.assignedRoute!.length.toString()} Titik",
+                          "pin"),
+                      8.height,
+                      ElevatedButton(
+                        onPressed: () => _showTaskDialog(state.task!),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kbpBlue900,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Lihat Detail',
+                                style: semiBoldTextStyle(
+                                  size: 14,
+                                  color: neutralWhite,
+                                ),
+                              ),
+                              4.width,
+                              SvgPicture.asset(
+                                'assets/map.svg',
+                                height: 16,
+                                width: 16,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 );
               }
             }
 
-            return const Card(
-              child: ListTile(
-                title: Text('No upcoming patrols'),
-                subtitle: Text('No active tasks available'),
+            return Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: neutral500,
+                  width: 3,
+                ),
+                color: neutral300,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SvgPicture.asset(
+                    'assets/state/noTask.svg',
+                    height: 60,
+                    width: 60,
+                  ),
+                  4.height,
+                  Text(
+                    'Belum ada tugas patroli\nyang dijadwalkan',
+                    textAlign: TextAlign.center,
+                    style: regularTextStyle(),
+                  ),
+                ],
               ),
             );
           },

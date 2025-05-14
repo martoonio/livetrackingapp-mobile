@@ -100,6 +100,16 @@ class _MapScreenState extends State<MapScreen> {
         newPosition.longitude,
       );
       _totalDistance += distanceInMeters;
+
+      // Simpan totalDistance ke backend
+      final state = context.read<PatrolBloc>().state;
+      if (state is PatrolLoaded && state.task != null) {
+        context.read<PatrolBloc>().add(UpdateTask(
+              taskId: state.task!.taskId,
+              updates: {'distance': _totalDistance},
+            ));
+      }
+
       print('Distance updated: $_totalDistance meters');
     } else {
       print(
@@ -113,12 +123,19 @@ class _MapScreenState extends State<MapScreen> {
     super.initState();
     currentState = context.read<PatrolBloc>().state;
 
-    // Check if this is a resumed patrol
-    if (currentState is PatrolLoaded &&
-        currentState.isPatrolling &&
-        currentState.task?.startTime != null) {
-      print('Resuming patrol tracking...');
-      _resumePatrolTracking(currentState.task!.startTime!);
+    if (currentState is PatrolLoaded) {
+      final patrolState = currentState as PatrolLoaded;
+
+      // Pulihkan totalDistance dari state
+      if (patrolState.distance != null) {
+        _totalDistance = patrolState.distance!;
+      }
+
+      // Check if this is a resumed patrol
+      if (patrolState.isPatrolling && patrolState.task?.startTime != null) {
+        print('Resuming patrol tracking...');
+        _resumePatrolTracking(patrolState.task!.startTime!);
+      }
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -394,7 +411,9 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     // Stop patrol
-    context.read<PatrolBloc>().add(StopPatrol(endTime: endTime));
+    context
+        .read<PatrolBloc>()
+        .add(StopPatrol(endTime: endTime, distance: _totalDistance));
 
     // Wait briefly for state to update
     await Future.delayed(const Duration(milliseconds: 100));
@@ -409,6 +428,7 @@ class _MapScreenState extends State<MapScreen> {
             routePath: convertedPath,
             startTime: state.task?.startTime ?? DateTime.now(),
             endTime: endTime,
+            distance: _totalDistance,
           ),
         ),
       );

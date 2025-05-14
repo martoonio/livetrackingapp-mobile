@@ -51,6 +51,7 @@ android {
     ndkVersion = "26.1.10909125"
 
     compileOptions {
+        coreLibraryDesugaringEnabled true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -100,4 +101,5 @@ flutter {
 dependencies {
     implementation 'com.google.android.gms:play-services-location:21.3.0'
     implementation 'androidx.core:core:1.15.0'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
 }

@@ -47,7 +47,7 @@ TextStyle boldTextStyle({
     fontSize: size != null ? size.toDouble() : paragrafXL,
     color: color ?? neutral900,
     fontWeight: weight ?? FontWeight.w700,
-    fontFamily: fontFamily ?? 'Inter',
+    fontFamily: fontFamily ?? 'Plus Jakarta Sans',
     letterSpacing: calculateLetterSpacing(size != null ? size.toDouble() : paragrafXL, -0.03),
   );
 }
@@ -63,7 +63,7 @@ TextStyle semiBoldTextStyle({
     fontSize: size != null ? size.toDouble() : h6,
     color: color ?? neutral900,
     fontWeight: weight ?? FontWeight.w600,
-    fontFamily: fontFamily ?? 'Inter',
+    fontFamily: fontFamily ?? 'Plus Jakarta Sans',
     letterSpacing: calculateLetterSpacing(size != null ? size.toDouble() : h6, -0.03),
   );
 }
@@ -79,7 +79,7 @@ TextStyle mediumTextStyle({
     fontSize: size != null ? size.toDouble() : paragrafXL,
     color: color ?? neutral900,
     fontWeight: weight ?? FontWeight.w500,
-    fontFamily: fontFamily ?? 'Inter',
+    fontFamily: fontFamily ?? 'Plus Jakarta Sans',
     letterSpacing: calculateLetterSpacing(size != null ? size.toDouble() : paragrafXL, -0.03),
   );
 }
@@ -95,7 +95,7 @@ TextStyle regularTextStyle({
     fontSize: size != null ? size.toDouble() : paragrafLG,
     color: color ?? neutral900,
     fontWeight: weight ?? FontWeight.w400,
-    fontFamily: fontFamily ?? 'Inter',
+    fontFamily: fontFamily ?? 'Plus Jakarta Sans',
     letterSpacing: calculateLetterSpacing(size != null ? size.toDouble() : paragrafLG, -0.03),
   );
 }

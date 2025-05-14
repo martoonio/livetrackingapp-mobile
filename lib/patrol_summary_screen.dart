@@ -12,14 +12,16 @@ class PatrolSummaryScreen extends StatefulWidget {
   final List<List<double>> routePath;
   final DateTime startTime;
   final DateTime endTime;
+  final double distance;
 
   const PatrolSummaryScreen({
-    Key? key,
+    super.key,
     required this.task,
     required this.routePath,
     required this.startTime,
     required this.endTime,
-  }) : super(key: key);
+    required this.distance,
+  });
 
   @override
   State<PatrolSummaryScreen> createState() => _PatrolSummaryScreenState();

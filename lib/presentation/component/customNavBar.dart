@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:livetrackingapp/presentation/component/utils.dart';
 
 class CustomNavBar extends StatefulWidget {
   final List<NavBarItem> items;
@@ -27,7 +28,8 @@ class _CustomNavBarState extends State<CustomNavBar> {
   void initState() {
     super.initState();
     _selectedIndex = widget.initialIndex;
-    _posX = (-1 + (_selectedIndex * (2 / (widget.items.length - 1)))).toDouble();
+    _posX =
+        (-1 + (_selectedIndex * (2 / (widget.items.length - 1)))).toDouble();
   }
 
   void _movePage(int index) {
@@ -76,8 +78,9 @@ class _CustomNavBarState extends State<CustomNavBar> {
             child: Column(
               children: [
                 AnimatedContainer(
-                  width: MediaQuery.of(context).size.width / widget.items.length -
-                      _minusWidth,
+                  width:
+                      MediaQuery.of(context).size.width / widget.items.length -
+                          _minusWidth,
                   alignment: Alignment(_posX!, -1),
                   duration: const Duration(milliseconds: 200),
                   height: 4,
@@ -86,13 +89,14 @@ class _CustomNavBarState extends State<CustomNavBar> {
                       bottomLeft: Radius.circular(4),
                       bottomRight: Radius.circular(4),
                     ),
-                    color: Colors.teal, // Warna sesuai identitas aplikasi
+                    color: kbpBlue900, // Warna sesuai identitas aplikasi
                   ),
                 ),
                 Visibility(
                   visible: _isShow,
                   child: Container(
-                    width: MediaQuery.of(context).size.width / widget.items.length -
+                    width: MediaQuery.of(context).size.width /
+                            widget.items.length -
                         _minusWidth,
                     height: 40,
                     decoration: BoxDecoration(
@@ -100,7 +104,7 @@ class _CustomNavBarState extends State<CustomNavBar> {
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Colors.teal.withOpacity(0.1),
+                          kbpBlue900.withOpacity(0.1),
                           Colors.transparent,
                         ],
                       ),
@@ -135,14 +139,14 @@ class _CustomNavBarState extends State<CustomNavBar> {
             children: [
               Icon(
                 _selectedIndex == index ? item.activeIcon : item.inactiveIcon,
-                color: _selectedIndex == index ? Colors.teal : Colors.grey,
+                color: _selectedIndex == index ? kbpBlue900 : Colors.grey,
                 size: 24,
               ),
               const SizedBox(height: 5),
               Text(
                 item.label,
                 style: TextStyle(
-                  color: _selectedIndex == index ? Colors.teal : Colors.grey,
+                  color: _selectedIndex == index ? kbpBlue900 : Colors.grey,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),

@@ -42,7 +42,8 @@ class UpdatePatrolLocation extends PatrolEvent {
 
 class StopPatrol extends PatrolEvent {
   final DateTime endTime;
-  StopPatrol({required this.endTime});
+  final double distance;
+  StopPatrol({required this.endTime, required this.distance});
 }
 
 class LoadPatrolHistory extends PatrolEvent {
@@ -82,6 +83,7 @@ class PatrolLoaded extends PatrolState {
   // add startTime and endTime
   final DateTime? startTime;
   final DateTime? endTime;
+  final double? distance;
   final Map<String, dynamic>? routePath; // Add this
   final List<PatrolTask> finishedTasks;
 
@@ -91,17 +93,26 @@ class PatrolLoaded extends PatrolState {
     this.currentPatrolPath,
     this.startTime,
     this.endTime,
+    this.distance,
     this.routePath, // Add this
     this.finishedTasks = const [],
   });
 
   @override
-  List<Object?> get props =>
-      [task, isPatrolling, startTime, endTime, currentPatrolPath, routePath, finishedTasks];
+  List<Object?> get props => [
+        task,
+        isPatrolling,
+        startTime,
+        endTime,
+        currentPatrolPath,
+        routePath,
+        finishedTasks
+      ];
 
   PatrolLoaded copyWith({
     PatrolTask? task,
     bool? isPatrolling,
+    double? distance,
     List<Position>? currentPatrolPath,
     Map<String, dynamic>? routePath, // Add this
     List<PatrolTask>? finishedTasks,
@@ -110,6 +121,7 @@ class PatrolLoaded extends PatrolState {
       task: task ?? this.task,
       isPatrolling: isPatrolling ?? this.isPatrolling,
       currentPatrolPath: currentPatrolPath ?? this.currentPatrolPath,
+      distance: distance ?? this.distance,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       routePath: routePath ?? this.routePath, // Add this
@@ -199,6 +211,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       emit(PatrolLoaded(
         task: currentTask,
         finishedTasks: finishedTasks,
+        distance: currentTask?.distance,
         isPatrolling: currentTask?.status ==
             'ongoing', // Changed from 'in_progress' to 'ongoing'
       ));
@@ -362,55 +375,69 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
   }
 
   Future<void> _onUpdatePatrolLocation(
-    UpdatePatrolLocation event,
-    Emitter<PatrolState> emit,
-  ) async {
-    if (state is PatrolLoaded) {
-      final currentState = state as PatrolLoaded;
-      if (currentState.isPatrolling && currentState.task != null) {
-        try {
-          final coordinates = [
+  UpdatePatrolLocation event,
+  Emitter<PatrolState> emit,
+) async {
+  if (state is PatrolLoaded) {
+    final currentState = state as PatrolLoaded;
+    if (currentState.isPatrolling && currentState.task != null) {
+      try {
+        final coordinates = [
+          event.position.latitude,
+          event.position.longitude
+        ];
+
+        // Update repository first
+        await repository.updatePatrolLocation(
+          currentState.task!.taskId,
+          coordinates,
+          event.timestamp,
+        );
+
+        // Hitung jarak baru
+        double newDistance = currentState.distance ?? 0.0;
+        if (currentState.currentPatrolPath != null &&
+            currentState.currentPatrolPath!.isNotEmpty) {
+          final lastPosition = currentState.currentPatrolPath!.last;
+          newDistance += Geolocator.distanceBetween(
+            lastPosition.latitude,
+            lastPosition.longitude,
             event.position.latitude,
-            event.position.longitude
-          ];
-
-          // Update repository first
-          await repository.updatePatrolLocation(
-            currentState.task!.taskId,
-            coordinates,
-            event.timestamp,
+            event.position.longitude,
           );
-
-          // Update local state
-          final updatedRoutePath =
-              Map<String, dynamic>.from(currentState.routePath ?? {});
-          final timestampKey =
-              event.timestamp.millisecondsSinceEpoch.toString();
-
-          updatedRoutePath[timestampKey] = {
-            'coordinates': coordinates,
-            'timestamp': event.timestamp.toIso8601String(),
-          };
-
-          emit(currentState.copyWith(
-            currentPatrolPath: [
-              ...?currentState.currentPatrolPath,
-              event.position
-            ],
-            routePath: updatedRoutePath,
-            task: currentState.task?.copyWith(
-              routePath: updatedRoutePath,
-            ),
-          ));
-
-          print('Location updated successfully');
-        } catch (e) {
-          print('Error updating location: $e');
-          // Don't emit error state to prevent disrupting tracking
         }
+
+        // Update local state
+        final updatedRoutePath =
+            Map<String, dynamic>.from(currentState.routePath ?? {});
+        final timestampKey =
+            event.timestamp.millisecondsSinceEpoch.toString();
+
+        updatedRoutePath[timestampKey] = {
+          'coordinates': coordinates,
+          'timestamp': event.timestamp.toIso8601String(),
+        };
+
+        emit(currentState.copyWith(
+          currentPatrolPath: [
+            ...?currentState.currentPatrolPath,
+            event.position
+          ],
+          routePath: updatedRoutePath,
+          distance: newDistance, // Update distance
+          task: currentState.task?.copyWith(
+            routePath: updatedRoutePath,
+          ),
+        ));
+
+        print('Location updated successfully');
+      } catch (e) {
+        print('Error updating location: $e');
+        // Don't emit error state to prevent disrupting tracking
       }
     }
   }
+}
 
   Future<void> _onStopPatrol(
     StopPatrol event,
@@ -430,7 +457,10 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         // Update endTime
         await repository.updateTask(
           currentState.task!.taskId,
-          {'endTime': event.endTime.toIso8601String()},
+          {
+            'endTime': event.endTime.toIso8601String(),
+            'distance': event.distance,
+          },
         );
 
         // Cancel location tracking
