@@ -8,6 +8,7 @@ import 'package:livetrackingapp/notification_utils.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'package:livetrackingapp/presentation/component/undo_button.dart';
+import 'package:lottie/lottie.dart' as lottie;
 import '../component/dropdown_component.dart';
 import '../component/map_section.dart';
 
@@ -405,16 +406,14 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
     if (_selectedOfficerId == null) {
       setState(() {
-        _isOfficerInvalid =
-            true; // Tandai dropdown "Petugas" sebagai tidak valid
+        _isOfficerInvalid = true;
       });
       isValid = false;
     }
 
     if (_vehicleId.isEmpty) {
       setState(() {
-        _isVehicleInvalid =
-            true; // Tandai dropdown "Kendaraan" sebagai tidak valid
+        _isVehicleInvalid = true;
       });
       isValid = false;
     }
@@ -453,30 +452,33 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       return;
     }
 
-    final assignedRoute = _selectedPoints
+    // 1. Menampilkan dialog konfirmasi
+    final result = await _showConfirmationDialog();
+    if (result != true) {
+      return; // User membatalkan operasi
+    }
+
+    // 2. Menyimpan variabel yang akan digunakan
+    final String officerId = _selectedOfficerId!;
+    final String vehicleId = _vehicleId;
+    final DateTime startTime = _assignedStartTime;
+    final DateTime endTime = _assignedEndTime;
+    final List<List<double>> assignedRoute = _selectedPoints
         .map((point) => [point.latitude, point.longitude])
         .toList();
 
-    final String officerId = _selectedOfficerId!;
-
+    // 3. Mengirim event CreateTask ke AdminBloc
     context.read<AdminBloc>().add(
           CreateTask(
-            vehicleId: _vehicleId,
+            vehicleId: vehicleId,
             assignedRoute: assignedRoute,
             assignedOfficerId: officerId,
-            assignedStartTime: _assignedStartTime,
-            assignedEndTime: _assignedEndTime,
+            assignedStartTime: startTime,
+            assignedEndTime: endTime,
           ),
         );
 
-    showCustomSnackbar(
-      context: context,
-      title: 'Berhasil',
-      subtitle: 'Tugas berhasil dibuat',
-      type: SnackbarType.success,
-      entryDirection: SnackbarEntryDirection.fromTop,
-    );
-    // Reset form fields
+    // 4. Reset form fields
     setState(() {
       _selectedPoints.clear();
       _markers.clear();
@@ -486,19 +488,153 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       _isVehicleInvalid = true;
     });
 
-    print('ini debug sebelum send notification');
-
-    await sendPushNotificationToOfficer(
-      officerId: officerId,
-      title: 'Tugas Patroli Baru',
-      body:
-          'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(_assignedStartTime)}',
-      patrolTime: DateFormat('dd/MM/yyyy - HH:mm').format(_assignedStartTime),
+    // 5. Menampilkan loading dialog di tengah layar
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return Center(
+          child: lottie.LottieBuilder.asset(
+            'assets/lottie/maps_loading.json',
+            width: 200,
+            height: 100,
+            fit: BoxFit.cover,
+          ),
+        );
+      },
     );
 
-    print('ini debug setelah send notification');
+    print('ini debug sebelum send notification');
 
-    Navigator.pop(context);
+    try {
+      // 6. Mengirim notifikasi ke petugas
+      await sendPushNotificationToOfficer(
+        officerId: officerId,
+        title: 'Tugas Patroli Baru',
+        body:
+            'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(startTime)}',
+        patrolTime: DateFormat('dd/MM/yyyy - HH:mm').format(startTime),
+      );
+
+      print('ini debug setelah send notification');
+
+      // 7. Menutup dialog loading
+      Navigator.of(context).pop();
+
+      // 8. Menampilkan pesan sukses
+      showCustomSnackbar(
+        context: context,
+        title: 'Berhasil',
+        subtitle: 'Tugas berhasil dibuat dan notifikasi terkirim',
+        type: SnackbarType.success,
+        entryDirection: SnackbarEntryDirection.fromTop,
+      );
+
+      // 9. Kembali ke halaman sebelumnya
+      Navigator.pop(context);
+    } catch (e) {
+      // 10. Jika gagal, tutup dialog loading dan tampilkan pesan error
+      Navigator.of(context).pop();
+
+      showCustomSnackbar(
+        context: context,
+        title: 'Peringatan',
+        subtitle: 'Tugas berhasil dibuat tetapi gagal mengirim notifikasi',
+        type: SnackbarType.warning,
+        entryDirection: SnackbarEntryDirection.fromTop,
+      );
+
+      print('Error sending notification: $e');
+      Navigator.pop(context);
+    }
+  }
+
+// Menambahkan dialog konfirmasi
+  Future<bool?> _showConfirmationDialog() async {
+    // Cari nama officer berdasarkan ID
+    String officerName = 'Unknown Officer';
+    final state = context.read<AdminBloc>().state;
+    if (state is OfficersAndVehiclesLoaded) {
+      final officer = state.officers.firstWhere(
+        (o) => o.id == _selectedOfficerId,
+        orElse: () =>
+            User(id: '', email: '', name: 'Tidak ditemukan', role: ''),
+      );
+      officerName = officer.name;
+    }
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Konfirmasi Tugas Patroli'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Detail Tugas:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                _infoRow('Petugas', officerName),
+                _infoRow('Kendaraan', _vehicleId),
+                _infoRow(
+                    'Jumlah Titik Patroli', _selectedPoints.length.toString()),
+                _infoRow(
+                    'Mulai Patroli',
+                    DateFormat('dd/MM/yyyy - HH:mm')
+                        .format(_assignedStartTime)),
+                _infoRow('Selesai Patroli',
+                    DateFormat('dd/MM/yyyy - HH:mm').format(_assignedEndTime)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Batal'),
+              onPressed: () {
+                Navigator.of(context).pop(false);
+              },
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kbpBlue900,
+              ),
+              child: const Text('Ya, Buat Tugas',
+                  style: TextStyle(color: Colors.white)),
+              onPressed: () {
+                Navigator.of(context).pop(true);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+// Helper widget untuk menampilkan info di dialog konfirmasi
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+          ),
+          Expanded(
+            child: Text(value),
+          ),
+        ],
+      ),
+    );
   }
 
   void _handleMapTap(LatLng position) {
