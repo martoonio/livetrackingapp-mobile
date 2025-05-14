@@ -1,6 +1,7 @@
 // import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/material.dart';
 import '../../domain/entities/patrol_task.dart';
 import '../../domain/repositories/route_repository.dart';
 import '../../domain/entities/user.dart' as UserModel;
@@ -262,6 +263,12 @@ class RouteRepositoryImpl implements RouteRepository {
         endTime: data['endTime'] != null
             ? DateTime.parse(data['endTime'].toString())
             : null,
+        assignedStartTime: data['assignedStartTime'] != null
+            ? DateTime.parse(data['assignedStartTime'].toString())
+            : null,
+        assignedEndTime: data['assignedEndTime'] != null
+            ? DateTime.parse(data['assignedEndTime'].toString())
+            : null,
       );
     } catch (e) {
       print('Error converting task: $e'); // Debug print
@@ -297,6 +304,8 @@ class RouteRepositoryImpl implements RouteRepository {
     required String vehicleId,
     required List<List<double>> assignedRoute,
     required String? assignedOfficerId,
+    required DateTime? assignedStartTime,
+    required DateTime? assignedEndTime,
   }) async {
     try {
       await _checkAuth();
@@ -307,6 +316,24 @@ class RouteRepositoryImpl implements RouteRepository {
         'vehicleId': vehicleId,
         'userId': assignedOfficerId,
         'assigned_route': assignedRoute,
+        'assignedStartTime': assignedStartTime != null
+            ? DateTime(
+                DateTime.now().year,
+                DateTime.now().month,
+                DateTime.now().day,
+                assignedStartTime.hour,
+                assignedStartTime.minute,
+              ).toIso8601String()
+            : null,
+        'assignedEndTime': assignedEndTime != null
+            ? DateTime(
+                DateTime.now().year,
+                DateTime.now().month,
+                DateTime.now().day,
+                assignedEndTime.hour,
+                assignedEndTime.minute,
+              ).toIso8601String()
+            : null,
         'status': 'active',
         'createdAt': DateTime.now().toIso8601String(),
         'route_path': null,

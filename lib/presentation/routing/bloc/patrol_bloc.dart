@@ -83,6 +83,8 @@ class PatrolLoaded extends PatrolState {
   // add startTime and endTime
   final DateTime? startTime;
   final DateTime? endTime;
+  final DateTime? assignedStartTime;
+  final DateTime? assignedEndTime;
   final double? distance;
   final Map<String, dynamic>? routePath; // Add this
   final List<PatrolTask> finishedTasks;
@@ -93,6 +95,8 @@ class PatrolLoaded extends PatrolState {
     this.currentPatrolPath,
     this.startTime,
     this.endTime,
+    this.assignedStartTime,
+    this.assignedEndTime,
     this.distance,
     this.routePath, // Add this
     this.finishedTasks = const [],
@@ -104,6 +108,9 @@ class PatrolLoaded extends PatrolState {
         isPatrolling,
         startTime,
         endTime,
+        assignedStartTime,
+        assignedEndTime,
+        distance,
         currentPatrolPath,
         routePath,
         finishedTasks
@@ -113,6 +120,10 @@ class PatrolLoaded extends PatrolState {
     PatrolTask? task,
     bool? isPatrolling,
     double? distance,
+    DateTime? startTime,
+    DateTime? endTime,
+    DateTime? assignedStartTime,
+    DateTime? assignedEndTime,
     List<Position>? currentPatrolPath,
     Map<String, dynamic>? routePath, // Add this
     List<PatrolTask>? finishedTasks,
@@ -124,6 +135,8 @@ class PatrolLoaded extends PatrolState {
       distance: distance ?? this.distance,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
+      assignedStartTime: assignedStartTime ?? this.assignedStartTime,
+      assignedEndTime: assignedEndTime ?? this.assignedEndTime,
       routePath: routePath ?? this.routePath, // Add this
       finishedTasks: finishedTasks ?? this.finishedTasks,
     );

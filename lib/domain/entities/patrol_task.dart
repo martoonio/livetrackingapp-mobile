@@ -7,6 +7,8 @@ class PatrolTask {
   final String status;
   final DateTime? startTime;
   final DateTime? endTime;
+  final DateTime? assignedStartTime;
+  final DateTime? assignedEndTime;
   final double? distance;
   final List<List<double>>? assignedRoute;
   final DateTime createdAt;
@@ -23,6 +25,8 @@ class PatrolTask {
     required this.status,
     this.startTime,
     this.endTime,
+    this.assignedStartTime,
+    this.assignedEndTime,
     this.distance,
     this.assignedRoute,
     required this.createdAt,
@@ -44,6 +48,12 @@ class PatrolTask {
           : null,
       endTime: json['endTime'] != null
           ? DateTime.parse(json['endTime'] as String)
+          : null,
+      assignedStartTime: json['assigned_start_time'] != null
+          ? DateTime.parse(json['assigned_start_time'] as String)
+          : null,
+      assignedEndTime: json['assigned_end_time'] != null
+          ? DateTime.parse(json['assigned_end_time'] as String)
           : null,
       assignedRoute: json['assigned_route'] != null
           ? (json['assigned_route'] as List)

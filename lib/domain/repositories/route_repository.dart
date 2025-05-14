@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 import '../entities/patrol_task.dart';
 import '../entities/user.dart';
 
@@ -20,5 +22,7 @@ abstract class RouteRepository {
     required String vehicleId,
     required List<List<double>> assignedRoute,
     required String? assignedOfficerId,
+    required DateTime? assignedStartTime,
+    required DateTime? assignedEndTime,
   });
 }

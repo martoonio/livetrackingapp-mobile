@@ -1,11 +1,15 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/firebase_options.dart';
+import 'package:googleapis_auth/auth_io.dart';
+import 'package:http/http.dart' as http;
 
 import 'dart:developer';
 
@@ -150,5 +154,99 @@ Future<void> getFirebaseMessagingToken(User user) async {
     }
   } catch (e) {
     log('Error getting messaging token: $e');
+  }
+}
+
+Future<void> sendPushNotificationToOfficer({
+  required String officerId,
+  required String title,
+  required String body,
+  required String patrolTime,
+}) async {
+  try {
+    // Ambil push token petugas dari Realtime Database
+    final DatabaseReference officerRef =
+        FirebaseDatabase.instance.ref('users/$officerId');
+    final DataSnapshot snapshot = await officerRef.get();
+
+    if (!snapshot.exists) {
+      throw Exception('Officer not found');
+    }
+
+    final officerData = Map<String, dynamic>.from(snapshot.value as Map);
+    String? officerPushToken = officerData['push_token'];
+
+    if (officerPushToken == null || officerPushToken.isEmpty) {
+      log('Officer does not have a valid push token');
+      return;
+    }
+
+    // Ambil admin bearer token
+    final bearerToken = await NotificationAccessToken.getToken;
+    if (bearerToken == null) {
+      throw Exception('Failed to get admin access token');
+    }
+
+    // Kirim notifikasi menggunakan Firebase Cloud Messaging
+    final response = await http.post(
+      Uri.parse(
+          'https://fcm.googleapis.com/v1/projects/trackingsystem-kbp/messages:send'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $bearerToken',
+      },
+      body: jsonEncode({
+        "message": {
+          "token": officerPushToken,
+          "notification": {
+            "title": title,
+            "body": "$body\nJam Patroli: $patrolTime",
+          },
+          "data": {
+            "click_action": "FLUTTER_NOTIFICATION_CLICK",
+          },
+        },
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      log('FCM Error: ${response.body}');
+      throw Exception('Failed to send notification: ${response.body}');
+    }
+
+    log('Notification sent successfully to officer: $officerId');
+  } catch (e) {
+    log('Error sending notification: $e');
+  }
+}
+
+class NotificationAccessToken {
+  static String? _token;
+
+  //to generate token only once for an app run
+  static Future<String?> get getToken async =>
+      _token ?? await _getAccessToken();
+
+  // to get admin bearer token
+  static Future<String?> _getAccessToken() async {
+    try {
+      const fMessagingScope =
+          'https://www.googleapis.com/auth/firebase.messaging';
+
+      final jsonString = await rootBundle
+          .loadString('assets/credential/trackingsystem-kbp-09105242eb36.json');
+      final serviceAccount = json.decode(jsonString);
+
+      final client = await clientViaServiceAccount(
+        ServiceAccountCredentials.fromJson(serviceAccount),
+        [fMessagingScope],
+      );
+
+      _token = client.credentials.accessToken.data;
+      return _token;
+    } catch (e) {
+      log('error notifnya gan $e');
+      return null;
+    }
   }
 }

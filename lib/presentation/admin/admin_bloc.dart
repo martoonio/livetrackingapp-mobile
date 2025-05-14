@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/domain/repositories/route_repository.dart';
@@ -14,11 +15,15 @@ class CreateTask extends AdminEvent {
   final String vehicleId;
   final List<List<double>> assignedRoute;
   final String? assignedOfficerId;
+  final DateTime? assignedStartTime;
+  final DateTime? assignedEndTime;
 
   CreateTask({
     required this.vehicleId,
     required this.assignedRoute,
     required this.assignedOfficerId,
+    required this.assignedStartTime,
+    required this.assignedEndTime,
   });
 }
 
@@ -124,6 +129,8 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
         vehicleId: event.vehicleId,
         assignedRoute: event.assignedRoute,
         assignedOfficerId: event.assignedOfficerId,
+        assignedStartTime: event.assignedStartTime,
+        assignedEndTime: event.assignedEndTime,
       );
 
       emit(CreateTaskSuccess());

@@ -341,6 +341,20 @@ class _HomeScreenState extends State<HomeScreen> {
 //     );
 //   }
 
+  getDurasiPatroli(
+    DateTime startTime,
+    DateTime endTime,
+  ) {
+    final duration = endTime.difference(startTime);
+    if (duration.inHours <= 0) {
+      return '${duration.inMinutes} Menit';
+    } else if (duration.inMinutes.remainder(60) <= 0 && duration.inHours > 0) {
+      return '${duration.inHours} Jam';
+    } else {
+      return '${duration.inHours} Jam ${duration.inMinutes.remainder(60)} Menit';
+    }
+  }
+
   @override
   void dispose() {
     _taskSubscription?.cancel();
@@ -430,17 +444,43 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          rowInfo(state.task!.vehicleId, state.task!.vehicleId),
-                          rowInfo(
-                              formatDateFromString(
-                                  state.task!.createdAt.toString()),
-                              null),
+                          Column(
+                            children: [
+                              rowInfo(
+                                  state.task!.vehicleId, state.task!.vehicleId),
+                              rowInfo(
+                                  "${state.task!.assignedRoute!.length.toString()} Titik",
+                                  "pin"),
+                            ],
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              rowInfo(
+                                  formatDateFromString(
+                                      state.task!.assignedStartTime.toString()),
+                                  null),
+                              Row(
+                                children: [
+                                  rowInfo(
+                                      formatTimeFromString(state
+                                          .task!.assignedStartTime
+                                          .toString()),
+                                      null),
+                                  8.width,
+                                  rowInfo(
+                                      getDurasiPatroli(
+                                          state.task!.assignedStartTime!,
+                                          state.task!.assignedEndTime!),
+                                      null),
+                                ],
+                              ),
+                            ],
+                          ),
                         ],
                       ),
-                      rowInfo(
-                          "${state.task!.assignedRoute!.length.toString()} Titik",
-                          "pin"),
                       8.height,
                       ElevatedButton(
                         onPressed: () => _showTaskDialog(state.task!),
