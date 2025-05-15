@@ -1,6 +1,7 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:lottie/lottie.dart';
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/auth/bloc/auth_bloc.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
@@ -103,8 +104,13 @@ class _TaskListScreenState extends State<TaskListScreen> {
 
                 if (!snapshot.hasData) {
                   print('masuk sini no data');
-                  return const Center(
-                    child: CircularProgressIndicator(),
+                  return Center(
+                    child: LottieBuilder.asset(
+                      'assets/lottie/maps_loading.json',
+                      width: 200,
+                      height: 100,
+                      fit: BoxFit.cover,
+                    ),
                   );
                 }
 

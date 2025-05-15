@@ -29,7 +29,6 @@ class PatrolSummaryScreen extends StatefulWidget {
 
 class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
   GoogleMapController? mapController;
-  bool _isMapReady = false;
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
 
@@ -77,7 +76,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
 
   void _initializeMap() {
     setState(() {
-      _isMapReady = true;
     });
     _prepareRouteAndMarkers();
   }

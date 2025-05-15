@@ -21,7 +21,6 @@ class StartPatrol extends PatrolEvent {
     required this.task,
   });
 
-  @override
   List<Object> get props => [startTime, task];
 }
 
@@ -51,21 +50,18 @@ class LoadPatrolHistory extends PatrolEvent {
 
   LoadPatrolHistory({required this.userId});
 
-  @override
   List<Object?> get props => [userId];
 }
 
 class UpdateCurrentTask extends PatrolEvent {
   final PatrolTask task;
   UpdateCurrentTask({required this.task});
-  @override
   List<Object?> get props => [task];
 }
 
 class UpdateFinishedTasks extends PatrolEvent {
   final List<PatrolTask> tasks;
   UpdateFinishedTasks({required this.tasks});
-  @override
   List<Object?> get props => [tasks];
 }
 
@@ -102,7 +98,6 @@ class PatrolLoaded extends PatrolState {
     this.finishedTasks = const [],
   });
 
-  @override
   List<Object?> get props => [
         task,
         isPatrolling,
@@ -251,19 +246,19 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) {
     try {
-      print('Updating current task: ${event.task?.taskId}'); // Debug print
+      print('Updating current task: ${event.task.taskId}'); // Debug print
 
       if (state is PatrolLoaded) {
         final currentState = state as PatrolLoaded;
         emit(currentState.copyWith(
           task: event.task,
-          isPatrolling: event.task?.status ==
+          isPatrolling: event.task.status ==
               'ongoing', // Changed from 'in_progress' to 'ongoing'
         ));
       } else {
         emit(PatrolLoaded(
           task: event.task,
-          isPatrolling: event.task?.status ==
+          isPatrolling: event.task.status ==
               'ongoing', // Changed from 'in_progress' to 'ongoing'
           finishedTasks: const [], // Initialize empty list
         ));
@@ -612,6 +607,5 @@ class UpdateTask extends PatrolEvent {
     required this.updates,
   });
 
-  @override
   List<Object> get props => [taskId, updates];
 }

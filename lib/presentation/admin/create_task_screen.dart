@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
@@ -13,7 +12,7 @@ import '../component/dropdown_component.dart';
 import '../component/map_section.dart';
 
 class CreateTaskScreen extends StatefulWidget {
-  const CreateTaskScreen({Key? key}) : super(key: key);
+  const CreateTaskScreen({super.key});
 
   @override
   State<CreateTaskScreen> createState() => _CreateTaskScreenState();
@@ -45,7 +44,14 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       body: BlocBuilder<AdminBloc, AdminState>(
         builder: (context, state) {
           if (state is OfficersAndVehiclesLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return Center(
+              child: lottie.LottieBuilder.asset(
+                'assets/lottie/maps_loading.json',
+                width: 200,
+                height: 100,
+                fit: BoxFit.cover,
+              ),
+            );
           } else if (state is OfficersAndVehiclesError) {
             return Center(child: Text(state.message));
           } else if (state is OfficersAndVehiclesLoaded) {
@@ -292,7 +298,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                             children: [
                               // Format tanggal dan waktu untuk tampilan yang lebih user-friendly
                               Text(
-                                "${_assignedStartTime.day}/${_assignedStartTime.month}/${_assignedStartTime.year} - ${DateFormat('HH:mm').format(_assignedStartTime)}",
+                                "${formatDateFromString(_assignedStartTime.toString())} - ${DateFormat('HH:mm').format(_assignedStartTime)}",
                                 style: const TextStyle(fontSize: 16),
                               ),
                               const Icon(Icons.calendar_today,
@@ -358,7 +364,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                             children: [
                               // Format tanggal dan waktu untuk tampilan yang lebih user-friendly
                               Text(
-                                "${_assignedEndTime.day}/${_assignedEndTime.month}/${_assignedEndTime.year} - ${DateFormat('HH:mm').format(_assignedEndTime)}",
+                                "${formatDateFromString(_assignedEndTime.toString())} - ${DateFormat('HH:mm').format(_assignedEndTime)}",
                                 style: const TextStyle(fontSize: 16),
                               ),
                               const Icon(Icons.calendar_today,
@@ -568,33 +574,40 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Konfirmasi Tugas Patroli'),
+          title: Text(
+            'Konfirmasi Tugas Patroli',
+            style: boldTextStyle(
+              size: h4,
+            ),
+          ),
           content: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  'Detail Tugas:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
+                Text('Detail Tugas:', style: semiBoldTextStyle()),
                 _infoRow('Petugas', officerName),
                 _infoRow('Kendaraan', _vehicleId),
                 _infoRow(
                     'Jumlah Titik Patroli', _selectedPoints.length.toString()),
-                _infoRow(
-                    'Mulai Patroli',
-                    DateFormat('dd/MM/yyyy - HH:mm')
-                        .format(_assignedStartTime)),
+                _infoRow('Mulai Patroli',
+                    "${formatDateFromString(_assignedStartTime.toString())} Pukul ${formatTimeFromString(_assignedStartTime.toString())}"),
                 _infoRow('Selesai Patroli',
-                    DateFormat('dd/MM/yyyy - HH:mm').format(_assignedEndTime)),
+                    "${formatDateFromString(_assignedEndTime.toString())} Pukul ${formatTimeFromString(_assignedEndTime.toString())}"),
               ],
             ),
           ),
           actions: [
             TextButton(
-              child: const Text('Batal'),
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.transparent,
+              ),
+              child: Text(
+                'Batal',
+                style: mediumTextStyle(
+                  color: kbpBlue900,
+                ),
+              ),
               onPressed: () {
                 Navigator.of(context).pop(false);
               },

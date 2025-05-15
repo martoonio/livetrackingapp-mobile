@@ -4,6 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_svg/svg.dart';
+import 'package:geofence_service/geofence_service.dart' as geofence;
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:livetrackingapp/domain/entities/report.dart';
@@ -46,6 +47,19 @@ class _MapScreenState extends State<MapScreen> {
   Timer? _longPressTimer;
 
   List<File> selectedPhotos = [];
+
+  final _geofenceService = geofence.GeofenceService.instance;
+  final List<geofence.Geofence> _geofenceList = [];
+  StreamSubscription<geofence.GeofenceStatus>? _geofenceStatusSubscription;
+  
+  // Jarak maksimum yang diperbolehkan (dalam meter) dari titik rute
+  final double _maxAllowedDistanceFromRoute = 50.0;
+  
+  // Flag untuk menandai apakah petugas berada di luar rute
+  bool _isOutsideRoute = false;
+  
+  // Waktu terakhir notifikasi dikirim (untuk mencegah spam notifikasi)
+  DateTime? _lastNotificationTime;
 
   void _startLongPressAnimation(BuildContext context, PatrolState state) {
     const duration = Duration(seconds: 3); // Durasi long press

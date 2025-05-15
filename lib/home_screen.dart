@@ -5,11 +5,11 @@ import 'package:flutter_svg/svg.dart';
 import 'package:livetrackingapp/map_screen.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
+import 'package:lottie/lottie.dart';
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/auth/bloc/auth_bloc.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'presentation/task/task_dialog.dart';
-import 'package:intl/intl.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -51,10 +51,15 @@ class _HomeScreenState extends State<HomeScreen> {
             print('Building history with state: $state'); // Debug print
 
             if (state is PatrolLoading) {
-              return const Center(
+              return Center(
                 child: Padding(
                   padding: EdgeInsets.all(16.0),
-                  child: CircularProgressIndicator(),
+                  child: LottieBuilder.asset(
+                    'assets/lottie/maps_loading.json',
+                    width: 200,
+                    height: 100,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               );
             }
@@ -163,17 +168,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 // Add helper methods for formatting
-  String formatDateFromString(String isoString) {
-    final date = DateTime.parse(isoString);
-    return DateFormat('d MMM yyyy', 'id_ID')
-        .format(date); // Output: 13 May 2025
-  }
-
-  String formatTimeFromString(String isoString) {
-    final date = DateTime.parse(isoString);
-    return DateFormat('HH:mm').format(date); // Output: 11:42
-  }
-
   String _formatDuration(Duration duration) {
     final hours = duration.inHours;
     final minutes = duration.inMinutes % 60;

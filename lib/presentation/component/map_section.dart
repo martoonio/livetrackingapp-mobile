@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:livetrackingapp/patrol_summary_screen.dart';
+import 'package:livetrackingapp/presentation/component/utils.dart';
+import 'package:lottie/lottie.dart' as lottie;
 
 class MapSection extends StatefulWidget {
   final GoogleMapController? mapController;
@@ -77,8 +80,22 @@ class _MapSectionState extends State<MapSection> {
     print('Building MapSection with _currentPosition: $_currentPosition');
 
     if (_currentPosition == null) {
-      return const Center(
-          child: CircularProgressIndicator()); // Tampilkan loading
+      return Center(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            lottie.LottieBuilder.asset(
+              'assets/lottie/maps_loading.json',
+              width: 200,
+              height: 100,
+              fit: BoxFit.cover,
+              repeat: true,
+            ),
+            320.height,
+          ],
+        ),
+      );
     }
 
     return GoogleMap(

@@ -81,14 +81,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         return;
       }
 
-      if (user != null) {
-        print('Emitting AuthAuthenticated state');
-        emit(AuthAuthenticated(user));
-      } else {
-        print('User is null after login');
-        emit(AuthError('Login failed: User is null'));
-      }
-    } catch (e) {
+      print('Emitting AuthAuthenticated state');
+      emit(AuthAuthenticated(user));
+        } catch (e) {
       print('Login error in bloc: $e');
       emit(AuthError(e.toString()));
     }
