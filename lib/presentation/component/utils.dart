@@ -8,13 +8,77 @@ export 'paddingUtils.dart';
 export 'textStyle.dart';
 export 'customSnackBar.dart';
 
-String formatDateFromString(String isoString) {
-    final date = DateTime.parse(isoString);
-    return DateFormat('d MMM yyyy', 'id_ID')
-        .format(date); // Output: 13 May 2025
+String formatDateFromString(String? isoString) {
+  if (isoString == null || isoString.isEmpty) {
+    return 'N/A';
   }
 
-  String formatTimeFromString(String isoString) {
-    final date = DateTime.parse(isoString);
-    return DateFormat('HH:mm').format(date); // Output: 11:42
+  try {
+    // Menangani berbagai format tanggal termasuk dengan mikrodetik
+    DateTime date;
+    if (isoString.contains('.')) {
+      // Format dengan mikrodetik
+      final parts = isoString.split('.');
+      final mainPart = parts[0];
+      final microPart = parts[1];
+
+      // Batasi mikrodetik menjadi 6 digit untuk mencegah overflow
+      final cleanMicroPart =
+          microPart.length > 6 ? microPart.substring(0, 6) : microPart;
+
+      date = DateTime.parse('$mainPart.$cleanMicroPart');
+    } else {
+      date = DateTime.parse(isoString);
+    }
+
+    return DateFormat('d MMM yyyy', 'id_ID').format(date);
+  } catch (e) {
+    print('Error parsing date: $isoString, error: $e');
+    return 'N/A';
   }
+}
+
+String formatTimeFromString(String? isoString) {
+  if (isoString == null || isoString.isEmpty) {
+    return 'N/A';
+  }
+
+  try {
+    // Menangani berbagai format tanggal termasuk dengan mikrodetik
+    DateTime date;
+    if (isoString.contains('.')) {
+      // Format dengan mikrodetik
+      final parts = isoString.split('.');
+      final mainPart = parts[0];
+      final microPart = parts[1];
+
+      // Batasi mikrodetik menjadi 6 digit untuk mencegah overflow
+      final cleanMicroPart =
+          microPart.length > 6 ? microPart.substring(0, 6) : microPart;
+
+      date = DateTime.parse('$mainPart.$cleanMicroPart');
+    } else {
+      date = DateTime.parse(isoString);
+    }
+
+    return DateFormat('HH:mm').format(date);
+  } catch (e) {
+    print('Error parsing time: $isoString, error: $e');
+    return 'N/A';
+  }
+}
+
+// Tambahkan fungsi helper untuk durasi patroli yang aman
+String getDurasiPatroli(DateTime? endTime, {DateTime? startTime}) {
+  if (endTime == null) return 'N/A';
+
+  final end = endTime;
+  final start = startTime ?? DateTime.now();
+
+  final difference = end.difference(start);
+
+  final hours = difference.inHours;
+  final minutes = difference.inMinutes.remainder(60);
+
+  return '$hours jam $minutes menit';
+}

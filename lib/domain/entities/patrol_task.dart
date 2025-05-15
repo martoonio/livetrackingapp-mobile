@@ -49,26 +49,50 @@ class PatrolTask {
       endTime: json['endTime'] != null
           ? DateTime.parse(json['endTime'] as String)
           : null,
-      assignedStartTime: json['assigned_start_time'] != null
-          ? DateTime.parse(json['assigned_start_time'] as String)
-          : null,
-      assignedEndTime: json['assigned_end_time'] != null
-          ? DateTime.parse(json['assigned_end_time'] as String)
-          : null,
-      assignedRoute: json['assigned_route'] != null
-          ? (json['assigned_route'] as List)
-              .map((route) => (route as List)
-                  .map((coord) => (coord as num).toDouble())
-                  .toList())
-              .toList()
-          : null,
+      // Perbaikan: Periksa kedua format nama field (dengan dan tanpa underscore)
+      assignedStartTime: json['assignedStartTime'] != null
+          ? DateTime.parse(json['assignedStartTime'] as String)
+          : (json['assigned_start_time'] != null
+              ? DateTime.parse(json['assigned_start_time'] as String)
+              : null),
+      assignedEndTime: json['assignedEndTime'] != null
+          ? DateTime.parse(json['assignedEndTime'] as String)
+          : (json['assigned_end_time'] != null
+              ? DateTime.parse(json['assigned_end_time'] as String)
+              : null),
+      assignedRoute: json['assignedRoute'] != null
+          ? _parseRouteCoordinates(json['assignedRoute'])
+          : (json['assigned_route'] != null
+              ? _parseRouteCoordinates(json['assigned_route'])
+              : null),
       distance: json['distance'] != null
           ? (json['distance'] as num).toDouble()
           : null,
-      createdAt: DateTime.parse(json['createdAt'] as String),
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'] as String)
+          : DateTime.now(),
       routePath: json['route_path'] as Map<String, dynamic>?,
       lastLocation: json['lastLocation'] as Map<String, dynamic>?,
     );
+  }
+
+// Helper method untuk parsing route coordinates dengan lebih aman
+  static List<List<double>> _parseRouteCoordinates(dynamic routeData) {
+    if (routeData is! List) return [];
+
+    try {
+      return (routeData as List).map((route) {
+        if (route is! List) return <double>[];
+        return (route as List).map((coord) {
+          if (coord is double) return coord;
+          if (coord is int) return coord.toDouble();
+          return 0.0;
+        }).toList();
+      }).toList();
+    } catch (e) {
+      print('Error parsing route coordinates: $e');
+      return [];
+    }
   }
 
   Future<void> fetchOfficerName(DatabaseReference database) async {

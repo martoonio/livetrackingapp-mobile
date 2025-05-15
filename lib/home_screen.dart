@@ -133,10 +133,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             rowInfo(task.vehicleId, task.vehicleId),
+                            // Perbaiki cara mengakses startTime dan endTime
                             Text(
-                                '${formatTimeFromString(task.startTime.toString())} - ${task.endTime != null ? formatTimeFromString(task.endTime.toString()) : 'N/A'}'),
+                                '${formatTimeFromString(task.startTime?.toString())} - ${formatTimeFromString(task.endTime?.toString())}'),
+                            // Pastikan distance tidak null dengan menggunakan nilai default 0
                             Text(
-                                '${_formatDuration(duration)} ${(task.distance! / 1000).toStringAsFixed(2)} km'),
+                                '${_formatDuration(duration)} ${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km'),
                           ],
                         ),
                         trailing: IconButton(
@@ -269,6 +271,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleNewTask(PatrolTask task) {
+    // Add debugging output
+    print('=== New Task Received ===');
+    print('Task ID: ${task.taskId}');
+    print('Status: ${task.status}');
+    print('Assigned Start Time: ${task.assignedStartTime}');
+    print('Assigned End Time: ${task.assignedEndTime}');
+
     // Only show dialog for active tasks that haven't started
     if (task.status == 'active') {
       _showTaskDialog(task);
@@ -453,21 +462,30 @@ class _HomeScreenState extends State<HomeScreen> {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               rowInfo(
-                                  formatDateFromString(
-                                      state.task!.assignedStartTime.toString()),
+                                  state.task?.assignedStartTime != null
+                                      ? formatDateFromString(state
+                                          .task!.assignedStartTime
+                                          .toString())
+                                      : 'Tanggal tidak tersedia',
                                   null),
                               Row(
                                 children: [
                                   rowInfo(
-                                      formatTimeFromString(state
-                                          .task!.assignedStartTime
-                                          .toString()),
+                                      state.task?.assignedStartTime != null
+                                          ? formatTimeFromString(state
+                                              .task!.assignedStartTime
+                                              .toString())
+                                          : 'Waktu tidak tersedia',
                                       null),
                                   8.width,
                                   rowInfo(
-                                      getDurasiPatroli(
-                                          state.task!.assignedStartTime!,
-                                          state.task!.assignedEndTime!),
+                                      state.task?.assignedStartTime != null &&
+                                              state.task?.assignedEndTime !=
+                                                  null
+                                          ? getDurasiPatroli(
+                                              state.task!.assignedStartTime!,
+                                              state.task!.assignedEndTime!)
+                                          : 'Durasi tidak tersedia',
                                       null),
                                 ],
                               ),

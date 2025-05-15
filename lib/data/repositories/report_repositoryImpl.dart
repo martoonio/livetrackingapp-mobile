@@ -17,9 +17,8 @@ class ReportRepositoryImpl implements ReportRepository {
   Future<void> createReport(Report report) async {
     try {
       // Upload photo to Firebase Storage
-      final photoRef = firebaseStorage
-          .ref()
-          .child('reports/${report.id}/photo.jpg');
+      final photoRef =
+          firebaseStorage.ref().child('reports/${report.id}/photo.jpg');
       final uploadTask = await photoRef.putFile(File(report.photoUrl));
       final photoUrl = await uploadTask.ref.getDownloadURL();
 
@@ -33,6 +32,7 @@ class ReportRepositoryImpl implements ReportRepository {
         'longitude': report.longitude,
         'taskId': report.taskId, // Tambahkan taskId
       });
+      print('Report created successfully with ID: ${report.id}');
     } catch (e) {
       throw Exception('Failed to create report: $e');
     }

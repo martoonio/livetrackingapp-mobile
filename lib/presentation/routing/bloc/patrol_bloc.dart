@@ -316,7 +316,10 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     try {
       print('Starting patrol for task: ${event.task.taskId}'); // Debug print
 
-      // First update task status
+      // Emit loading state terlebih dahulu
+      emit(PatrolLoading());
+
+      // Update task status in database
       await repository.updateTask(
         event.task.taskId,
         {
@@ -325,25 +328,42 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         },
       );
 
+      // Initialize empty routePath if needed
+      final routePath = <String, dynamic>{};
+
       // Create updated task object with the new status
-      final updatedTask = event.task.copyWith(
+      final updatedTask = PatrolTask(
+        taskId: event.task.taskId,
+        userId: event.task.userId,
+        vehicleId: event.task.vehicleId,
         status: 'ongoing',
         startTime: event.startTime,
+        endTime: null,
+        assignedStartTime: event.task.assignedStartTime,
+        assignedEndTime: event.task.assignedEndTime,
+        assignedRoute: event.task.assignedRoute,
+        distance: 0.0,
+        createdAt: event.task.createdAt,
+        routePath: routePath,
+        lastLocation: event.task.lastLocation,
       );
 
-      // Then emit new state with isPatrolling = true and the updated task
+      // Emit new state with isPatrolling = true and the updated task
       emit(PatrolLoaded(
         task: updatedTask,
         isPatrolling: true,
         startTime: event.startTime,
+        routePath: routePath,
+        distance: 0.0,
       ));
 
       // Start location tracking
-      _startLocationTracking();
+      // _startLocationTracking();
 
       print('Patrol started successfully'); // Debug print
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('Error starting patrol: $e'); // Debug print
+      print('Stack trace: $stackTrace');
       emit(PatrolError('Failed to start patrol: $e'));
     }
   }
@@ -383,69 +403,71 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
   }
 
   Future<void> _onUpdatePatrolLocation(
-  UpdatePatrolLocation event,
-  Emitter<PatrolState> emit,
-) async {
-  if (state is PatrolLoaded) {
-    final currentState = state as PatrolLoaded;
-    if (currentState.isPatrolling && currentState.task != null) {
-      try {
-        final coordinates = [
-          event.position.latitude,
-          event.position.longitude
-        ];
-
-        // Update repository first
-        await repository.updatePatrolLocation(
-          currentState.task!.taskId,
-          coordinates,
-          event.timestamp,
-        );
-
-        // Hitung jarak baru
-        double newDistance = currentState.distance ?? 0.0;
-        if (currentState.currentPatrolPath != null &&
-            currentState.currentPatrolPath!.isNotEmpty) {
-          final lastPosition = currentState.currentPatrolPath!.last;
-          newDistance += Geolocator.distanceBetween(
-            lastPosition.latitude,
-            lastPosition.longitude,
+    UpdatePatrolLocation event,
+    Emitter<PatrolState> emit,
+  ) async {
+    if (state is PatrolLoaded) {
+      final currentState = state as PatrolLoaded;
+      if (currentState.isPatrolling && currentState.task != null) {
+        try {
+          // Perbaikan: Pastikan koordinat disimpan dalam List<double> bukan dynamic
+          final List<double> coordinates = [
             event.position.latitude,
-            event.position.longitude,
+            event.position.longitude
+          ];
+
+          // Update repository first
+          await repository.updatePatrolLocation(
+            currentState.task!.taskId,
+            coordinates,
+            event.timestamp,
           );
-        }
 
-        // Update local state
-        final updatedRoutePath =
-            Map<String, dynamic>.from(currentState.routePath ?? {});
-        final timestampKey =
-            event.timestamp.millisecondsSinceEpoch.toString();
+          // Hitung jarak baru
+          double newDistance = currentState.distance ?? 0.0;
+          if (currentState.currentPatrolPath != null &&
+              currentState.currentPatrolPath!.isNotEmpty) {
+            final lastPosition = currentState.currentPatrolPath!.last;
+            newDistance += Geolocator.distanceBetween(
+              lastPosition.latitude,
+              lastPosition.longitude,
+              event.position.latitude,
+              event.position.longitude,
+            );
+          }
 
-        updatedRoutePath[timestampKey] = {
-          'coordinates': coordinates,
-          'timestamp': event.timestamp.toIso8601String(),
-        };
+          // Update local state
+          final updatedRoutePath =
+              Map<String, dynamic>.from(currentState.routePath ?? {});
+          final timestampKey =
+              event.timestamp.millisecondsSinceEpoch.toString();
 
-        emit(currentState.copyWith(
-          currentPatrolPath: [
-            ...?currentState.currentPatrolPath,
-            event.position
-          ],
-          routePath: updatedRoutePath,
-          distance: newDistance, // Update distance
-          task: currentState.task?.copyWith(
+          // Perbaikan: Format konsisten untuk koordinat
+          updatedRoutePath[timestampKey] = {
+            'coordinates': coordinates,
+            'timestamp': event.timestamp.toIso8601String(),
+          };
+
+          emit(currentState.copyWith(
+            currentPatrolPath: [
+              ...?currentState.currentPatrolPath,
+              event.position
+            ],
             routePath: updatedRoutePath,
-          ),
-        ));
+            distance: newDistance,
+            task: currentState.task?.copyWith(
+              routePath: updatedRoutePath,
+            ),
+          ));
 
-        print('Location updated successfully');
-      } catch (e) {
-        print('Error updating location: $e');
-        // Don't emit error state to prevent disrupting tracking
+          print('Location updated successfully: $coordinates');
+        } catch (e) {
+          print('Error updating location: $e');
+          // Don't emit error state to prevent disrupting tracking
+        }
       }
     }
   }
-}
 
   Future<void> _onStopPatrol(
     StopPatrol event,

@@ -48,18 +48,11 @@ class _MapScreenState extends State<MapScreen> {
 
   List<File> selectedPhotos = [];
 
-  final _geofenceService = geofence.GeofenceService.instance;
-  final List<geofence.Geofence> _geofenceList = [];
-  StreamSubscription<geofence.GeofenceStatus>? _geofenceStatusSubscription;
-  
-  // Jarak maksimum yang diperbolehkan (dalam meter) dari titik rute
-  final double _maxAllowedDistanceFromRoute = 50.0;
-  
-  // Flag untuk menandai apakah petugas berada di luar rute
-  bool _isOutsideRoute = false;
-  
-  // Waktu terakhir notifikasi dikirim (untuk mencegah spam notifikasi)
-  DateTime? _lastNotificationTime;
+  final Set<Polyline> _polylines = {};
+  final List<LatLng> _routePoints = [];
+
+  // Warna untuk polyline
+  static const Color _polylineColor = kbpBlue900;
 
   void _startLongPressAnimation(BuildContext context, PatrolState state) {
     const duration = Duration(seconds: 3); // Durasi long press
@@ -143,6 +136,12 @@ class _MapScreenState extends State<MapScreen> {
       // Pulihkan totalDistance dari state
       if (patrolState.distance != null) {
         _totalDistance = patrolState.distance!;
+      }
+
+      if (patrolState.task?.routePath != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _displaySavedRoute(patrolState.task?.routePath);
+        });
       }
 
       // Check if this is a resumed patrol
@@ -291,6 +290,9 @@ class _MapScreenState extends State<MapScreen> {
     // Update camera to follow user if patrolling
     final state = context.read<PatrolBloc>().state;
     if (state is PatrolLoaded && state.isPatrolling) {
+      // Update polyline jika sedang patroli
+      _updatePolyline(position);
+
       mapController?.animateCamera(
         CameraUpdate.newLatLng(
           LatLng(position.latitude, position.longitude),
@@ -350,6 +352,15 @@ class _MapScreenState extends State<MapScreen> {
     String timeNow = DateTime.now().toIso8601String();
     print('ini debug Starting location tracking... jam $timeNow');
     _positionStreamSubscription?.cancel();
+
+    // Reset polyline points when starting fresh
+    if (_routePoints.isEmpty) {
+      setState(() {
+        _routePoints.clear();
+        _polylines.clear();
+      });
+    }
+
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
@@ -374,6 +385,8 @@ class _MapScreenState extends State<MapScreen> {
                   timestamp: DateTime.now(),
                 ));
             _updateDistance(position);
+            // Update polyline setiap kali posisi berubah
+            _updatePolyline(position);
           }
         }
       },
@@ -404,24 +417,55 @@ class _MapScreenState extends State<MapScreen> {
     List<List<double>> convertedPath = [];
     try {
       if (state.task?.routePath != null && state.task!.routePath is Map) {
-        final map = state.task!.routePath as Map;
+        final map = state.task!.routePath as Map<String, dynamic>;
 
-        // Sort entries by timestamp
-        final sortedEntries = map.entries.toList()
-          ..sort((a, b) => (a.value['timestamp'] as String)
-              .compareTo(b.value['timestamp'] as String));
+        if (map.isEmpty) {
+          print('Route path is empty, using collected route points');
+          convertedPath = _routePoints
+              .map((point) => [point.latitude, point.longitude])
+              .toList();
+        } else {
+          // Sort entries by timestamp
+          final sortedEntries = map.entries.toList()
+            ..sort((a, b) => (a.value['timestamp'] as String)
+                .compareTo(b.value['timestamp'] as String));
 
-        // Convert coordinates
-        convertedPath = sortedEntries.map((entry) {
-          final coordinates = entry.value['coordinates'] as List;
-          return [
-            (coordinates[0] as num).toDouble(),
-            (coordinates[1] as num).toDouble(),
-          ];
-        }).toList();
+          // Convert coordinates with validation
+          for (var entry in sortedEntries) {
+            if (entry.value is! Map || entry.value['coordinates'] == null)
+              continue;
+
+            final coordinates = entry.value['coordinates'] as List;
+            if (coordinates.length < 2) continue;
+
+            convertedPath.add([
+              (coordinates[0] as num).toDouble(),
+              (coordinates[1] as num).toDouble(),
+            ]);
+          }
+        }
+      } else {
+        print('No route_path in task, using collected route points');
+        convertedPath = _routePoints
+            .map((point) => [point.latitude, point.longitude])
+            .toList();
+      }
+
+      // Fallback jika masih kosong
+      if (convertedPath.isEmpty && _routePoints.isNotEmpty) {
+        print('Using fallback route points');
+        convertedPath = _routePoints
+            .map((point) => [point.latitude, point.longitude])
+            .toList();
       }
     } catch (e) {
       print('Error converting route path: $e');
+      // Pastikan selalu ada path yang valid
+      if (_routePoints.isNotEmpty) {
+        convertedPath = _routePoints
+            .map((point) => [point.latitude, point.longitude])
+            .toList();
+      }
     }
 
     // Stop patrol
@@ -464,10 +508,12 @@ class _MapScreenState extends State<MapScreen> {
         ));
 
     // Start patrol
-    context.read<PatrolBloc>().add(StartPatrol(
-          task: widget.task,
-          startTime: startTime,
-        ));
+    context.read<PatrolBloc>().add(
+          StartPatrol(
+            task: widget.task,
+            startTime: startTime,
+          ),
+        );
 
     _startPatrolTimer(); // Start timer
     _elapsedTime = Duration.zero; // Reset timer
@@ -477,6 +523,137 @@ class _MapScreenState extends State<MapScreen> {
     print('ini debug patroli udah mulai');
 
     widget.onStart();
+  }
+
+  void _updatePolyline(Position position) {
+    if (!_isMapReady || mapController == null) return;
+
+    final LatLng newPoint = LatLng(position.latitude, position.longitude);
+
+    // Debug info
+    print('Position for polyline: ${position.latitude}, ${position.longitude}');
+
+    // Cek jika titik berubah signifikan (opsional untuk mengurangi titik berlebihan)
+    if (_routePoints.isNotEmpty) {
+      final lastPoint = _routePoints.last;
+      final distance = Geolocator.distanceBetween(lastPoint.latitude,
+          lastPoint.longitude, newPoint.latitude, newPoint.longitude);
+
+      print('Distance from last point: $distance meters');
+
+      // Hanya tambahkan titik jika jarak cukup signifikan
+      if (distance < 5) {
+        print('Point too close, skipping');
+        return; // Skip jika kurang dari 5 meter
+      }
+    }
+
+    try {
+      setState(() {
+        // Tambahkan titik baru ke array titik
+        _routePoints.add(newPoint);
+
+        print('Route points count: ${_routePoints.length}');
+
+        // Update polyline yang sudah ada
+        _polylines.removeWhere((polyline) =>
+            polyline.polylineId == const PolylineId('patrol_route'));
+
+        _polylines.add(
+          Polyline(
+            polylineId: const PolylineId('patrol_route'),
+            points: _routePoints,
+            color: _polylineColor,
+            width: 5,
+          ),
+        );
+
+        print('Polyline updated with ${_routePoints.length} points');
+      });
+    } catch (e) {
+      print('Error updating polyline: $e');
+    }
+  }
+
+// Metode untuk menampilkan rute yang tersimpan dari database
+  void _displaySavedRoute(Map<String, dynamic>? routePath) {
+    if (routePath == null || !_isMapReady) return;
+
+    try {
+      // Konversi route_path menjadi list koordinat yang diurutkan berdasarkan timestamp
+      final entries = routePath.entries.toList()
+        ..sort((a, b) => (a.value['timestamp'] as String)
+            .compareTo(b.value['timestamp'] as String));
+
+      // Reset _routePoints
+      _routePoints.clear();
+
+      // Tambahkan semua titik dari routePath
+      for (var entry in entries) {
+        final coordinates = entry.value['coordinates'] as List;
+        _routePoints.add(LatLng(
+          (coordinates[0] as num).toDouble(),
+          (coordinates[1] as num).toDouble(),
+        ));
+      }
+
+      // Perbarui polyline
+      setState(() {
+        _polylines.clear();
+        if (_routePoints.isNotEmpty) {
+          _polylines.add(
+            Polyline(
+              polylineId: const PolylineId('patrol_route'),
+              points: _routePoints,
+              color: _polylineColor,
+              width: 5,
+            ),
+          );
+        }
+      });
+
+      print('Loaded saved route with ${_routePoints.length} points');
+
+      // Jika ada titik, zoom ke area yang mencakup semua titik
+      if (_routePoints.isNotEmpty) {
+        _zoomToPolyline();
+      }
+    } catch (e) {
+      print('Error loading saved route: $e');
+    }
+  }
+
+// Metode untuk zoom ke polyline
+  void _zoomToPolyline() {
+    if (_routePoints.isEmpty || mapController == null) return;
+
+    // Cari bounds untuk semua titik
+    double minLat = 90.0, maxLat = -90.0;
+    double minLng = 180.0, maxLng = -180.0;
+
+    for (var point in _routePoints) {
+      minLat = minLat < point.latitude ? minLat : point.latitude;
+      maxLat = maxLat > point.latitude ? maxLat : point.latitude;
+      minLng = minLng < point.longitude ? minLng : point.longitude;
+      maxLng = maxLng > point.longitude ? maxLng : point.longitude;
+    }
+
+    // Pastikan bounds cukup besar
+    final padding = 0.01; // sekitar 1km pada kebanyakan latitude
+    minLat -= padding;
+    maxLat += padding;
+    minLng -= padding;
+    maxLng += padding;
+
+    final bounds = LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+
+    // Animasi kamera ke bounds
+    mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(bounds, 50),
+    );
   }
 
   void _showReportDialog(BuildContext context) {
@@ -724,6 +901,7 @@ class _MapScreenState extends State<MapScreen> {
                 zoom: 15,
               ),
               markers: _markers,
+              polylines: _polylines, // Tambahkan polylines di sini
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               zoomControlsEnabled: true,

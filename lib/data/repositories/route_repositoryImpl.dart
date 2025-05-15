@@ -185,16 +185,25 @@ class RouteRepositoryImpl implements RouteRepository {
           return null;
         }
 
-        print(
-            'Found task: ${activeTaskEntry.key} with status: ${(activeTaskEntry.value as Map)['status']}');
+        // Log assigned start/end times for debugging
+        final taskData = activeTaskEntry.value as Map<dynamic, dynamic>;
+        print('Task assigned start time: ${taskData['assignedStartTime']}');
+        print('Task assigned end time: ${taskData['assignedEndTime']}');
+
+
+        // Create PatrolTask with the task data
         return _convertToPatrolTask({
-          ...activeTaskEntry.value as Map<dynamic, dynamic>,
+          ...taskData,
           'taskId': activeTaskEntry.key,
         });
-      } catch (e) {
+      } catch (e, stackTrace) {
         print('Error processing tasks: $e');
+        print('Stack trace: $stackTrace');
         return null;
       }
+    }).handleError((error) {
+      print('Error in task stream: $error');
+      return null;
     });
   }
 
@@ -232,6 +241,33 @@ class RouteRepositoryImpl implements RouteRepository {
     });
   }
 
+  DateTime? _parseDateTime(dynamic value) {
+    if (value == null) return null;
+
+    try {
+      if (value is String) {
+        // Handle string with microseconds
+        if (value.contains('.')) {
+          final parts = value.split('.');
+          final mainPart = parts[0];
+          final microPart = parts[1];
+
+          // Limit microseconds to 6 digits
+          final cleanMicroPart =
+              microPart.length > 6 ? microPart.substring(0, 6) : microPart;
+
+          return DateTime.parse('$mainPart.$cleanMicroPart');
+        }
+        return DateTime.parse(value);
+      } else if (value is int) {
+        return DateTime.fromMillisecondsSinceEpoch(value);
+      }
+    } catch (e) {
+      print('Error parsing datetime: $value, error: $e');
+    }
+    return null;
+  }
+
   PatrolTask _convertToPatrolTask(Map<dynamic, dynamic> data) {
     print('Converting data: $data'); // Debug print
     try {
@@ -253,25 +289,30 @@ class RouteRepositoryImpl implements RouteRepository {
         routePath: data['route_path'] != null
             ? Map<String, dynamic>.from(data['route_path'] as Map)
             : null,
-        createdAt: data['createdAt'] != null
-            ? DateTime.parse(data['createdAt'].toString())
-            : DateTime.now(),
-        startTime: data['startTime'] != null
-            ? DateTime.parse(data['startTime'].toString())
-            : null,
-        endTime: data['endTime'] != null
-            ? DateTime.parse(data['endTime'].toString())
-            : null,
+        createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
+        startTime: _parseDateTime(data['startTime']),
+        endTime: _parseDateTime(data['endTime']),
+        assignedStartTime: _parseDateTime(data['assignedStartTime']),
+        assignedEndTime: _parseDateTime(data['assignedEndTime']),
+      );
+    } catch (e, stackTrace) {
+      print('Error converting task: $e'); // Debug print
+      print('Stack trace: $stackTrace');
+
+      // Return a default task instead of rethrowing
+      return PatrolTask(
+        taskId: data['taskId']?.toString() ?? '',
+        userId: data['userId']?.toString() ?? '',
+        vehicleId: data['vehicleId']?.toString() ?? '',
         assignedStartTime: data['assignedStartTime'] != null
-            ? DateTime.parse(data['assignedStartTime'].toString())
+            ? _parseDateTime(data['assignedStartTime'])
             : null,
         assignedEndTime: data['assignedEndTime'] != null
-            ? DateTime.parse(data['assignedEndTime'].toString())
+            ? _parseDateTime(data['assignedEndTime'])
             : null,
+        status: 'error',
+        createdAt: DateTime.now(),
       );
-    } catch (e) {
-      print('Error converting task: $e'); // Debug print
-      rethrow;
     }
   }
 
@@ -287,12 +328,22 @@ class RouteRepositoryImpl implements RouteRepository {
         throw Exception('Task not found');
       }
 
+      // Format any DateTime objects in updates to ISO format
+      final formattedUpdates = Map<String, dynamic>.from(updates);
+      for (final key in formattedUpdates.keys) {
+        final value = formattedUpdates[key];
+        if (value is DateTime) {
+          formattedUpdates[key] = value.toIso8601String();
+        }
+      }
+
       // Update task with new data
-      await _database.child('tasks').child(taskId).update(updates);
+      await _database.child('tasks').child(taskId).update(formattedUpdates);
 
       print('Task updated successfully'); // Debug print
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('Error updating task: $e'); // Debug print
+      print('Stack trace: $stackTrace');
       throw Exception('Failed to update task: $e');
     }
   }
