@@ -899,7 +899,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: const Icon(Icons.map, size: 18),
                 label: Text(
                   'Lihat Detail',
-                  style: semiBoldTextStyle(size: 14),
+                  style: semiBoldTextStyle(size: 14, color: neutralWhite),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: kbpBlue900,
