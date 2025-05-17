@@ -14,6 +14,20 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Load data saat inisialisasi
+    _loadData();
+  }
+
+  void _loadData() {
+    context.read<AdminBloc>().add(LoadAllTasks());
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -21,9 +35,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () {
-              context.read<AdminBloc>().add(LoadAllTasks());
-            },
+            onPressed: _loadData,
           ),
         ],
       ),

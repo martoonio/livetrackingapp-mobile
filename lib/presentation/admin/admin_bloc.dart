@@ -4,11 +4,23 @@ import 'package:livetrackingapp/domain/repositories/route_repository.dart';
 import '../../domain/entities/patrol_task.dart';
 
 // Events
-abstract class AdminEvent {}
+abstract class AdminEvent {
+  const AdminEvent();
+}
 
-class LoadAllTasks extends AdminEvent {}
+class LoadAllTasks extends AdminEvent {
+  const LoadAllTasks();
+}
 
-class LoadOfficersAndVehicles extends AdminEvent {}
+class GetClusterDetail extends AdminEvent {
+  final String clusterId;
+
+  const GetClusterDetail(this.clusterId);
+}
+
+class LoadOfficersAndVehicles extends AdminEvent {
+  const LoadOfficersAndVehicles();
+}
 
 class CreateTask extends AdminEvent {
   final String vehicleId;
@@ -17,7 +29,7 @@ class CreateTask extends AdminEvent {
   final DateTime? assignedStartTime;
   final DateTime? assignedEndTime;
 
-  CreateTask({
+  const CreateTask({
     required this.vehicleId,
     required this.assignedRoute,
     required this.assignedOfficerId,
@@ -26,13 +38,96 @@ class CreateTask extends AdminEvent {
   });
 }
 
-class CreateTaskLoading extends AdminState {}
+// Event untuk load seluruh clusters
+class LoadClusters extends AdminEvent {
+  const LoadClusters();
+}
 
-class CreateTaskSuccess extends AdminState {}
+// Alias untuk LoadClusters untuk backward compatibility
+class LoadAllClusters extends AdminEvent {
+  const LoadAllClusters();
+}
 
-class CreateTaskError extends AdminState {
-  final String message;
-  CreateTaskError(this.message);
+// Event untuk membuat cluster baru dengan akun
+class CreateClusterAccount extends AdminEvent {
+  final String name;
+  final String email;
+  final String password;
+  final List<List<double>> clusterCoordinates;
+
+  const CreateClusterAccount({
+    required this.name,
+    required this.email,
+    required this.password,
+    required this.clusterCoordinates,
+  });
+}
+
+// Event untuk update informasi cluster
+class UpdateClusterAccount extends AdminEvent {
+  final User cluster;
+
+  const UpdateClusterAccount({
+    required this.cluster,
+  });
+}
+
+// Event untuk update koordinat cluster
+class UpdateClusterCoordinates extends AdminEvent {
+  final String clusterId;
+  final List<List<double>> coordinates;
+
+  const UpdateClusterCoordinates({
+    required this.clusterId,
+    required this.coordinates,
+  });
+}
+
+// Event untuk menambah officer ke cluster
+class AddOfficerToClusterEvent extends AdminEvent {
+  final String clusterId;
+  final Officer officer;
+
+  const AddOfficerToClusterEvent({
+    required this.clusterId,
+    required this.officer,
+  });
+}
+
+// Event untuk update officer di cluster
+class UpdateOfficerInClusterEvent extends AdminEvent {
+  final String clusterId;
+  final Officer officer;
+
+  const UpdateOfficerInClusterEvent({
+    required this.clusterId,
+    required this.officer,
+  });
+}
+
+// Event untuk hapus officer dari cluster
+class RemoveOfficerFromClusterEvent extends AdminEvent {
+  final String clusterId;
+  final String officerId;
+
+  const RemoveOfficerFromClusterEvent({
+    required this.clusterId,
+    required this.officerId,
+  });
+}
+
+// Event untuk pencarian cluster
+class SearchClustersEvent extends AdminEvent {
+  final String searchTerm;
+
+  const SearchClustersEvent(this.searchTerm);
+}
+
+// Event untuk menghapus cluster
+class DeleteClusterEvent extends AdminEvent {
+  final String clusterId;
+
+  const DeleteClusterEvent(this.clusterId);
 }
 
 // States
@@ -41,6 +136,9 @@ abstract class AdminState {}
 class AdminInitial extends AdminState {}
 
 class AdminLoading extends AdminState {}
+
+// Loading state khusus untuk cluster
+class ClustersLoading extends AdminState {}
 
 class AdminLoaded extends AdminState {
   final List<PatrolTask> activeTasks;
@@ -58,7 +156,48 @@ class AdminLoaded extends AdminState {
 
 class AdminError extends AdminState {
   final String message;
+
   AdminError(this.message);
+}
+
+class LoadClusterDetails extends AdminEvent {
+  final String clusterId;
+
+  const LoadClusterDetails({required this.clusterId});
+}
+
+// State loading untuk detail cluster
+class ClusterDetailsLoading extends AdminState {}
+
+// State untuk detail cluster yang berhasil dimuat
+class ClusterDetailsLoaded extends AdminState {
+  final User cluster;
+
+  ClusterDetailsLoaded({required this.cluster});
+}
+
+// State error untuk detail cluster
+class ClusterDetailsError extends AdminState {
+  final String message;
+
+  ClusterDetailsError(this.message);
+}
+
+// Error state khusus untuk cluster
+class ClustersError extends AdminState {
+  final String message;
+
+  ClustersError(this.message);
+}
+
+class CreateTaskLoading extends AdminState {}
+
+class CreateTaskSuccess extends AdminState {}
+
+class CreateTaskError extends AdminState {
+  final String message;
+
+  CreateTaskError(this.message);
 }
 
 class OfficersAndVehiclesLoaded extends AdminState {
@@ -75,7 +214,41 @@ class OfficersAndVehiclesLoading extends AdminState {}
 
 class OfficersAndVehiclesError extends AdminState {
   final String message;
+
   OfficersAndVehiclesError(this.message);
+}
+
+// Cluster Account States
+class ClustersLoaded extends AdminState {
+  final List<User> clusters;
+
+  ClustersLoaded(this.clusters);
+}
+
+class ClusterDetailLoaded extends AdminState {
+  final User cluster;
+
+  ClusterDetailLoaded(this.cluster);
+}
+
+class ClusterOfficersLoaded extends AdminState {
+  final String clusterId;
+  final List<Officer> officers;
+
+  ClusterOfficersLoaded({
+    required this.clusterId,
+    required this.officers,
+  });
+}
+
+class ClusterTasksLoaded extends AdminState {
+  final String clusterId;
+  final List<PatrolTask> tasks;
+
+  ClusterTasksLoaded({
+    required this.clusterId,
+    required this.tasks,
+  });
 }
 
 // BLoC
@@ -83,9 +256,23 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
   final RouteRepository repository;
 
   AdminBloc({required this.repository}) : super(AdminInitial()) {
+    // Register all event handlers
     on<LoadAllTasks>(_onLoadAllTasks);
     on<CreateTask>(_onCreateTask);
     on<LoadOfficersAndVehicles>(_onLoadOfficersAndVehicles);
+    on<GetClusterDetail>(_onGetClusterDetail);
+
+    // Handlers for cluster-related events
+    on<LoadClusters>(_onLoadClusters);
+    on<LoadAllClusters>(_onLoadClusters); // Map both to same handler
+    on<CreateClusterAccount>(_onCreateClusterAccount);
+    on<UpdateClusterAccount>(_onUpdateClusterAccount);
+    on<UpdateClusterCoordinates>(_onUpdateClusterCoordinates);
+    on<AddOfficerToClusterEvent>(_onAddOfficerToCluster);
+    on<UpdateOfficerInClusterEvent>(_onUpdateOfficerInCluster);
+    on<RemoveOfficerFromClusterEvent>(_onRemoveOfficerFromCluster);
+    on<SearchClustersEvent>(_onSearchClusters);
+    on<DeleteClusterEvent>(_onDeleteCluster);
   }
 
   Future<void> _onLoadAllTasks(
@@ -133,7 +320,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
       );
 
       emit(CreateTaskSuccess());
-      add(LoadAllTasks());
+      add(const LoadAllTasks());
     } catch (e) {
       emit(CreateTaskError('Failed to create task: $e'));
     }
@@ -151,6 +338,167 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     } catch (e) {
       emit(
           OfficersAndVehiclesError('Failed to load officers and vehicles: $e'));
+    }
+  }
+
+  Future<void> _onGetClusterDetail(
+    GetClusterDetail event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(AdminLoading());
+      final cluster = await repository.getClusterById(event.clusterId);
+      emit(ClusterDetailLoaded(cluster));
+    } catch (e) {
+      emit(AdminError('Failed to get cluster details: $e'));
+    }
+  }
+
+  Future<void> _onLoadClusters(
+    AdminEvent event, // Accept either LoadClusters or LoadAllClusters
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      final clusters = await repository.getAllClusters();
+      emit(ClustersLoaded(clusters));
+    } catch (e) {
+      emit(ClustersError('Failed to load clusters: $e'));
+    }
+  }
+
+  Future<void> _onCreateClusterAccount(
+    CreateClusterAccount event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      await repository.createClusterAccount(
+        name: event.name,
+        email: event.email,
+        password: event.password,
+        role: 'patrol', // Default role for clusters
+        clusterCoordinates: event.clusterCoordinates,
+      );
+      final clusters = await repository.getAllClusters();
+      emit(ClustersLoaded(clusters));
+    } catch (e) {
+      emit(ClustersError('Failed to create cluster account: $e'));
+    }
+  }
+
+  Future<void> _onUpdateClusterAccount(
+    UpdateClusterAccount event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      await repository.updateCluster(
+        clusterId: event.cluster.id,
+        updates: event.cluster.toMap(),
+      );
+      final cluster = await repository.getClusterById(event.cluster.id);
+      emit(ClusterDetailLoaded(cluster));
+    } catch (e) {
+      emit(ClustersError('Failed to update cluster: $e'));
+    }
+  }
+
+  Future<void> _onUpdateClusterCoordinates(
+    UpdateClusterCoordinates event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      await repository.updateClusterCoordinates(
+        clusterId: event.clusterId,
+        coordinates: event.coordinates,
+      );
+      final cluster = await repository.getClusterById(event.clusterId);
+      emit(ClusterDetailLoaded(cluster));
+    } catch (e) {
+      emit(ClustersError('Failed to update cluster coordinates: $e'));
+    }
+  }
+
+  Future<void> _onAddOfficerToCluster(
+    AddOfficerToClusterEvent event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      await repository.addOfficerToCluster(
+        clusterId: event.clusterId,
+        officer: event.officer,
+      );
+      final officers = await repository.getClusterOfficers(event.clusterId);
+      emit(ClusterOfficersLoaded(
+          clusterId: event.clusterId, officers: officers));
+    } catch (e) {
+      emit(ClustersError('Failed to add officer to cluster: $e'));
+    }
+  }
+
+  Future<void> _onUpdateOfficerInCluster(
+    UpdateOfficerInClusterEvent event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      await repository.updateOfficerInCluster(
+        clusterId: event.clusterId,
+        officer: event.officer,
+      );
+      final officers = await repository.getClusterOfficers(event.clusterId);
+      emit(ClusterOfficersLoaded(
+          clusterId: event.clusterId, officers: officers));
+    } catch (e) {
+      emit(ClustersError('Failed to update officer in cluster: $e'));
+    }
+  }
+
+  Future<void> _onRemoveOfficerFromCluster(
+    RemoveOfficerFromClusterEvent event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      await repository.removeOfficerFromCluster(
+        clusterId: event.clusterId,
+        officerId: event.officerId,
+      );
+      final officers = await repository.getClusterOfficers(event.clusterId);
+      emit(ClusterOfficersLoaded(
+          clusterId: event.clusterId, officers: officers));
+    } catch (e) {
+      emit(ClustersError('Failed to remove officer from cluster: $e'));
+    }
+  }
+
+  Future<void> _onSearchClusters(
+    SearchClustersEvent event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      final clusters = await repository.searchClustersByName(event.searchTerm);
+      emit(ClustersLoaded(clusters));
+    } catch (e) {
+      emit(ClustersError('Failed to search clusters: $e'));
+    }
+  }
+
+  Future<void> _onDeleteCluster(
+    DeleteClusterEvent event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      await repository.deleteCluster(event.clusterId);
+      final clusters = await repository.getAllClusters();
+      emit(ClustersLoaded(clusters));
+    } catch (e) {
+      emit(ClustersError('Failed to delete cluster: $e'));
     }
   }
 }

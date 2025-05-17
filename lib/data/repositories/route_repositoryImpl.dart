@@ -1,6 +1,9 @@
 // import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:math';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:livetrackingapp/domain/entities/user.dart';
 import '../../domain/entities/patrol_task.dart';
 import '../../domain/repositories/route_repository.dart';
 import '../../domain/entities/user.dart' as UserModel;
@@ -189,7 +192,6 @@ class RouteRepositoryImpl implements RouteRepository {
         final taskData = activeTaskEntry.value as Map<dynamic, dynamic>;
         print('Task assigned start time: ${taskData['assignedStartTime']}');
         print('Task assigned end time: ${taskData['assignedEndTime']}');
-
 
         // Create PatrolTask with the task data
         return _convertToPatrolTask({
@@ -494,6 +496,428 @@ class RouteRepositoryImpl implements RouteRepository {
     } catch (e) {
       print('Error getting vehicles: $e');
       throw Exception('Failed to get vehicles: $e');
+    }
+  }
+
+  //Cluster Logic
+  // Tambahkan implementasi method-method baru ini ke AdminRepositoryImpl
+
+  @override
+  Future<UserModel.User> getClusterById(String clusterId) async {
+    try {
+      final snapshot = await _database.child('users/$clusterId').get();
+
+      if (!snapshot.exists) {
+        throw Exception('Cluster not found');
+      }
+
+      final data = snapshot.value as Map<dynamic, dynamic>;
+      final userData = Map<String, dynamic>.from(data);
+      userData['id'] = clusterId;
+
+      return UserModel.User.fromMap(userData);
+    } catch (e) {
+      print('Error getting cluster details: $e');
+      throw Exception('Failed to get cluster details: $e');
+    }
+  }
+
+  @override
+  Future<void> createClusterAccount({
+    required String name,
+    required String email,
+    required String password,
+    required String role,
+    required List<List<double>> clusterCoordinates,
+  }) async {
+    try {
+      // Create Firebase Auth account
+      final firebaseAuth = FirebaseAuth.instance;
+      final userCredential = await firebaseAuth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      final userId = userCredential.user!.uid;
+
+      // Create user data in Realtime Database
+      final now = DateTime.now().toIso8601String();
+      await _database.child('users/$userId').set({
+        'name': name,
+        'email': email,
+        'role': role,
+        'cluster_coordinates': clusterCoordinates,
+        'officers': [], // Empty officers list initially
+        'created_at': now,
+        'updated_at': now,
+      });
+
+      return;
+    } catch (e) {
+      print('Error creating cluster account: $e');
+      throw Exception('Failed to create cluster account: $e');
+    }
+  }
+
+  Future<void> updateClusterAccount(UserModel.User cluster) async {
+    try {
+      final updates = {
+        'name': cluster.name,
+        'role': cluster.role,
+        'cluster_coordinates': cluster.clusterCoordinates,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      await _database.child('users/${cluster.id}').update(updates);
+      return;
+    } catch (e) {
+      print('Error updating cluster account: $e');
+      throw Exception('Failed to update cluster account: $e');
+    }
+  }
+
+  @override
+  Future<void> addOfficerToCluster({
+    required String clusterId,
+    required Officer officer,
+  }) async {
+    try {
+      await _checkAuth();
+
+      // Generate ID unik jika belum ada
+      final String officerId = officer.id.isNotEmpty
+          ? officer.id
+          : 'officer_${DateTime.now().millisecondsSinceEpoch}_${_generateRandomString(6)}';
+
+      // Buat officer dengan ID baru
+      final updatedOfficer = Officer(
+        id: officerId,
+        name: officer.name,
+        shift: officer.shift,
+        clusterId: clusterId,
+        photoUrl: officer.photoUrl,
+      );
+
+      // Simpan officer langsung ke node specific
+      final officerRef = _database.child('users/$clusterId/officers').push();
+      await officerRef.set(updatedOfficer.toMap());
+
+      // Update timestamp cluster
+      await _database.child('users/$clusterId').update({
+        'updated_at': DateTime.now().toIso8601String(),
+        'updated_by': _auth.currentUser?.uid,
+      });
+
+      print('Officer added to cluster with ID: $officerId');
+      return;
+    } catch (e) {
+      print('Error adding officer to cluster: $e');
+      throw Exception('Failed to add officer to cluster: $e');
+    }
+  }
+
+// Tambahkan method helper untuk generate string random
+  String _generateRandomString(int length) {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    final random = Random();
+    return String.fromCharCodes(Iterable.generate(
+        length, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
+  }
+
+  @override
+  Future<void> updateOfficerInCluster({
+    required String clusterId,
+    required Officer officer,
+  }) async {
+    try {
+      // Get current officers list
+      final snapshot = await _database.child('users/$clusterId/officers').get();
+
+      if (!snapshot.exists || snapshot.value == null) {
+        throw Exception('No officers found in cluster');
+      }
+
+      List<Map<String, dynamic>> officersList = [];
+      final data = snapshot.value;
+
+      if (data is List) {
+        officersList = List<Map<String, dynamic>>.from(
+          data.map((item) => item is Map
+              ? Map<String, dynamic>.from(item)
+              : <String, dynamic>{}),
+        );
+      } else if (data is Map) {
+        officersList = (data as Map<dynamic, dynamic>)
+            .values
+            .map((item) => item is Map
+                ? Map<String, dynamic>.from(item)
+                : <String, dynamic>{})
+            .toList();
+      }
+
+      // Find and update officer
+      final index = officersList.indexWhere(
+        (item) => item['id'] == officer.id,
+      );
+
+      if (index == -1) {
+        throw Exception('Officer not found in cluster');
+      }
+
+      officersList[index] = officer.toMap();
+
+      // Update officers list
+      await _database.child('users/$clusterId').update({
+        'officers': officersList,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      return;
+    } catch (e) {
+      print('Error updating officer in cluster: $e');
+      throw Exception('Failed to update officer in cluster: $e');
+    }
+  }
+
+  @override
+  Future<void> removeOfficerFromCluster({
+    required String clusterId,
+    required String officerId,
+  }) async {
+    try {
+      // Get current officers list
+      final snapshot = await _database.child('users/$clusterId/officers').get();
+
+      if (!snapshot.exists || snapshot.value == null) {
+        throw Exception('No officers found in cluster');
+      }
+
+      List<Map<String, dynamic>> officersList = [];
+      final data = snapshot.value;
+
+      if (data is List) {
+        officersList = List<Map<String, dynamic>>.from(
+          data.map((item) => item is Map
+              ? Map<String, dynamic>.from(item)
+              : <String, dynamic>{}),
+        );
+      } else if (data is Map) {
+        officersList = (data as Map<dynamic, dynamic>)
+            .values
+            .map((item) => item is Map
+                ? Map<String, dynamic>.from(item)
+                : <String, dynamic>{})
+            .toList();
+      }
+
+      // Remove officer
+      officersList.removeWhere((item) => item['id'] == officerId);
+
+      // Update officers list
+      await _database.child('users/$clusterId').update({
+        'officers': officersList,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      return;
+    } catch (e) {
+      print('Error removing officer from cluster: $e');
+      throw Exception('Failed to remove officer from cluster: $e');
+    }
+  }
+
+  // Tambahkan metode-metode berikut ke class RouteRepositoryImpl
+  @override
+  Future<List<UserModel.User>> getAllClusters() async {
+    try {
+      await _checkAuth();
+      final snapshot = await _database
+          .child('users')
+          .orderByChild('role')
+          .equalTo('patrol')
+          .get();
+
+      if (!snapshot.exists) {
+        return [];
+      }
+
+      final clustersMap = Map<String, dynamic>.from(snapshot.value as Map);
+      final clusters = <UserModel.User>[];
+
+      for (var entry in clustersMap.entries) {
+        try {
+          final clusterData = Map<String, dynamic>.from(entry.value);
+          clusterData['id'] = entry.key;
+          clusters.add(UserModel.User.fromMap(clusterData));
+        } catch (e) {
+          print('Error parsing cluster data for ${entry.key}: $e');
+        }
+      }
+
+      print('Retrieved ${clusters.length} clusters');
+      return clusters;
+    } catch (e) {
+      print('Error getting all clusters: $e');
+      throw Exception('Failed to get clusters: $e');
+    }
+  }
+
+  @override
+  Future<void> updateClusterCoordinates({
+    required String clusterId,
+    required List<List<double>> coordinates,
+  }) async {
+    try {
+      await _checkAuth();
+      await _database.child('users/$clusterId').update({
+        'cluster_coordinates': coordinates,
+        'updated_at': DateTime.now().toIso8601String(),
+        'updated_by': _auth.currentUser?.uid,
+      });
+      print('Cluster coordinates updated successfully');
+      return;
+    } catch (e) {
+      print('Error updating cluster coordinates: $e');
+      throw Exception('Failed to update cluster coordinates: $e');
+    }
+  }
+
+  @override
+  Future<void> deleteCluster(String clusterId) async {
+    try {
+      await _checkAuth();
+
+      // Optional: Archive instead of delete
+      await _database.child('users/$clusterId').update({
+        'status': 'deleted',
+        'updated_at': DateTime.now().toIso8601String(),
+        'updated_by': _auth.currentUser?.uid,
+      });
+
+      // Or actually delete (uncomment if needed)
+      // await _database.child('users/$clusterId').remove();
+
+      print('Cluster deleted/archived successfully');
+      return;
+    } catch (e) {
+      print('Error deleting cluster: $e');
+      throw Exception('Failed to delete cluster: $e');
+    }
+  }
+
+  @override
+  Future<UserModel.User?> getCurrentUserCluster() async {
+    try {
+      await _checkAuth();
+      final userId = _auth.currentUser!.uid;
+
+      final snapshot = await _database.child('users/$userId').get();
+      if (!snapshot.exists) {
+        return null;
+      }
+
+      final userData = Map<String, dynamic>.from(snapshot.value as Map);
+      userData['id'] = userId;
+      return UserModel.User.fromMap(userData);
+    } catch (e) {
+      print('Error getting current user cluster: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<List<Officer>> getClusterOfficers(String clusterId) async {
+    try {
+      final snapshot = await _database.child('users/$clusterId/officers').get();
+
+      if (!snapshot.exists || snapshot.value == null) {
+        return [];
+      }
+
+      final dynamic officersData = snapshot.value;
+      final officers = <Officer>[];
+
+      if (officersData is List) {
+        for (var i = 0; i < officersData.length; i++) {
+          if (officersData[i] != null) {
+            try {
+              final officerMap = Map<String, dynamic>.from(officersData[i]);
+              officers.add(Officer.fromMap(officerMap));
+            } catch (e) {
+              print('Error parsing officer at index $i: $e');
+            }
+          }
+        }
+      } else if (officersData is Map) {
+        officersData.forEach((key, value) {
+          if (value != null) {
+            try {
+              final officerMap = Map<String, dynamic>.from(value);
+              officers.add(Officer.fromMap(officerMap));
+            } catch (e) {
+              print('Error parsing officer with key $key: $e');
+            }
+          }
+        });
+      }
+
+      return officers;
+    } catch (e) {
+      print('Error getting cluster officers: $e');
+      throw Exception('Failed to get cluster officers: $e');
+    }
+  }
+
+// Metode untuk mendapatkan semua tugas yang terkait dengan cluster tertentu
+  @override
+  Future<List<PatrolTask>> getClusterTasks(String clusterId) async {
+    try {
+      // Dapatkan semua petugas dari cluster
+      final officers = await getClusterOfficers(clusterId);
+      final officerIds = officers.map((o) => o.id).toList();
+
+      // Dapatkan semua tugas
+      final allTasks = await getAllTasks();
+
+      // Filter tugas berdasarkan petugas dalam cluster
+      return allTasks
+          .where((task) => officerIds.contains(task.userId))
+          .toList();
+    } catch (e) {
+      print('Error getting cluster tasks: $e');
+      throw Exception('Failed to get cluster tasks: $e');
+    }
+  }
+
+// Metode untuk mencari cluster berdasarkan nama
+  @override
+  Future<List<UserModel.User>> searchClustersByName(String searchTerm) async {
+    try {
+      final allClusters = await getAllClusters();
+      if (searchTerm.isEmpty) return allClusters;
+
+      return allClusters
+          .where((cluster) =>
+              cluster.name.toLowerCase().contains(searchTerm.toLowerCase()))
+          .toList();
+    } catch (e) {
+      print('Error searching clusters: $e');
+      throw Exception('Failed to search clusters: $e');
+    }
+  }
+
+  @override
+  Future<void> updateCluster({
+    required String clusterId,
+    required Map<String, dynamic> updates,
+  }) async {
+    try {
+      await _checkAuth();
+      await _database.child('users/$clusterId').update(updates);
+      print('Cluster updated successfully');
+    } catch (e) {
+      print('Error updating cluster: $e');
+      throw Exception('Failed to update cluster: $e');
     }
   }
 }
