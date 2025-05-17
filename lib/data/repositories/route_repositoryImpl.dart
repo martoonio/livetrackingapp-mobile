@@ -1,6 +1,7 @@
 // import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:livetrackingapp/domain/entities/cluster.dart';
 import '../../domain/entities/patrol_task.dart';
 import '../../domain/repositories/route_repository.dart';
 import '../../domain/entities/user.dart' as UserModel;
@@ -190,7 +191,6 @@ class RouteRepositoryImpl implements RouteRepository {
         print('Task assigned start time: ${taskData['assignedStartTime']}');
         print('Task assigned end time: ${taskData['assignedEndTime']}');
 
-
         // Create PatrolTask with the task data
         return _convertToPatrolTask({
           ...taskData,
@@ -275,6 +275,7 @@ class RouteRepositoryImpl implements RouteRepository {
         taskId: data['taskId']?.toString() ?? '',
         userId: data['userId']?.toString() ?? '',
         vehicleId: data['vehicleId']?.toString() ?? '',
+        clusterId: data['clusterId']?.toString() ?? '',
         assignedRoute: data['assigned_route'] != null
             ? (data['assigned_route'] as List)
                 .map((point) => (point as List)
@@ -304,6 +305,7 @@ class RouteRepositoryImpl implements RouteRepository {
         taskId: data['taskId']?.toString() ?? '',
         userId: data['userId']?.toString() ?? '',
         vehicleId: data['vehicleId']?.toString() ?? '',
+        clusterId: data['clusterId']?.toString() ?? '',
         assignedStartTime: data['assignedStartTime'] != null
             ? _parseDateTime(data['assignedStartTime'])
             : null,
@@ -354,6 +356,7 @@ class RouteRepositoryImpl implements RouteRepository {
     required String vehicleId,
     required List<List<double>> assignedRoute,
     required String? assignedOfficerId,
+    required String? clusterId,
     required DateTime? assignedStartTime,
     required DateTime? assignedEndTime,
   }) async {
@@ -364,6 +367,7 @@ class RouteRepositoryImpl implements RouteRepository {
       final newTask = {
         'taskId': taskRef.key,
         'vehicleId': vehicleId,
+        'clusterId': clusterId,
         'userId': assignedOfficerId,
         'assigned_route': assignedRoute,
         'assignedStartTime': assignedStartTime != null
@@ -494,6 +498,72 @@ class RouteRepositoryImpl implements RouteRepository {
     } catch (e) {
       print('Error getting vehicles: $e');
       throw Exception('Failed to get vehicles: $e');
+    }
+  }
+
+  @override
+  Future<List<ClusterModel>> getClusters() async {
+    try {
+      final snapshot = await _database.child('clusters').get();
+      if (!snapshot.exists) return [];
+
+      final data = snapshot.value as Map<dynamic, dynamic>;
+      return data.entries.map((entry) {
+        final id = entry.key as String;
+        final clusterData = entry.value as Map<dynamic, dynamic>;
+
+        // Add id to the data
+        final clusterWithId = {...clusterData, 'id': id};
+
+        return ClusterModel.fromJson(Map<String, dynamic>.from(clusterWithId));
+      }).toList();
+    } catch (e) {
+      print('Error getting clusters: $e');
+      return [];
+    }
+  }
+
+  @override
+  Future<void> createCluster({
+    required String name,
+    required String description,
+    required List<List<double>> clusterCoordinates,
+    required String status,
+  }) async {
+    try {
+      final newClusterId = _database.child('clusters').push().key;
+      if (newClusterId == null)
+        throw Exception('Failed to generate cluster ID');
+
+      final now = DateTime.now().toIso8601String();
+
+      await _database.child('clusters').child(newClusterId).set({
+        'name': name,
+        'description': description,
+        'clusterCoordinates': clusterCoordinates,
+        'status': status,
+        'created_at': now,
+        'updated_at': now,
+      });
+    } catch (e) {
+      print('Error creating cluster: $e');
+      throw Exception('Failed to create cluster: $e');
+    }
+  }
+
+  @override
+  Future<void> updateCluster({
+    required String clusterId,
+    required Map<String, dynamic> updates,
+  }) async {
+    try {
+      // Add updated_at timestamp
+      updates['updated_at'] = DateTime.now().toIso8601String();
+
+      await _database.child('clusters').child(clusterId).update(updates);
+    } catch (e) {
+      print('Error updating cluster: $e');
+      throw Exception('Failed to update cluster: $e');
     }
   }
 }

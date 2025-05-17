@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:livetrackingapp/presentation/admin/add_cluster.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/admin/patrol_history_screen.dart';
 import 'create_task_screen.dart';
@@ -23,6 +24,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: () {
               context.read<AdminBloc>().add(LoadAllTasks());
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AddClusterScreen(),
+                ),
+              );
             },
           ),
         ],

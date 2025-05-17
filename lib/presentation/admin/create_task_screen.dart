@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
+import 'package:livetrackingapp/domain/entities/cluster.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/notification_utils.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
@@ -32,6 +33,10 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
   DateTime _assignedStartTime = DateTime.now();
   DateTime _assignedEndTime = DateTime.now().add(const Duration(hours: 1));
+
+  String? _selectedClusterId;
+  bool _isUsingCluster = false;
+  ClusterModel? _selectedCluster;
 
   @override
   void initState() {
@@ -98,6 +103,11 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
   Widget _buildDraggableFormSection(List<User> officers, List<String> vehicles,
       ScrollController scrollController) {
+    List<ClusterModel> clusters = [];
+    final state = context.read<AdminBloc>().state;
+    if (state is OfficersAndVehiclesLoaded && state.clusters.isNotEmpty) {
+      clusters = state.clusters;
+    }
     return Container(
       decoration: BoxDecoration(
         color: neutralWhite,
@@ -200,6 +210,100 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                         borderColor:
                             _isVehicleInvalid ? Colors.red : kbpBlue900,
                       ),
+                      16.height,
+                      const Text(
+                        'Pilih Cluster:',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: neutral900,
+                        ),
+                      ),
+                      8.height,
+                      CustomDropdown(
+                        hintText: 'Pilih cluster...',
+                        value: _selectedClusterId,
+                        items: clusters
+                            .where((c) =>
+                                c.status ==
+                                'active') // Hanya tampilkan cluster aktif
+                            .map((cluster) {
+                          return DropdownMenuItem(
+                            value: cluster.id,
+                            child: Text(cluster.name),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedClusterId = value;
+                            if (value != null) {
+                              // Cari data cluster yang dipilih
+                              _selectedCluster = clusters.firstWhere(
+                                (c) => c.id == value,
+                                orElse: () => clusters.first,
+                              );
+
+                              // Reset titik yang sudah ada
+                              _selectedPoints.clear();
+                              _markers.clear();
+
+                              // Tambahkan titik-titik dari cluster yang dipilih
+                              if (_selectedCluster?.clusterCoordinates !=
+                                  null) {
+                                for (var i = 0;
+                                    i <
+                                        _selectedCluster!
+                                            .clusterCoordinates!.length;
+                                    i++) {
+                                  final coord =
+                                      _selectedCluster!.clusterCoordinates![i];
+                                  final latLng = LatLng(coord[0], coord[1]);
+                                  _selectedPoints.add(latLng);
+
+                                  // Tambahkan marker untuk titik tersebut
+                                  _markers.add(
+                                    Marker(
+                                      markerId: MarkerId('point_$i'),
+                                      position: latLng,
+                                      infoWindow:
+                                          InfoWindow(title: 'Point ${i + 1}'),
+                                    ),
+                                  );
+                                }
+
+                                // Jika ada mapController dan ada titik, zoom ke area cluster
+                                if (_mapController != null &&
+                                    _selectedPoints.isNotEmpty) {
+                                  _zoomToSelectedPoints();
+                                }
+                              }
+                            }
+                          });
+                        },
+                        borderColor: kbpBlue900,
+                      ),
+
+                      // Tampilkan info tambahan tentang cluster jika sudah dipilih
+                      if (_selectedCluster != null) ...[
+                        16.height,
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: neutral300,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: kbpBlue900, width: 1),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                  'Jumlah Titik: ${_selectedCluster!.clusterCoordinates?.length ?? 0}',
+                                  style: semiBoldTextStyle()),
+                            ],
+                          ),
+                        ),
+                      ],
+
                       24.height,
 
                       // Patrol Points Counter
@@ -661,5 +765,37 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         ),
       );
     });
+  }
+
+  void _zoomToSelectedPoints() {
+    if (_selectedPoints.isEmpty || _mapController == null) return;
+
+    double minLat = double.infinity;
+    double maxLat = -double.infinity;
+    double minLng = double.infinity;
+    double maxLng = -double.infinity;
+
+    for (var point in _selectedPoints) {
+      if (point.latitude < minLat) minLat = point.latitude;
+      if (point.latitude > maxLat) maxLat = point.latitude;
+      if (point.longitude < minLng) minLng = point.longitude;
+      if (point.longitude > maxLng) maxLng = point.longitude;
+    }
+
+    // Tambahkan padding
+    final padding = 0.002; // Sekitar 200 meter
+    minLat -= padding;
+    maxLat += padding;
+    minLng -= padding;
+    maxLng += padding;
+
+    final bounds = LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(bounds, 50),
+    );
   }
 }

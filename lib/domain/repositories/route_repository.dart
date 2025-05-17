@@ -1,3 +1,5 @@
+import 'package:livetrackingapp/domain/entities/cluster.dart';
+
 import '../entities/patrol_task.dart';
 import '../entities/user.dart';
 
@@ -20,7 +22,19 @@ abstract class RouteRepository {
     required String vehicleId,
     required List<List<double>> assignedRoute,
     required String? assignedOfficerId,
+    required String? clusterId,
     required DateTime? assignedStartTime,
     required DateTime? assignedEndTime,
+  });
+  Future<List<ClusterModel>> getClusters();
+  Future<void> createCluster({
+    required String name,
+    required String description,
+    required List<List<double>> clusterCoordinates,
+    required String status,
+  });
+  Future<void> updateCluster({
+    required String clusterId,
+    required Map<String, dynamic> updates,
   });
 }

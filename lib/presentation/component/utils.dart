@@ -82,3 +82,21 @@ String getDurasiPatroli(DateTime? endTime, {DateTime? startTime}) {
 
   return '$hours jam $minutes menit';
 }
+
+List<List<double>> parseRouteCoordinates(dynamic routeData) {
+    if (routeData is! List) return [];
+
+    try {
+      return (routeData as List).map((route) {
+        if (route is! List) return <double>[];
+        return (route as List).map((coord) {
+          if (coord is double) return coord;
+          if (coord is int) return coord.toDouble();
+          return 0.0;
+        }).toList();
+      }).toList();
+    } catch (e) {
+      print('Error parsing route coordinates: $e');
+      return [];
+    }
+  }

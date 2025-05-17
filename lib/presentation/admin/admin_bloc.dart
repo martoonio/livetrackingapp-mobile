@@ -1,4 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:livetrackingapp/domain/entities/cluster.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/domain/repositories/route_repository.dart';
 import '../../domain/entities/patrol_task.dart';
@@ -9,6 +10,39 @@ abstract class AdminEvent {}
 class LoadAllTasks extends AdminEvent {}
 
 class LoadOfficersAndVehicles extends AdminEvent {}
+
+// Cluster events
+class LoadClusters extends AdminEvent {}
+
+class CreateCluster extends AdminEvent {
+  final String name;
+  final String description;
+  final List<List<double>> clusterCoordinates;
+  final String status;
+
+  CreateCluster({
+    required this.name,
+    required this.description,
+    required this.clusterCoordinates,
+    required this.status,
+  });
+}
+
+class UpdateCluster extends AdminEvent {
+  final String clusterId;
+  final String name;
+  final String description;
+  final List<List<double>> clusterCoordinates;
+  final String status;
+
+  UpdateCluster({
+    required this.clusterId,
+    required this.name,
+    required this.description,
+    required this.clusterCoordinates,
+    required this.status,
+  });
+}
 
 class CreateTask extends AdminEvent {
   final String vehicleId;
@@ -64,10 +98,12 @@ class AdminError extends AdminState {
 class OfficersAndVehiclesLoaded extends AdminState {
   final List<User> officers;
   final List<String> vehicles;
+  final List<ClusterModel> clusters;
 
   OfficersAndVehiclesLoaded({
     required this.officers,
     required this.vehicles,
+    this.clusters = const [],
   });
 }
 
@@ -78,6 +114,21 @@ class OfficersAndVehiclesError extends AdminState {
   OfficersAndVehiclesError(this.message);
 }
 
+// Cluster States
+class ClustersLoading extends AdminState {}
+
+class ClustersLoaded extends AdminState {
+  final List<ClusterModel> clusters;
+
+  ClustersLoaded(this.clusters);
+}
+
+class ClustersError extends AdminState {
+  final String message;
+
+  ClustersError(this.message);
+}
+
 // BLoC
 class AdminBloc extends Bloc<AdminEvent, AdminState> {
   final RouteRepository repository;
@@ -86,6 +137,9 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     on<LoadAllTasks>(_onLoadAllTasks);
     on<CreateTask>(_onCreateTask);
     on<LoadOfficersAndVehicles>(_onLoadOfficersAndVehicles);
+    on<LoadClusters>(_onLoadClusters);
+    on<CreateCluster>(_onCreateCluster);
+    on<UpdateCluster>(_onUpdateCluster);
   }
 
   Future<void> _onLoadAllTasks(
@@ -128,6 +182,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
         vehicleId: event.vehicleId,
         assignedRoute: event.assignedRoute,
         assignedOfficerId: event.assignedOfficerId,
+        clusterId: event.assignedOfficerId,
         assignedStartTime: event.assignedStartTime,
         assignedEndTime: event.assignedEndTime,
       );
@@ -147,10 +202,59 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
       emit(OfficersAndVehiclesLoading());
       final officers = await repository.getAllOfficers();
       final vehicles = await repository.getAllVehicles();
-      emit(OfficersAndVehiclesLoaded(officers: officers, vehicles: vehicles));
+      final clusters = await repository.getClusters();
+      emit(OfficersAndVehiclesLoaded(officers: officers, vehicles: vehicles, clusters: clusters));
     } catch (e) {
       emit(
           OfficersAndVehiclesError('Failed to load officers and vehicles: $e'));
+    }
+  }
+
+  Future<void> _onLoadClusters(
+      LoadClusters event, Emitter<AdminState> emit) async {
+    try {
+      emit(ClustersLoading());
+      final clusters = await repository.getClusters();
+      emit(ClustersLoaded(clusters));
+    } catch (e) {
+      emit(ClustersError('Failed to load clusters: $e'));
+    }
+  }
+
+  Future<void> _onCreateCluster(
+      CreateCluster event, Emitter<AdminState> emit) async {
+    try {
+      await repository.createCluster(
+        name: event.name,
+        description: event.description,
+        clusterCoordinates: event.clusterCoordinates,
+        status: event.status,
+      );
+
+      final clusters = await repository.getClusters();
+      emit(ClustersLoaded(clusters));
+    } catch (e) {
+      emit(ClustersError('Failed to create cluster: $e'));
+    }
+  }
+
+  Future<void> _onUpdateCluster(
+      UpdateCluster event, Emitter<AdminState> emit) async {
+    try {
+      await repository.updateCluster(
+        clusterId: event.clusterId,
+        updates: {
+          'name': event.name,
+          'description': event.description,
+          'clusterCoordinates': event.clusterCoordinates,
+          'status': event.status,
+        },
+      );
+
+      final clusters = await repository.getClusters();
+      emit(ClustersLoaded(clusters));
+    } catch (e) {
+      emit(ClustersError('Failed to update cluster: $e'));
     }
   }
 }

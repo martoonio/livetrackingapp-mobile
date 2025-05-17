@@ -336,6 +336,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         taskId: event.task.taskId,
         userId: event.task.userId,
         vehicleId: event.task.vehicleId,
+        clusterId: event.task.clusterId,
         status: 'ongoing',
         startTime: event.startTime,
         endTime: null,

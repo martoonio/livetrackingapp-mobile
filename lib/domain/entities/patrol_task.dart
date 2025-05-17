@@ -1,9 +1,11 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:livetrackingapp/presentation/component/utils.dart';
 
 class PatrolTask {
   final String taskId;
   final String userId;
   final String vehicleId;
+  final String clusterId;
   final String status;
   final DateTime? startTime;
   final DateTime? endTime;
@@ -16,12 +18,15 @@ class PatrolTask {
   final Map<String, dynamic>? lastLocation;
   String? _officerName;
   String get officerName => _officerName ?? 'Loading...';
+  String? _clusterName;
+  String? get clusterName => _clusterName ?? 'Loading...';
   set officerName(String value) => _officerName = value;
 
   PatrolTask({
     required this.taskId,
     required this.userId,
     required this.vehicleId,
+    required this.clusterId,
     required this.status,
     this.startTime,
     this.endTime,
@@ -42,6 +47,7 @@ class PatrolTask {
       taskId: json['taskId'] as String,
       userId: json['userId'] as String,
       vehicleId: json['vehicleId'] as String,
+      clusterId: json['clusterId'] as String,
       status: json['status'] as String,
       startTime: json['startTime'] != null
           ? DateTime.parse(json['startTime'] as String)
@@ -61,9 +67,9 @@ class PatrolTask {
               ? DateTime.parse(json['assigned_end_time'] as String)
               : null),
       assignedRoute: json['assignedRoute'] != null
-          ? _parseRouteCoordinates(json['assignedRoute'])
+          ? parseRouteCoordinates(json['assignedRoute'])
           : (json['assigned_route'] != null
-              ? _parseRouteCoordinates(json['assigned_route'])
+              ? parseRouteCoordinates(json['assigned_route'])
               : null),
       distance: json['distance'] != null
           ? (json['distance'] as num).toDouble()
@@ -74,25 +80,6 @@ class PatrolTask {
       routePath: json['route_path'] as Map<String, dynamic>?,
       lastLocation: json['lastLocation'] as Map<String, dynamic>?,
     );
-  }
-
-// Helper method untuk parsing route coordinates dengan lebih aman
-  static List<List<double>> _parseRouteCoordinates(dynamic routeData) {
-    if (routeData is! List) return [];
-
-    try {
-      return (routeData as List).map((route) {
-        if (route is! List) return <double>[];
-        return (route as List).map((coord) {
-          if (coord is double) return coord;
-          if (coord is int) return coord.toDouble();
-          return 0.0;
-        }).toList();
-      }).toList();
-    } catch (e) {
-      print('Error parsing route coordinates: $e');
-      return [];
-    }
   }
 
   Future<void> fetchOfficerName(DatabaseReference database) async {
@@ -116,10 +103,32 @@ class PatrolTask {
     }
   }
 
+  Future<void> fetchClusterName(DatabaseReference database) async {
+    try {
+      print('Fetching cluster name for clusterId: $clusterId');
+      if (clusterId.isEmpty) return;
+
+      final snapshot = await database.child('clusters').child(clusterId).get();
+
+      if (snapshot.exists) {
+        final clusterData = Map<String, dynamic>.from(snapshot.value as Map);
+        _clusterName = clusterData['name'] as String? ?? 'Unknown';
+        print('Cluster name loaded: $_clusterName');
+      } else {
+        _clusterName = 'Unknown Cluster';
+        print('Cluster not found in database');
+      }
+    } catch (e) {
+      print('Error fetching cluster name: $e');
+      _clusterName = 'Error loading name';
+    }
+  }
+
   PatrolTask copyWith({
     String? taskId,
     String? userId,
     String? vehicleId,
+    String? clusterId,
     String? status,
     DateTime? startTime,
     DateTime? endTime,
@@ -134,6 +143,7 @@ class PatrolTask {
       taskId: taskId ?? this.taskId,
       userId: userId ?? this.userId,
       vehicleId: vehicleId ?? this.vehicleId,
+      clusterId: clusterId ?? this.clusterId,
       status: status ?? this.status,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
