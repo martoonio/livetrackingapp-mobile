@@ -392,6 +392,23 @@ class RouteRepositoryImpl implements RouteRepository {
   }
 
   @override
+  Future<PatrolTask?> getTaskById({required String taskId}) async {
+    try {
+      final snapshot = await _database.child('tasks/$taskId').get();
+
+      if (!snapshot.exists) {
+        return null;
+      }
+
+      final taskData = Map<String, dynamic>.from(snapshot.value as Map);
+      return _convertToPatrolTask(taskData);
+    } catch (e) {
+      print('Error getting task by ID: $e');
+      return null;
+    }
+  }
+
+  @override
   Future<void> updateTask(String taskId, Map<String, dynamic> updates) async {
     try {
       print('Updating task $taskId with: $updates'); // Debug print

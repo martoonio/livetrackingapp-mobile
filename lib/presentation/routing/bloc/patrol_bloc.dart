@@ -3,6 +3,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../domain/entities/patrol_task.dart';
 import '../../../domain/repositories/route_repository.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
 
 // Events
 abstract class PatrolEvent {}
@@ -42,7 +46,7 @@ class UpdatePatrolLocation extends PatrolEvent {
 class StopPatrol extends PatrolEvent {
   final DateTime endTime;
   final double distance;
-  final Map<String, dynamic>? finalRoutePath; // Tambahkan parameter ini
+  final Map<String, dynamic>? finalRoutePath;
 
   StopPatrol({
     required this.endTime,
@@ -83,6 +87,10 @@ class ResumePatrol extends PatrolEvent {
   });
 }
 
+class SyncOfflineData extends PatrolEvent {}
+
+class DebugOfflineData extends PatrolEvent {}
+
 // States
 abstract class PatrolState {}
 
@@ -94,14 +102,15 @@ class PatrolLoaded extends PatrolState {
   final PatrolTask? task;
   final bool isPatrolling;
   final List<Position>? currentPatrolPath;
-  // add startTime and endTime
   final DateTime? startTime;
   final DateTime? endTime;
   final DateTime? assignedStartTime;
   final DateTime? assignedEndTime;
   final double? distance;
-  final Map<String, dynamic>? routePath; // Add this
+  final Map<String, dynamic>? routePath;
   final List<PatrolTask> finishedTasks;
+  final bool isSyncing;
+  final bool isOffline;
 
   PatrolLoaded({
     this.task,
@@ -112,8 +121,10 @@ class PatrolLoaded extends PatrolState {
     this.assignedStartTime,
     this.assignedEndTime,
     this.distance,
-    this.routePath, // Add this
+    this.routePath,
     this.finishedTasks = const [],
+    this.isSyncing = false,
+    this.isOffline = false,
   });
 
   List<Object?> get props => [
@@ -126,7 +137,9 @@ class PatrolLoaded extends PatrolState {
         distance,
         currentPatrolPath,
         routePath,
-        finishedTasks
+        finishedTasks,
+        isSyncing,
+        isOffline,
       ];
 
   PatrolLoaded copyWith({
@@ -138,8 +151,10 @@ class PatrolLoaded extends PatrolState {
     DateTime? assignedStartTime,
     DateTime? assignedEndTime,
     List<Position>? currentPatrolPath,
-    Map<String, dynamic>? routePath, // Add this
+    Map<String, dynamic>? routePath,
     List<PatrolTask>? finishedTasks,
+    bool? isSyncing,
+    bool? isOffline,
   }) {
     return PatrolLoaded(
       task: task ?? this.task,
@@ -150,8 +165,10 @@ class PatrolLoaded extends PatrolState {
       endTime: endTime ?? this.endTime,
       assignedStartTime: assignedStartTime ?? this.assignedStartTime,
       assignedEndTime: assignedEndTime ?? this.assignedEndTime,
-      routePath: routePath ?? this.routePath, // Add this
+      routePath: routePath ?? this.routePath,
       finishedTasks: finishedTasks ?? this.finishedTasks,
+      isSyncing: isSyncing ?? this.isSyncing,
+      isOffline: isOffline ?? this.isOffline,
     );
   }
 }
@@ -163,10 +180,15 @@ class PatrolError extends PatrolState {
 
 // BLoC
 class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
+  // Di dalam deklarasi class PatrolBloc
   final RouteRepository repository;
   StreamSubscription<Position>? _locationSubscription;
   StreamSubscription<PatrolTask?>? _taskSubscription;
   StreamSubscription<List<PatrolTask>>? _historySubscription;
+  StreamSubscription<dynamic>?
+      _connectivitySubscription; // Ubah tipe ke dynamic
+  Box<dynamic>? _offlineLocationBox;
+  bool _isConnected = true;
 
   PatrolBloc({required this.repository}) : super(PatrolInitial()) {
     on<LoadRouteData>(_onLoadRouteData);
@@ -179,6 +201,347 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     on<UpdateCurrentTask>(_onUpdateCurrentTask);
     on<CheckOngoingPatrol>(_onCheckOngoingPatrol);
     on<ResumePatrol>(_onResumePatrol);
+    on<SyncOfflineData>(_onSyncOfflineData);
+    on<DebugOfflineData>(_onDebugOfflineData);
+
+    // Setup connectivity monitoring and local storage
+    _initializeStorage();
+    _setupConnectivityMonitoring();
+  }
+
+  void _onDebugOfflineData(
+    DebugOfflineData event,
+    Emitter<PatrolState> emit,
+  ) {
+    debugPrintOfflineData();
+  }
+
+  // Debugging method to print all offline data
+  void debugPrintOfflineData() {
+    if (_offlineLocationBox == null || _offlineLocationBox!.isEmpty) {
+      print('No offline data to display');
+      return;
+    }
+
+    print('\n===== OFFLINE DATA CONTENTS =====');
+    print('Total items: ${_offlineLocationBox!.length}');
+
+    // Group by type
+    final stopKeys = _offlineLocationBox!.keys
+        .where((k) => k.toString().startsWith('patrol_stop_'))
+        .toList();
+
+    final startKeys = _offlineLocationBox!.keys
+        .where((k) => k.toString().startsWith('patrol_start_'))
+        .toList();
+
+    final updateKeys = _offlineLocationBox!.keys
+        .where((k) => k.toString().startsWith('task_update_'))
+        .toList();
+
+    final locationKeys = _offlineLocationBox!.keys
+        .where((k) =>
+            !k.toString().startsWith('patrol_') &&
+            !k.toString().startsWith('task_'))
+        .toList();
+
+    print('\n-- PATROL STARTS: ${startKeys.length} --');
+    for (final key in startKeys) {
+      final data = _offlineLocationBox!.get(key);
+      print('$key: $data');
+    }
+
+    print('\n-- PATROL STOPS: ${stopKeys.length} --');
+    for (final key in stopKeys) {
+      final data = _offlineLocationBox!.get(key);
+      print('$key: $data');
+    }
+
+    print('\n-- TASK UPDATES: ${updateKeys.length} --');
+    for (final key in updateKeys) {
+      final data = _offlineLocationBox!.get(key);
+      print('$key: $data');
+    }
+
+    print('\n-- LOCATION POINTS: ${locationKeys.length} --');
+    if (locationKeys.length > 10) {
+      for (final key in locationKeys.take(5)) {
+        final data = _offlineLocationBox!.get(key);
+        print('$key: $data');
+      }
+      print('... (showing 5 of ${locationKeys.length})');
+      for (final key in locationKeys.skip(locationKeys.length - 5)) {
+        final data = _offlineLocationBox!.get(key);
+        print('$key: $data');
+      }
+    } else {
+      for (final key in locationKeys) {
+        final data = _offlineLocationBox!.get(key);
+        print('$key: $data');
+      }
+    }
+
+    print('===============================\n');
+  }
+
+  // Initialize local storage
+  Future<void> _initializeStorage() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      await Hive.initFlutter(dir.path);
+      _offlineLocationBox = await Hive.openBox('offline_locations');
+      print('Local storage initialized');
+    } catch (e) {
+      print('Error initializing local storage: $e');
+    }
+  }
+
+  // Setup connectivity monitoring
+// Setup connectivity monitoring
+  void _setupConnectivityMonitoring() {
+    Connectivity().checkConnectivity().then((result) {
+      _isConnected = (result != ConnectivityResult.none);
+      print('Initial connection status: $_isConnected');
+    });
+
+    // Perbaikan error tipe dengan menyesuaikan parameter fungsi
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
+      (List<ConnectivityResult> results) {
+        // Gunakan hasil pertama atau anggap tidak ada koneksi jika list kosong
+        final result =
+            results.isNotEmpty ? results.first : ConnectivityResult.none;
+
+        final wasConnected = _isConnected;
+        _isConnected = (result != ConnectivityResult.none);
+
+        print('Connection status changed: $_isConnected');
+
+        // Update UI to show offline/online status
+        if (state is PatrolLoaded) {
+          final currentState = state as PatrolLoaded;
+          emit(currentState.copyWith(isOffline: !_isConnected));
+        }
+
+        // If reconnected, try to sync offline data
+        if (!wasConnected && _isConnected) {
+          print('Reconnected to network, syncing offline data...');
+          add(SyncOfflineData());
+        }
+      },
+    );
+  }
+
+  // Handle syncing offline data when connection is restored
+  // Handle syncing offline data when connection is restored
+  Future<void> _onSyncOfflineData(
+    SyncOfflineData event,
+    Emitter<PatrolState> emit,
+  ) async {
+    if (!_isConnected || _offlineLocationBox == null) return;
+
+    try {
+      print('Starting to sync offline data...');
+      print('Total offline items: ${_offlineLocationBox!.length}');
+      print('Keys: ${_offlineLocationBox!.keys.toList()}');
+
+      if (_offlineLocationBox!.isEmpty) {
+        print('No offline data to sync');
+        return;
+      }
+
+      // Get current state and set syncing flag
+      if (state is PatrolLoaded) {
+        final currentState = state as PatrolLoaded;
+        emit(currentState.copyWith(isSyncing: true));
+
+        // Debug: print task info
+        print('Current task: ${currentState.task?.taskId}');
+        print(
+            'Current route path length: ${currentState.routePath?.length ?? 0}');
+
+        // Check for patrol stop data first
+        final stopKeyPattern = 'patrol_stop_';
+        final stopKeys = _offlineLocationBox!.keys
+            .where((k) => k.toString().startsWith(stopKeyPattern))
+            .toList();
+
+        // Debug stop keys
+        print('Found ${stopKeys.length} stop records to sync');
+
+        // Collate all location points by taskId
+        final locationDataByTask = <String, Map<String, dynamic>>{};
+
+        // Find all location points (non-stop keys) and organize by task ID
+        final locationKeys = _offlineLocationBox!.keys
+            .where((k) =>
+                !k.toString().startsWith(stopKeyPattern) &&
+                !k.toString().startsWith('task_update_') &&
+                !k.toString().startsWith('patrol_start_'))
+            .toList();
+
+        print('Found ${locationKeys.length} location points to sync');
+
+        // Organize points by task ID
+        for (final key in locationKeys) {
+          final data = _offlineLocationBox!.get(key);
+          if (data != null && data is Map && data['taskId'] != null) {
+            final taskId = data['taskId'] as String;
+            final timestamp = data['timestamp'] as String;
+            final latitude = data['latitude'] as double;
+            final longitude = data['longitude'] as double;
+
+            // Initialize map for this task if needed
+            locationDataByTask[taskId] ??= {};
+
+            // Add point to route_path
+            locationDataByTask[taskId]?[key.toString()] = {
+              'coordinates': [latitude, longitude],
+              'timestamp': timestamp,
+            };
+          }
+        }
+
+        print('Organized points for ${locationDataByTask.length} tasks');
+
+        // First, process location data to build complete route paths
+        for (final taskId in locationDataByTask.keys) {
+          try {
+            print(
+                'Processing ${locationDataByTask[taskId]!.length} points for task $taskId');
+
+            // Fetch current route_path from database to merge with
+            Map<String, dynamic> existingRoutePath = {};
+            try {
+              final taskSnapshot = await repository.getTaskById(taskId: taskId);
+              if (taskSnapshot != null && taskSnapshot.routePath != null) {
+                existingRoutePath =
+                    Map<String, dynamic>.from(taskSnapshot.routePath as Map);
+                print(
+                    'Found existing route_path with ${existingRoutePath.length} points');
+              }
+            } catch (e) {
+              print('Error fetching existing route_path: $e');
+            }
+
+            // Merge with local points
+            final mergedRoutePath = {
+              ...existingRoutePath,
+              ...locationDataByTask[taskId]!
+            };
+            print('Merged route_path now has ${mergedRoutePath.length} points');
+
+            // Update route_path in database
+            await repository.updateTask(
+              taskId,
+              {'route_path': mergedRoutePath},
+            );
+            print('Successfully updated route_path for task $taskId');
+
+            // Delete synced points
+            for (final key in locationDataByTask[taskId]!.keys) {
+              await _offlineLocationBox!.delete(key);
+            }
+          } catch (e) {
+            print('Error syncing route_path for task $taskId: $e');
+          }
+        }
+
+        // Now process stop records
+        if (stopKeys.isNotEmpty) {
+          print('Processing patrol stop data...');
+          for (final key in stopKeys) {
+            final data = _offlineLocationBox!.get(key);
+            if (data != null && data is Map) {
+              final taskId = data['taskId'] as String;
+              final endTime = DateTime.parse(data['endTime'] as String);
+              final distance = data['distance'] as double;
+
+              try {
+                print('Syncing stop data for task $taskId');
+                print('End time: $endTime, Distance: $distance');
+
+                // Update task status
+                await repository.updateTaskStatus(taskId, 'finished');
+
+                // Update endTime and distance
+                await repository.updateTask(
+                  taskId,
+                  {
+                    'endTime': endTime.toIso8601String(),
+                    'distance': distance,
+                    'status': 'finished',
+                  },
+                );
+
+                print('Synced patrol stop data for task $taskId');
+                await _offlineLocationBox!.delete(key);
+              } catch (e) {
+                print('Failed to sync patrol stop data: $e');
+              }
+            }
+          }
+        }
+
+        // Process any task updates
+        final updateKeyPattern = 'task_update_';
+        final updateKeys = _offlineLocationBox!.keys
+            .where((k) => k.toString().startsWith(updateKeyPattern))
+            .toList();
+
+        print('Found ${updateKeys.length} task updates to sync');
+
+        for (final key in updateKeys) {
+          final data = _offlineLocationBox!.get(key);
+          if (data != null && data is Map) {
+            final taskId = data['taskId'] as String;
+            final updates = data['updates'] as Map<dynamic, dynamic>;
+
+            try {
+              print('Syncing task update for $taskId: $updates');
+              await repository.updateTask(
+                taskId,
+                Map<String, dynamic>.from(updates),
+              );
+              await _offlineLocationBox!.delete(key);
+            } catch (e) {
+              print('Failed to sync task update: $e');
+            }
+          }
+        }
+
+        // Get updated finished tasks
+        List<PatrolTask> finishedTasks = [];
+        try {
+          if (currentState.task != null) {
+            finishedTasks =
+                await repository.getFinishedTasks(currentState.task!.userId);
+            print(
+                'Retrieved ${finishedTasks.length} finished tasks after sync');
+          }
+        } catch (e) {
+          print('Failed to refresh finished tasks: $e');
+          finishedTasks = currentState.finishedTasks;
+        }
+
+        print('Offline data sync completed.');
+        emit(currentState.copyWith(
+          isSyncing: false,
+          finishedTasks: finishedTasks,
+        ));
+
+        // Check if any data remains
+        print('Remaining offline items: ${_offlineLocationBox!.length}');
+        if (_offlineLocationBox!.length > 0) {
+          print('Remaining keys: ${_offlineLocationBox!.keys.toList()}');
+        }
+      }
+    } catch (e, stack) {
+      print('Error syncing offline data: $e');
+      print('Stack trace: $stack');
+      if (state is PatrolLoaded) {
+        emit((state as PatrolLoaded).copyWith(isSyncing: false));
+      }
+    }
   }
 
   Future<void> _onCheckOngoingPatrol(
@@ -200,6 +563,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           task: task,
           isPatrolling: true,
           routePath: task.routePath,
+          isOffline: !_isConnected,
         ));
 
         // Restart location tracking
@@ -231,6 +595,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         routePath: event.task.routePath as Map<String, dynamic>?,
         finishedTasks:
             state is PatrolLoaded ? (state as PatrolLoaded).finishedTasks : [],
+        isOffline: !_isConnected,
       ));
 
       // Restart location tracking
@@ -248,8 +613,17 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) async {
     try {
-      print('Loading patrol history for user: ${event.userId}'); // Debug print
+      print('Loading patrol history for user: ${event.userId}');
       emit(PatrolLoading());
+
+      if (!_isConnected) {
+        print('Offline: Unable to load patrol history');
+        emit(PatrolLoaded(
+          finishedTasks: [],
+          isOffline: true,
+        ));
+        return;
+      }
 
       // Get current active task and finished tasks in parallel
       final currentTaskFuture = repository.getCurrentTask(event.userId);
@@ -260,18 +634,18 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       final currentTask = results[0] as PatrolTask?;
       final finishedTasks = results[1] as List<PatrolTask>;
 
-      print('Loaded ${finishedTasks.length} finished tasks'); // Debug print
+      print('Loaded ${finishedTasks.length} finished tasks');
 
       // Always emit PatrolLoaded, even without current task
       emit(PatrolLoaded(
         task: currentTask,
         finishedTasks: finishedTasks,
         distance: currentTask?.distance,
-        isPatrolling: currentTask?.status ==
-            'ongoing', // Changed from 'in_progress' to 'ongoing'
+        isPatrolling: currentTask?.status == 'ongoing',
+        isOffline: !_isConnected,
       ));
     } catch (e) {
-      print('Error in _onLoadPatrolHistory: $e'); // Debug print
+      print('Error in _onLoadPatrolHistory: $e');
       emit(PatrolError('Failed to load patrol history: $e'));
     }
   }
@@ -284,7 +658,10 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       final currentState = state as PatrolLoaded;
       emit(currentState.copyWith(finishedTasks: event.tasks));
     } else {
-      emit(PatrolLoaded(finishedTasks: event.tasks));
+      emit(PatrolLoaded(
+        finishedTasks: event.tasks,
+        isOffline: !_isConnected,
+      ));
     }
   }
 
@@ -293,30 +670,28 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) {
     try {
-      print('Updating current task: ${event.task.taskId}'); // Debug print
+      print('Updating current task: ${event.task.taskId}');
 
       if (state is PatrolLoaded) {
         final currentState = state as PatrolLoaded;
         emit(currentState.copyWith(
           task: event.task,
-          isPatrolling: event.task.status ==
-              'ongoing', // Changed from 'in_progress' to 'ongoing'
+          isPatrolling: event.task.status == 'ongoing',
         ));
       } else {
         emit(PatrolLoaded(
           task: event.task,
-          isPatrolling: event.task.status ==
-              'ongoing', // Changed from 'in_progress' to 'ongoing'
-          finishedTasks: const [], // Initialize empty list
+          isPatrolling: event.task.status == 'ongoing',
+          finishedTasks: const [],
+          isOffline: !_isConnected,
         ));
       }
     } catch (e) {
-      print('Error updating current task: $e'); // Debug print
+      print('Error updating current task: $e');
       emit(PatrolError('Failed to update current task: $e'));
     }
   }
 
-// Update _onLoadRouteData to include finished tasks
   Future<void> _onLoadRouteData(
     LoadRouteData event,
     Emitter<PatrolState> emit,
@@ -327,6 +702,16 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       await _taskSubscription?.cancel();
       await _historySubscription?.cancel();
 
+      // If offline, load minimal state
+      if (!_isConnected) {
+        print('Offline: Limited route data loading');
+        emit(PatrolLoaded(
+          finishedTasks: [],
+          isOffline: true,
+        ));
+        return;
+      }
+
       // Start listening to current task stream
       _taskSubscription = repository.watchCurrentTask(event.userId).listen(
         (task) {
@@ -335,7 +720,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           }
         },
         onError: (error) {
-          print('Task stream error: $error'); // Debug print
+          print('Task stream error: $error');
           emit(PatrolError('Failed to watch current task: $error'));
         },
       );
@@ -346,12 +731,12 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           add(UpdateFinishedTasks(tasks: tasks));
         },
         onError: (error) {
-          print('History stream error: $error'); // Debug print
+          print('History stream error: $error');
           emit(PatrolError('Failed to watch finished tasks: $error'));
         },
       );
     } catch (e) {
-      print('Error loading route data: $e'); // Debug print
+      print('Error loading route data: $e');
       emit(PatrolError(e.toString()));
     }
   }
@@ -361,21 +746,13 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) async {
     try {
-      print('Starting patrol for task: ${event.task.taskId}'); // Debug print
+      print('Starting patrol for task: ${event.task.taskId}');
+      print('Connection status: ${_isConnected ? "Online" : "Offline"}');
 
       // Emit loading state terlebih dahulu
       emit(PatrolLoading());
 
-      // Update task status in database
-      await repository.updateTask(
-        event.task.taskId,
-        {
-          'status': 'ongoing',
-          'startTime': event.startTime.toIso8601String(),
-        },
-      );
-
-      // Initialize empty routePath if needed
+      // Initialize empty routePath
       final routePath = <String, dynamic>{};
 
       // Create updated task object with the new status
@@ -395,6 +772,28 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         lastLocation: event.task.lastLocation,
       );
 
+      // If online, update database
+      if (_isConnected) {
+        // Update task status in database
+        await repository.updateTask(
+          event.task.taskId,
+          {
+            'status': 'ongoing',
+            'startTime': event.startTime.toIso8601String(),
+          },
+        );
+      } else {
+        // If offline, store start info locally
+        if (_offlineLocationBox != null) {
+          await _offlineLocationBox!.put('patrol_start_${event.task.taskId}', {
+            'taskId': event.task.taskId,
+            'startTime': event.startTime.toIso8601String(),
+            'status': 'ongoing',
+          });
+          print('Saved patrol start data to offline storage');
+        }
+      }
+
       // Emit new state with isPatrolling = true and the updated task
       emit(PatrolLoaded(
         task: updatedTask,
@@ -402,14 +801,15 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         startTime: event.startTime,
         routePath: routePath,
         distance: 0.0,
+        isOffline: !_isConnected,
       ));
 
       // Start location tracking
-      // _startLocationTracking();
+      _startLocationTracking();
 
-      print('Patrol started successfully'); // Debug print
+      print('Patrol started successfully');
     } catch (e, stackTrace) {
-      print('Error starting patrol: $e'); // Debug print
+      print('Error starting patrol: $e');
       print('Stack trace: $stackTrace');
       emit(PatrolError('Failed to start patrol: $e'));
     }
@@ -420,12 +820,25 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) async {
     try {
-      print('Updating task: ${event.taskId}'); // Debug print
+      print('Updating task: ${event.taskId}');
 
-      // await repository.updateTask(
-      //   event.taskId,
-      //   event.updates,
-      // );
+      if (_isConnected) {
+        await repository.updateTask(
+          event.taskId,
+          event.updates,
+        );
+      } else {
+        // Store update for later sync
+        if (_offlineLocationBox != null) {
+          final key =
+              'task_update_${event.taskId}_${DateTime.now().millisecondsSinceEpoch}';
+          await _offlineLocationBox!.put(key, {
+            'taskId': event.taskId,
+            'updates': event.updates,
+          });
+          print('Saved task update to offline storage');
+        }
+      }
 
       if (state is PatrolLoaded) {
         final currentState = state as PatrolLoaded;
@@ -438,18 +851,17 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
                 ? DateTime.parse(event.updates['startTime'] as String)
                 : null,
           ),
-          isPatrolling: isInProgress, // Set based on status update
+          isPatrolling: isInProgress,
+          isOffline: !_isConnected,
         ));
-        print(
-            'Task updated successfully with isPatrolling: $isInProgress'); // Debug print
+        print('Task updated successfully with isPatrolling: $isInProgress');
       }
     } catch (e) {
-      print('Error in _onUpdateTask: $e'); // Debug print
+      print('Error in _onUpdateTask: $e');
       emit(PatrolError('Failed to update task: $e'));
     }
   }
 
-  // Perbaikan _onUpdatePatrolLocation untuk menyimpan route_path dengan benar
   Future<void> _onUpdatePatrolLocation(
     UpdatePatrolLocation event,
     Emitter<PatrolState> emit,
@@ -462,35 +874,58 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           print('Task ID: ${currentState.task!.taskId}');
           print(
               'Position: ${event.position.latitude}, ${event.position.longitude}');
+          print('Connection status: ${_isConnected ? "Online" : "Offline"}');
 
-          // Ensure coordinates are stored as List<double>
+          // Prepare location data
           final List<double> coordinates = [
             event.position.latitude,
             event.position.longitude
           ];
 
-          // Prepare timestamp key for consistent format
           final timestampKey =
               event.timestamp.millisecondsSinceEpoch.toString();
 
-          // Create location data object
+          // Create location data object for state update
           final locationData = {
             'coordinates': coordinates,
             'timestamp': event.timestamp.toIso8601String(),
           };
 
-          // Update route_path in the database FIRST
-          try {
-            // Direct write to the specific route_path entry
-            await repository.updatePatrolLocation(
-              currentState.task!.taskId,
-              coordinates,
-              event.timestamp,
-            );
-            print('Database location update successful');
-          } catch (e) {
-            print('Error updating database with location: $e');
-            // Continue with local state update even if database update fails
+          // Try to update database if online
+          bool databaseUpdateSuccess = false;
+          if (_isConnected) {
+            try {
+              await repository.updatePatrolLocation(
+                currentState.task!.taskId,
+                coordinates,
+                event.timestamp,
+              );
+              databaseUpdateSuccess = true;
+              print('Database location update successful');
+            } catch (e) {
+              print('Error updating database with location: $e');
+            }
+          }
+
+          // If offline or database update failed, save to local storage
+          if (!_isConnected || !databaseUpdateSuccess) {
+            if (_offlineLocationBox != null) {
+              await _offlineLocationBox!.put(timestampKey, {
+                'latitude': event.position.latitude,
+                'longitude': event.position.longitude,
+                'timestamp': event.timestamp.toIso8601String(),
+                'taskId': currentState.task!.taskId,
+              });
+
+              // Debug: show offline storage status
+              print('Saved location to offline storage. Key: $timestampKey');
+              print(
+                  'Offline storage now has ${_offlineLocationBox!.length} items');
+              if (_offlineLocationBox!.length % 10 == 0) {
+                print(
+                    'Offline storage keys: ${_offlineLocationBox!.keys.take(5).toList()}... (showing first 5)');
+              }
+            }
           }
 
           // Calculate new distance
@@ -523,16 +958,20 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           // Add new point
           updatedRoutePath[timestampKey] = locationData;
 
-          // Update total distance in database periodically
-          if (updatedRoutePath.length % 5 == 0) {
+          // Update total distance in database periodically if online
+          if (_isConnected && updatedRoutePath.length % 5 == 0) {
             try {
               await repository.updateTask(
                 currentState.task!.taskId,
-                {'distance': newDistance},
+                {
+                  'distance': newDistance,
+                  'route_path': updatedRoutePath
+                }, // Save route_path here too
               );
-              print('Updated distance in database: $newDistance meters');
+              print(
+                  'Updated distance and route_path in database: $newDistance meters');
             } catch (e) {
-              print('Error updating distance: $e');
+              print('Error updating distance and route_path: $e');
             }
           }
 
@@ -551,9 +990,11 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             routePath: updatedRoutePath,
             distance: newDistance,
             task: updatedTask,
+            isOffline: !_isConnected,
           ));
 
           print('State updated with ${updatedRoutePath.length} route points');
+          print('Total distance: $newDistance meters');
         } catch (e, stackTrace) {
           print('Error in location update flow: $e');
           print('Stack trace: $stackTrace');
@@ -572,62 +1013,109 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       try {
         print('=== Stopping Patrol ===');
         print('Task ID: ${currentState.task?.taskId}');
-        print('Current route path entries: ${currentState.routePath?.length}');
+        print('Connection status: ${_isConnected ? "Online" : "Offline"}');
+        print('Route path points: ${currentState.routePath?.length ?? 0}');
+        print('Final route path points: ${event.finalRoutePath?.length ?? 0}');
 
-        // Update task status
-        await repository.updateTaskStatus(
-            currentState.task!.taskId, 'finished');
+        // Pick the larger of the two route paths
+        Map<String, dynamic>? routePathToSave = currentState.routePath;
+        if (event.finalRoutePath != null) {
+          if (routePathToSave == null ||
+              (event.finalRoutePath!.length > routePathToSave.length)) {
+            routePathToSave = event.finalRoutePath;
+          }
+        }
 
-        // Update endTime
-        await repository.updateTask(
-          currentState.task!.taskId,
-          {
-            'endTime': event.endTime.toIso8601String(),
-            'distance': event.distance,
-          },
-        );
+        print(
+            'Selected route path with ${routePathToSave?.length ?? 0} points');
+
+        // Try to sync any offline data first if we're online
+        if (_isConnected) {
+          await _onSyncOfflineData(SyncOfflineData(), emit);
+        }
+
+        // If online, update the task in the database
+        if (_isConnected) {
+          // Update task status
+          await repository.updateTaskStatus(
+              currentState.task!.taskId, 'finished');
+
+          // Update endTime and distance
+          await repository.updateTask(
+            currentState.task!.taskId,
+            {
+              'endTime': event.endTime.toIso8601String(),
+              'distance': event.distance,
+            },
+          );
+
+          // Save route path for summary
+          if (routePathToSave != null && routePathToSave.isNotEmpty) {
+            print('Saving route path with ${routePathToSave.length} entries');
+
+            // Update task with final path
+            await repository.updateTask(
+              currentState.task!.taskId,
+              {
+                'route_path': routePathToSave,
+                'status': 'finished',
+              },
+            );
+          }
+        } else {
+          // If offline, save completion data locally
+          if (_offlineLocationBox != null) {
+            await _offlineLocationBox!
+                .put('patrol_stop_${currentState.task!.taskId}', {
+              'taskId': currentState.task!.taskId,
+              'endTime': event.endTime.toIso8601String(),
+              'distance': event.distance,
+              'status': 'finished',
+              'route_path_length':
+                  routePathToSave?.length ?? 0, // Track for debug
+            });
+
+            print('Saved patrol completion data to offline storage');
+
+            // Debug all offline data
+            debugPrintOfflineData();
+
+            // Show offline message to user
+            emit(PatrolError(
+                'Patroli berhasil dihentikan dalam mode offline. Data akan disinkronkan saat koneksi tersedia.'));
+
+            // Return to prevent further state changes until we're online
+            Future.delayed(const Duration(seconds: 2), () {
+              emit(currentState.copyWith(
+                isPatrolling: false,
+                endTime: event.endTime,
+                isOffline: true,
+              ));
+            });
+            return;
+          }
+        }
 
         // Cancel location tracking
         _locationSubscription?.cancel();
         _locationSubscription = null;
 
-        // Get updated finished tasks
-        final finishedTasks =
-            await repository.getFinishedTasks(currentState.task!.userId);
-
-        // Save route path for summary
-        final routePath = currentState.routePath;
-        if (routePath != null && routePath.isNotEmpty) {
-          print('Converting route path with ${routePath.length} entries');
-
-          // Sort entries by timestamp
-          final sortedEntries = routePath.entries.toList()
-            ..sort((a, b) => a.key.compareTo(b.key));
-
-          // Convert to list of coordinates
-          final List<List<double>> convertedPath = sortedEntries.map((entry) {
-            final coordinates = entry.value['coordinates'] as List<double>;
-            return coordinates;
-          }).toList();
-
-          print('Converted to ${convertedPath.length} coordinate points');
-
-          // Update task with final path
-          await repository.updateTask(
-            currentState.task!.taskId,
-            {
-              'route_path': routePath,
-              'status': 'finished',
-            },
-          );
+        // Get updated finished tasks if online
+        List<PatrolTask> finishedTasks = [];
+        if (_isConnected) {
+          finishedTasks =
+              await repository.getFinishedTasks(currentState.task!.userId);
+        } else {
+          finishedTasks = currentState.finishedTasks;
         }
 
         // Emit new state
         emit(currentState.copyWith(
           isPatrolling: false,
           currentPatrolPath: null,
-          routePath: null,
+          endTime: event.endTime,
           finishedTasks: finishedTasks,
+          isOffline: !_isConnected,
         ));
 
         print('Patrol stopped successfully');
@@ -676,49 +1164,17 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     );
   }
 
-  // Future<void> _onUpdateTask(
-  //   UpdateTask event,
-  //   Emitter<PatrolState> emit,
-  // ) async {
-  //   try {
-  //     print('Updating task: ${event.taskId}'); // Debug print
-
-  //     // Update task in repository
-  //     await repository.updateTask(
-  //       event.taskId,
-  //       event.updates,
-  //     );
-
-  //     if (state is PatrolLoaded) {
-  //       final currentState = state as PatrolLoaded;
-  //       // Emit new state with same task but updated status
-  //       emit(PatrolLoaded(
-  //         task: currentState.task.copyWith(
-  //           status: event.updates['status'] as String?,
-  //           startTime: event.updates['startTime'] != null
-  //               ? DateTime.parse(event.updates['startTime'] as String)
-  //               : null,
-  //         ),
-  //         isPatrolling: true,
-  //       ));
-  //       print('Task updated successfully'); // Debug print
-  //     }
-  //   } catch (e) {
-  //     print('Error in _onUpdateTask: $e'); // Debug print
-  //     emit(PatrolError('Failed to update task: $e'));
-  //   }
-  // }
-
   @override
   Future<void> close() async {
     await _locationSubscription?.cancel();
     await _taskSubscription?.cancel();
     await _historySubscription?.cancel();
+    await _connectivitySubscription?.cancel();
+    await _offlineLocationBox?.close();
     return super.close();
   }
 }
 
-// Additional Event for task updates
 class UpdateTask extends PatrolEvent {
   final String taskId;
   final Map<String, dynamic> updates;

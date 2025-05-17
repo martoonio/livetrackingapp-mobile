@@ -588,121 +588,125 @@ class _MapScreenState extends State<MapScreen> {
   // }
 
   Future<void> _stopPatrol(BuildContext context, PatrolLoaded state) async {
-  final endTime = DateTime.now();
-  print('Stopping patrol at $endTime');
+    final endTime = DateTime.now();
+    print('Stopping patrol at $endTime');
 
-  // Convert route path
-  List<List<double>> convertedPath = [];
-  Map<String, dynamic> finalRoutePath = {};
-  
-  try {
-    // 1. Ambil route_path yang sudah ada dari task
-    if (state.task?.routePath != null && state.task!.routePath is Map) {
-      finalRoutePath = Map<String, dynamic>.from(state.task!.routePath as Map);
-      print('Existing route_path found with ${finalRoutePath.length} points');
+    // Convert route path
+    List<List<double>> convertedPath = [];
+    Map<String, dynamic> finalRoutePath = {};
 
-      final map = state.task!.routePath as Map<String, dynamic>;
-      // Juga konversi untuk PatrolSummaryScreen
-      if (!map.isEmpty) {
-        // Sort entries by timestamp
-        final sortedEntries = map.entries.toList()
-          ..sort((a, b) => (a.value['timestamp'] as String)
-              .compareTo(b.value['timestamp'] as String));
+    try {
+      // 1. Ambil route_path yang sudah ada dari task
+      if (state.task?.routePath != null && state.task!.routePath is Map) {
+        finalRoutePath =
+            Map<String, dynamic>.from(state.task!.routePath as Map);
+        print('Existing route_path found with ${finalRoutePath.length} points');
 
-        // Convert coordinates with validation
-        for (var entry in sortedEntries) {
-          if (entry.value is! Map || entry.value['coordinates'] == null)
-            continue;
+        final map = state.task!.routePath as Map<String, dynamic>;
+        // Juga konversi untuk PatrolSummaryScreen
+        if (!map.isEmpty) {
+          // Sort entries by timestamp
+          final sortedEntries = map.entries.toList()
+            ..sort((a, b) => (a.value['timestamp'] as String)
+                .compareTo(b.value['timestamp'] as String));
 
-          final coordinates = entry.value['coordinates'] as List;
-          if (coordinates.length < 2) continue;
+          // Convert coordinates with validation
+          for (var entry in sortedEntries) {
+            if (entry.value is! Map || entry.value['coordinates'] == null) {
+              continue;
+            }
 
-          convertedPath.add([
-            (coordinates[0] as num).toDouble(),
-            (coordinates[1] as num).toDouble(),
-          ]);
-        }
-      }
-    }
+            final coordinates = entry.value['coordinates'] as List;
+            if (coordinates.length < 2) continue;
 
-    // 2. Jika ada _routePoints yang belum disimpan, tambahkan ke finalRoutePath
-    if (_routePoints.isNotEmpty) {
-      print('Adding ${_routePoints.length} new points from current session');
-      
-      // Tambahkan titik-titik baru ke convertedPath untuk PatrolSummaryScreen
-      for (var point in _routePoints) {
-        // Cek apakah titik ini sudah ada di convertedPath (untuk menghindari duplikasi)
-        bool isDuplicate = false;
-        for (var existingPoint in convertedPath) {
-          if (existingPoint[0] == point.latitude && existingPoint[1] == point.longitude) {
-            isDuplicate = true;
-            break;
+            convertedPath.add([
+              (coordinates[0] as num).toDouble(),
+              (coordinates[1] as num).toDouble(),
+            ]);
           }
         }
-        
-        if (!isDuplicate) {
-          convertedPath.add([point.latitude, point.longitude]);
-        }
       }
-      
-      // PENTING: Tambahkan ke finalRoutePath untuk diupdate ke database
-      // Gunakan timestamp sebagai key
-      // Ini memastikan data tidak tertimpa dan semua rute tersimpan
-      _routePoints.forEach((point) {
-        final timestamp = DateTime.now().add(Duration(microseconds: finalRoutePath.length * 100)).millisecondsSinceEpoch.toString();
-        finalRoutePath[timestamp] = {
-          'coordinates': [point.latitude, point.longitude],
-          'timestamp': DateTime.now().toIso8601String(),
-        };
-      });
+
+      // 2. Jika ada _routePoints yang belum disimpan, tambahkan ke finalRoutePath
+      if (_routePoints.isNotEmpty) {
+        print('Adding ${_routePoints.length} new points from current session');
+
+        // Tambahkan titik-titik baru ke convertedPath untuk PatrolSummaryScreen
+        for (var point in _routePoints) {
+          // Cek apakah titik ini sudah ada di convertedPath (untuk menghindari duplikasi)
+          bool isDuplicate = false;
+          for (var existingPoint in convertedPath) {
+            if (existingPoint[0] == point.latitude &&
+                existingPoint[1] == point.longitude) {
+              isDuplicate = true;
+              break;
+            }
+          }
+
+          if (!isDuplicate) {
+            convertedPath.add([point.latitude, point.longitude]);
+          }
+        }
+
+        // PENTING: Tambahkan ke finalRoutePath untuk diupdate ke database
+        // Gunakan timestamp sebagai key
+        // Ini memastikan data tidak tertimpa dan semua rute tersimpan
+        _routePoints.forEach((point) {
+          final timestamp = DateTime.now()
+              .add(Duration(microseconds: finalRoutePath.length * 100))
+              .millisecondsSinceEpoch
+              .toString();
+          finalRoutePath[timestamp] = {
+            'coordinates': [point.latitude, point.longitude],
+            'timestamp': DateTime.now().toIso8601String(),
+          };
+        });
+      }
+
+      // Fallback jika masih kosong
+      if (convertedPath.isEmpty && _routePoints.isNotEmpty) {
+        print('Using fallback route points');
+        convertedPath = _routePoints
+            .map((point) => [point.latitude, point.longitude])
+            .toList();
+      }
+    } catch (e) {
+      print('Error processing route path: $e');
+      // Pastikan selalu ada path yang valid
+      if (_routePoints.isNotEmpty) {
+        convertedPath = _routePoints
+            .map((point) => [point.latitude, point.longitude])
+            .toList();
+      }
     }
 
-    // Fallback jika masih kosong
-    if (convertedPath.isEmpty && _routePoints.isNotEmpty) {
-      print('Using fallback route points');
-      convertedPath = _routePoints
-          .map((point) => [point.latitude, point.longitude])
-          .toList();
-    }
-  } catch (e) {
-    print('Error processing route path: $e');
-    // Pastikan selalu ada path yang valid
-    if (_routePoints.isNotEmpty) {
-      convertedPath = _routePoints
-          .map((point) => [point.latitude, point.longitude])
-          .toList();
-    }
-  }
-
-  // 3. Sekarang kita kirim routePath yang lengkap dalam event StopPatrol
-  print('Stopping patrol with ${finalRoutePath.length} total route points');
-  context.read<PatrolBloc>().add(
-    StopPatrol(
-      endTime: endTime, 
-      distance: _totalDistance,
-      finalRoutePath: finalRoutePath, // Tambahkan parameter ini
-    )
-  );
-
-  // Wait briefly for state to update
-  await Future.delayed(const Duration(milliseconds: 100));
-
-  // Navigate to summary screen
-  if (mounted) {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PatrolSummaryScreen(
-          task: widget.task,
-          routePath: convertedPath,
-          startTime: state.task?.startTime ?? DateTime.now(),
+    // 3. Sekarang kita kirim routePath yang lengkap dalam event StopPatrol
+    print('Stopping patrol with ${finalRoutePath.length} total route points');
+    context.read<PatrolBloc>().add(StopPatrol(
           endTime: endTime,
           distance: _totalDistance,
+          finalRoutePath: finalRoutePath, // Tambahkan parameter ini
+        ));
+
+    if (mounted) {
+      // Beri jeda singkat untuk memastikan StopPatrol event diproses
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Selalu arahkan ke PatrolSummaryScreen
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PatrolSummaryScreen(
+            task: widget.task,
+            routePath: convertedPath,
+            startTime: state.task?.startTime ?? DateTime.now(),
+            endTime: endTime,
+            distance: _totalDistance,
+          ),
         ),
-      ),
-    );
+      );
+    }
   }
-}
 
   void _startPatrol(BuildContext context) {
     final startTime = DateTime.now();
@@ -1189,387 +1193,462 @@ class _MapScreenState extends State<MapScreen> {
           );
         }
       },
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            'Patrol Tracking',
-            style: boldTextStyle(size: 20, color: Colors.white),
-          ),
-          backgroundColor: kbpBlue900,
-          foregroundColor: Colors.white,
-          iconTheme: const IconThemeData(color: Colors.white),
-          elevation: 0,
-        ),
-        body: Stack(
-          children: [
-            // Peta sebagai latar belakang
-            GoogleMap(
-              onMapCreated: _onMapCreated,
-              initialCameraPosition: const CameraPosition(
-                target: LatLng(-6.927872391717073, 107.76910906700982),
-                zoom: 15,
-              ),
-              markers: _markers,
-              polylines: _polylines,
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false, // Sembunyikan tombol default
-              zoomControlsEnabled: false, // Sembunyikan kontrol zoom default
-              mapType: MapType.normal,
-              compassEnabled: true,
-              buildingsEnabled: true,
+      child: BlocBuilder<PatrolBloc, PatrolState>(builder: (context, state) {
+        print('MapScreen state: ${state is PatrolLoaded && state.isOffline}');
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(
+              'Patrol Tracking',
+              style: boldTextStyle(size: 20, color: Colors.white),
             ),
+            backgroundColor: kbpBlue900,
+            foregroundColor: Colors.white,
+            iconTheme: const IconThemeData(color: Colors.white),
+            elevation: 0,
+          ),
+          body: Stack(
+            children: [
+              // Peta sebagai latar belakang
 
-            // Panel informasi tugas - lebih rapi dengan kartu
-            Positioned(
-              top: 16,
-              left: 16,
-              right: 16,
-              child: Card(
-                elevation: 4,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: const BorderSide(color: kbpBlue900, width: 2),
+              GoogleMap(
+                onMapCreated: _onMapCreated,
+                initialCameraPosition: const CameraPosition(
+                  target: LatLng(-6.927872391717073, 107.76910906700982),
+                  zoom: 15,
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Judul Panel
-                      Text(
-                        'Detail Tugas Patroli',
-                        style: boldTextStyle(size: 16, color: kbpBlue900),
-                      ),
-                      const Divider(color: kbpBlue200, thickness: 1),
-                      const SizedBox(height: 8),
+                markers: _markers,
+                polylines: _polylines,
+                myLocationEnabled: true,
+                myLocationButtonEnabled: false, // Sembunyikan tombol default
+                zoomControlsEnabled: false, // Sembunyikan kontrol zoom default
+                mapType: MapType.normal,
+                compassEnabled: true,
+                buildingsEnabled: true,
+              ),
 
-                      // Informasi Petugas & Kendaraan
-                      Row(
+              if (state is PatrolLoaded && state.isOffline)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    color: dangerR500.withOpacity(0.8),
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                    child: SafeArea(
+                      bottom: false,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: kbpBlue200,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: SvgPicture.asset(
-                              'assets/icons/officer.svg',
-                              width: 36,
-                              height: 36,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
+                          const Icon(Icons.wifi_off,
+                              color: Colors.white, size: 16),
+                          const SizedBox(width: 8),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  widget.task.officerName ?? 'Petugas',
-                                  style: semiBoldTextStyle(size: 16),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.directions_car,
-                                        size: 16, color: kbpBlue900),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      widget.task.vehicleId,
-                                      style: regularTextStyle(size: 14),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.place,
-                                        size: 16, color: kbpBlue900),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '${widget.task.assignedRoute?.length ?? 0} titik patroli',
-                                      style: regularTextStyle(size: 14),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                            child: Text(
+                              'Mode Offline - Data akan disinkronkan saat terhubung',
+                              textAlign: TextAlign.center,
+                              style: mediumTextStyle(
+                                  color: Colors.white, size: 12),
                             ),
                           ),
                         ],
                       ),
+                    ),
+                  ),
+                ),
 
-                      // Info Waktu & Jarak (saat patroli aktif)
-                      BlocBuilder<PatrolBloc, PatrolState>(
-                        builder: (context, state) {
-                          if (state is PatrolLoaded && state.isPatrolling) {
-                            return Column(
-                              children: [
-                                const SizedBox(height: 12),
-                                const Divider(color: kbpBlue200, thickness: 1),
-                                const SizedBox(height: 8),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    // Waktu
-                                    Expanded(
-                                      child: Container(
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: kbpBlue100,
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text('Durasi',
-                                                style: regularTextStyle(
-                                                    size: 12,
-                                                    color: kbpBlue900)),
-                                            const SizedBox(height: 4),
-                                            Row(
-                                              children: [
-                                                const Icon(Icons.timer,
-                                                    color: kbpBlue900,
-                                                    size: 18),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  _formatDuration(_elapsedTime),
-                                                  style:
-                                                      boldTextStyle(size: 16),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    // Jarak
-                                    Expanded(
-                                      child: Container(
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: kbpBlue100,
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text('Jarak',
-                                                style: regularTextStyle(
-                                                    size: 12,
-                                                    color: kbpBlue900)),
-                                            const SizedBox(height: 4),
-                                            Row(
-                                              children: [
-                                                const Icon(Icons.directions,
-                                                    color: kbpBlue900,
-                                                    size: 18),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  '${(_totalDistance / 1000).toStringAsFixed(2)} km',
-                                                  style:
-                                                      boldTextStyle(size: 16),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            );
-                          }
-                          return const SizedBox.shrink();
-                        },
+              // Syncing Indicator
+              if (state is PatrolLoaded && state.isSyncing)
+                Positioned(
+                  top: state.isOffline
+                      ? 30
+                      : 0, // Position below offline indicator if visible
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    color: kbpBlue700,
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                    child: SafeArea(
+                      bottom: false,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Menyinkronkan data offline...',
+                            style:
+                                mediumTextStyle(color: Colors.white, size: 12),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                  ),
+                ),
+
+              // Panel informasi tugas - lebih rapi dengan kartu
+              Positioned(
+                top: 16,
+                left: 16,
+                right: 16,
+                child: Card(
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: const BorderSide(color: kbpBlue900, width: 2),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Judul Panel
+                        Text(
+                          'Detail Tugas Patroli',
+                          style: boldTextStyle(size: 16, color: kbpBlue900),
+                        ),
+                        const Divider(color: kbpBlue200, thickness: 1),
+                        const SizedBox(height: 8),
+
+                        // Informasi Petugas & Kendaraan
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: kbpBlue200,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: SvgPicture.asset(
+                                'assets/icons/officer.svg',
+                                width: 36,
+                                height: 36,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    widget.task.officerName ?? 'Petugas',
+                                    style: semiBoldTextStyle(size: 16),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.directions_car,
+                                          size: 16, color: kbpBlue900),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        widget.task.vehicleId,
+                                        style: regularTextStyle(size: 14),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.place,
+                                          size: 16, color: kbpBlue900),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${widget.task.assignedRoute?.length ?? 0} titik patroli',
+                                        style: regularTextStyle(size: 14),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // Info Waktu & Jarak (saat patroli aktif)
+                        BlocBuilder<PatrolBloc, PatrolState>(
+                          builder: (context, state) {
+                            if (state is PatrolLoaded && state.isPatrolling) {
+                              return Column(
+                                children: [
+                                  const SizedBox(height: 12),
+                                  const Divider(
+                                      color: kbpBlue200, thickness: 1),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      // Waktu
+                                      Expanded(
+                                        child: Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: kbpBlue100,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text('Durasi',
+                                                  style: regularTextStyle(
+                                                      size: 12,
+                                                      color: kbpBlue900)),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                children: [
+                                                  const Icon(Icons.timer,
+                                                      color: kbpBlue900,
+                                                      size: 18),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    _formatDuration(
+                                                        _elapsedTime),
+                                                    style:
+                                                        boldTextStyle(size: 16),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      // Jarak
+                                      Expanded(
+                                        child: Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: kbpBlue100,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text('Jarak',
+                                                  style: regularTextStyle(
+                                                      size: 12,
+                                                      color: kbpBlue900)),
+                                              const SizedBox(height: 4),
+                                              Row(
+                                                children: [
+                                                  const Icon(Icons.directions,
+                                                      color: kbpBlue900,
+                                                      size: 18),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    '${(_totalDistance / 1000).toStringAsFixed(2)} km',
+                                                    style:
+                                                        boldTextStyle(size: 16),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              );
+                            }
+                            return const SizedBox.shrink();
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
 
-            // Panel bawah - tombol kontrol
-            Positioned(
-              bottom: 16,
-              left: 16,
-              right: 16,
-              child: BlocBuilder<PatrolBloc, PatrolState>(
-                builder: (context, state) {
-                  final isPatrolling =
-                      state is PatrolLoaded && state.isPatrolling;
+              // Panel bawah - tombol kontrol
+              Positioned(
+                bottom: 16,
+                left: 16,
+                right: 16,
+                child: BlocBuilder<PatrolBloc, PatrolState>(
+                  builder: (context, state) {
+                    final isPatrolling =
+                        state is PatrolLoaded && state.isPatrolling;
 
-                  return Card(
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 12, horizontal: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          // Tombol kiri - kontrol peta
-                          Row(
-                            children: [
-                              // Zoom In
-                              ActionButton(
-                                icon: Icons.add,
-                                onTap: () => mapController
-                                    ?.animateCamera(CameraUpdate.zoomIn()),
-                                tooltip: 'Zoom In',
-                              ),
-                              const SizedBox(width: 8),
-                              // Zoom Out
-                              ActionButton(
-                                icon: Icons.remove,
-                                onTap: () => mapController
-                                    ?.animateCamera(CameraUpdate.zoomOut()),
-                                tooltip: 'Zoom Out',
-                              ),
-                              const SizedBox(width: 8),
-                              // Lokasi Saya
-                              ActionButton(
-                                icon: Icons.my_location,
-                                onTap: () {
-                                  if (userCurrentLocation != null &&
-                                      mapController != null) {
-                                    mapController!.animateCamera(
-                                      CameraUpdate.newLatLngZoom(
-                                        LatLng(userCurrentLocation!.latitude,
-                                            userCurrentLocation!.longitude),
-                                        18,
-                                      ),
-                                    );
-                                  }
-                                },
-                                tooltip: 'Lokasi Saya',
-                              ),
-                            ],
-                          ),
-
-                          // Tombol kanan - aksi utama
-                          Row(
-                            children: [
-                              // Tombol laporan (hanya saat patroli aktif)
-                              if (isPatrolling)
+                    return Card(
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 12, horizontal: 16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            // Tombol kiri - kontrol peta
+                            Row(
+                              children: [
+                                // Zoom In
                                 ActionButton(
-                                  icon: Icons.report_problem,
-                                  color: dangerR300,
-                                  onTap: () => _showReportDialog(context),
-                                  tooltip: 'Lapor Kejadian',
+                                  icon: Icons.add,
+                                  onTap: () => mapController
+                                      ?.animateCamera(CameraUpdate.zoomIn()),
+                                  tooltip: 'Zoom In',
                                 ),
-                              const SizedBox(width: 12),
-                              // Tombol mulai/stop
-                              // Perbaikan tombol longpress dengan tooltip
+                                const SizedBox(width: 8),
+                                // Zoom Out
+                                ActionButton(
+                                  icon: Icons.remove,
+                                  onTap: () => mapController
+                                      ?.animateCamera(CameraUpdate.zoomOut()),
+                                  tooltip: 'Zoom Out',
+                                ),
+                                const SizedBox(width: 8),
+                                // Lokasi Saya
+                                ActionButton(
+                                  icon: Icons.my_location,
+                                  onTap: () {
+                                    if (userCurrentLocation != null &&
+                                        mapController != null) {
+                                      mapController!.animateCamera(
+                                        CameraUpdate.newLatLngZoom(
+                                          LatLng(userCurrentLocation!.latitude,
+                                              userCurrentLocation!.longitude),
+                                          18,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  tooltip: 'Lokasi Saya',
+                                ),
+                              ],
+                            ),
 
-// Tombol mulai/stop
-                              GestureDetector(
-                                onTap: () {
-                                  // Tampilkan tooltip manual saat tap biasa
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        isPatrolling
-                                            ? 'Tekan 3 detik untuk selesai'
-                                            : 'Tekan 3 detik untuk mulai',
-                                        style: mediumTextStyle(
-                                            color: Colors.white),
-                                      ),
-                                      backgroundColor: isPatrolling
-                                          ? dangerR300
-                                          : kbpBlue900,
-                                      duration: const Duration(seconds: 2),
-                                      behavior: SnackBarBehavior.floating,
-                                      margin: const EdgeInsets.all(16),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                  );
-                                },
-                                onLongPressStart: (_) {
-                                  _startLongPressAnimation(context, state);
-                                },
-                                onLongPressEnd: (_) {
-                                  _resetLongPressAnimation();
-                                },
-                                child: Stack(
-                                  alignment: Alignment.center,
-                                  children: [
-                                    // Progress indicator
-                                    TweenAnimationBuilder<double>(
-                                      tween: Tween<double>(
-                                        begin: 0.0,
-                                        end: _longPressProgress,
-                                      ),
-                                      duration:
-                                          const Duration(milliseconds: 50),
-                                      builder: (context, value, child) {
-                                        return SizedBox(
-                                          width: 80,
-                                          height: 80,
-                                          child: CircularProgressIndicator(
-                                            value: value,
-                                            strokeWidth: 6.0,
-                                            color: isPatrolling
-                                                ? dangerR300
-                                                : successG300,
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                    // Tombol
-                                    Container(
-                                      width: 70,
-                                      height: 70,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: isPatrolling
-                                            ? dangerR300
-                                            : successG300,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color:
-                                                Colors.black.withOpacity(0.3),
-                                            blurRadius: 8,
-                                            offset: const Offset(0, 4),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Center(
-                                        child: Icon(
+                            // Tombol kanan - aksi utama
+                            Row(
+                              children: [
+                                // Tombol laporan (hanya saat patroli aktif)
+                                if (isPatrolling)
+                                  ActionButton(
+                                    icon: Icons.report_problem,
+                                    color: dangerR300,
+                                    onTap: () => _showReportDialog(context),
+                                    tooltip: 'Lapor Kejadian',
+                                  ),
+                                const SizedBox(width: 12),
+                                // Tombol mulai/stop
+                                // Perbaikan tombol longpress dengan tooltip
+
+                                // Tombol mulai/stop
+                                GestureDetector(
+                                  onTap: () {
+                                    // Tampilkan tooltip manual saat tap biasa
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
                                           isPatrolling
-                                              ? Icons.stop
-                                              : Icons.play_arrow,
-                                          color: Colors.white,
-                                          size: 32,
+                                              ? 'Tekan 3 detik untuk selesai'
+                                              : 'Tekan 3 detik untuk mulai',
+                                          style: mediumTextStyle(
+                                              color: Colors.white),
+                                        ),
+                                        backgroundColor: isPatrolling
+                                            ? dangerR300
+                                            : kbpBlue900,
+                                        duration: const Duration(seconds: 2),
+                                        behavior: SnackBarBehavior.floating,
+                                        margin: const EdgeInsets.all(16),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
                                         ),
                                       ),
-                                    ),
-                                  ],
+                                    );
+                                  },
+                                  onLongPressStart: (_) {
+                                    _startLongPressAnimation(context, state);
+                                  },
+                                  onLongPressEnd: (_) {
+                                    _resetLongPressAnimation();
+                                  },
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      // Progress indicator
+                                      TweenAnimationBuilder<double>(
+                                        tween: Tween<double>(
+                                          begin: 0.0,
+                                          end: _longPressProgress,
+                                        ),
+                                        duration:
+                                            const Duration(milliseconds: 50),
+                                        builder: (context, value, child) {
+                                          return SizedBox(
+                                            width: 80,
+                                            height: 80,
+                                            child: CircularProgressIndicator(
+                                              value: value,
+                                              strokeWidth: 6.0,
+                                              color: isPatrolling
+                                                  ? dangerR300
+                                                  : successG300,
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      // Tombol
+                                      Container(
+                                        width: 70,
+                                        height: 70,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: isPatrolling
+                                              ? dangerR300
+                                              : successG300,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color:
+                                                  Colors.black.withOpacity(0.3),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Center(
+                                          child: Icon(
+                                            isPatrolling
+                                                ? Icons.stop
+                                                : Icons.play_arrow,
+                                            color: Colors.white,
+                                            size: 32,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
-        ),
-      ),
+            ],
+          ),
+        );
+      }),
     );
   }
 }

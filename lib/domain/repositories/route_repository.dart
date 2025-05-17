@@ -121,4 +121,8 @@ abstract class RouteRepository {
     required String clusterId,
     required String officerId,
   });
+
+  Future<PatrolTask?> getTaskById({
+    required String taskId,
+  });
 }

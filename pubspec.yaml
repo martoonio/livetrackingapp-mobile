@@ -55,6 +55,10 @@ dependencies:
   googleapis_auth: ^1.6.0
   lottie: ^3.2.0
   geofence_service: ^6.0.0+1
+  connectivity_plus: ^6.1.4
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.5
   # permission_handler: ^11.4.0
 
 dev_dependencies:
