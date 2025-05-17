@@ -25,16 +25,19 @@ class PatrolTask {
 
   // Data officer yang akan di-lazy load
   String? _officerName;
+  String? _officerPhotoUrl;
   String? _clusterName;
   String? _vehicleName;
 
   String get officerName => _officerName ?? 'Loading...';
   String get clusterName => _clusterName ?? 'Loading...';
   String get vehicleName => _vehicleName ?? vehicleId;
+  String get officerPhotoUrl => _officerPhotoUrl ?? 'P';
 
   set officerName(String value) => _officerName = value;
   set clusterName(String value) => _clusterName = value;
   set vehicleName(String value) => _vehicleName = value;
+  set officerPhotoUrl(String value) => _officerPhotoUrl = value;
 
   PatrolTask({
     required this.taskId,
@@ -57,10 +60,12 @@ class PatrolTask {
     String? officerName,
     String? clusterName,
     String? vehicleName,
+    String? officerPhotoUrl,
   }) {
     _officerName = officerName;
     _clusterName = clusterName;
     _vehicleName = vehicleName;
+    _officerPhotoUrl = officerPhotoUrl;
   }
 
   // Konversi dari JSON ke objek PatrolTask
@@ -99,6 +104,7 @@ class PatrolTask {
       officerName: json['officerName'] as String?,
       clusterName: json['clusterName'] as String?,
       vehicleName: json['vehicleName'] as String?,
+      officerPhotoUrl: json['officerPhotoUrl'] as String?,
     );
   }
 
@@ -186,123 +192,76 @@ class PatrolTask {
 
   Future<void> fetchOfficerName(DatabaseReference database) async {
     try {
-      if (userId.isEmpty) {
-        _officerName = 'No Officer ID';
-        return;
-      }
-
-      print('Fetching name for officer ID: $userId in cluster: $clusterId');
-
-      // Coba 3 jalur berbeda untuk mencari officer
-
-      // 1. Cek di path users/{userId} (jika ini user officer langsung)
-      final userSnapshot = await database.child('users').child(userId).get();
-
-      if (userSnapshot.exists) {
-        final userData = userSnapshot.value as Map<dynamic, dynamic>;
-        _officerName = userData['name']?.toString() ?? 'Unknown';
-        print('Found officer name from users/$userId: $_officerName');
-        return;
-      }
-
-      // 2. Cek dalam cluster di path users/{clusterId}/officers/{userId}
       if (clusterId.isNotEmpty) {
-        // Coba jalur baru: users/{clusterId}/officers/{officerId}
-        final newPathSnapshot = await database
-            .child('users')
-            .child(clusterId)
-            .child('officers')
-            .child(userId)
-            .get();
+        final officerSnapshot =
+            await database.child('users/$clusterId/officers/$userId').get();
 
-        if (newPathSnapshot.exists) {
-          final officerData = newPathSnapshot.value as Map<dynamic, dynamic>;
+        if (officerSnapshot.exists && officerSnapshot.value != null) {
+          final officerData = officerSnapshot.value as Map<dynamic, dynamic>;
           _officerName = officerData['name']?.toString() ?? 'Unknown Officer';
-          print(
-              'Found officer name from users/$clusterId/officers/$userId: $_officerName');
+          _officerPhotoUrl =
+              officerData['photo_url']?.toString(); // Ambil URL foto
+          print('Found officer by direct path: $_officerName');
           return;
         }
 
-        // Coba semua officer dalam cluster untuk mencari yang cocok dengan userId
-        final allOfficersSnapshot = await database
-            .child('users')
-            .child(clusterId)
-            .child('officers')
-            .get();
+        // Jika tidak ditemukan dengan path langsung, cari di semua officers
+        final clusterSnapshot =
+            await database.child('users/$clusterId/officers').get();
 
-        if (allOfficersSnapshot.exists && allOfficersSnapshot.value != null) {
-          final officersData =
-              allOfficersSnapshot.value as Map<dynamic, dynamic>;
-          print('Officers data keys: ${officersData.keys.toList()}');
+        if (clusterSnapshot.exists && clusterSnapshot.value != null) {
+          final officersData = clusterSnapshot.value as Map<dynamic, dynamic>;
 
-          // Cari berdasarkan key (cara paling cepat)
-          if (officersData.containsKey(userId)) {
-            final officerData = officersData[userId] as Map<dynamic, dynamic>;
-            _officerName = officerData['name']?.toString() ?? 'Unknown Officer';
-            print(
-                'Found officer by key in users/$clusterId/officers: $_officerName');
-            return;
-          }
+          for (var officerId in officersData.keys) {
+            final officerData =
+                officersData[officerId] as Map<dynamic, dynamic>;
 
-          // Cari berdasarkan id dalam nilai (untuk kompatibilitas)
-          for (var entry in officersData.entries) {
-            final officerData = entry.value as Map<dynamic, dynamic>;
-            final id = officerData['id']?.toString() ?? '';
-
-            if (id == userId) {
+            if (officerData['id']?.toString() == userId) {
               _officerName =
                   officerData['name']?.toString() ?? 'Unknown Officer';
+              _officerPhotoUrl =
+                  officerData['photo_url']?.toString(); // Ambil URL foto
               print(
-                  'Found officer by id field in users/$clusterId/officers: $_officerName');
+                  'Found officer by id in users/$clusterId/officers: $_officerName');
               return;
             }
           }
         }
 
-        // 3. Coba jalur lama: clusters/{clusterId}/officers
-        final oldPathSnapshot = await database
-            .child('clusters')
-            .child(clusterId)
-            .child('officers')
-            .get();
+        // Mencoba path lama (untuk kompatibilitas dengan data lama)
+        final oldPathSnapshot =
+            await database.child('clusters/$clusterId/officers').get();
 
         if (oldPathSnapshot.exists && oldPathSnapshot.value != null) {
           final officersData = oldPathSnapshot.value;
 
           if (officersData is List) {
-            // Format lama: array
-            for (int i = 0; i < officersData.length; i++) {
-              if (officersData[i] != null) {
-                final officerData = officersData[i] as Map<dynamic, dynamic>;
-                if (officerData['id']?.toString() == userId) {
-                  _officerName =
-                      officerData['name']?.toString() ?? 'Unknown Officer';
-                  print(
-                      'Found officer in clusters/$clusterId/officers array: $_officerName');
-                  return;
-                }
+            // Array format
+            for (var i = 0; i < officersData.length; i++) {
+              final officerData = officersData[i];
+              if (officerData is Map &&
+                  officerData['id']?.toString() == userId) {
+                _officerName =
+                    officerData['name']?.toString() ?? 'Unknown Officer';
+                _officerPhotoUrl =
+                    officerData['photo_url']?.toString(); // Ambil URL foto
+                print(
+                    'Found officer by id in clusters/$clusterId/officers array: $_officerName');
+                return;
               }
             }
           } else if (officersData is Map) {
-            // Format lama: object dengan key
+            // Map format
             final officersMap = officersData as Map<dynamic, dynamic>;
 
-            // Cek jika key adalah userId
-            if (officersMap.containsKey(userId)) {
-              final officerData = officersMap[userId] as Map<dynamic, dynamic>;
-              _officerName =
-                  officerData['name']?.toString() ?? 'Unknown Officer';
-              print(
-                  'Found officer by key in clusters/$clusterId/officers: $_officerName');
-              return;
-            }
-
-            // Cek dalam nilai
             for (var entry in officersMap.entries) {
-              final officerData = entry.value as Map<dynamic, dynamic>;
-              if (officerData['id']?.toString() == userId) {
+              final officerData = entry.value;
+              if (officerData is Map &&
+                  officerData['id']?.toString() == userId) {
                 _officerName =
                     officerData['name']?.toString() ?? 'Unknown Officer';
+                _officerPhotoUrl =
+                    officerData['photo_url']?.toString(); // Ambil URL foto
                 print(
                     'Found officer by id in clusters/$clusterId/officers: $_officerName');
                 return;
@@ -482,6 +441,7 @@ class PatrolTask {
     String? officerName,
     String? clusterName,
     String? vehicleName,
+    String? officerPhotoUrl, // Tambahkan parameter ini
   }) {
     return PatrolTask(
       taskId: taskId ?? this.taskId,
@@ -504,6 +464,7 @@ class PatrolTask {
       officerName: officerName ?? _officerName,
       clusterName: clusterName ?? _clusterName,
       vehicleName: vehicleName ?? _vehicleName,
+      officerPhotoUrl: officerPhotoUrl ?? _officerPhotoUrl, // Tambahkan ini
     );
   }
 

@@ -129,16 +129,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Parse officer data
       final officersData = officerSnapshot.value as Map<dynamic, dynamic>;
-      Map<String, String> officerNames = {};
+      Map<String, Map<String, String>> officerInfo = {};
 
-      // Create mapping of officer IDs to names
+      // Create mapping of officer IDs to info (name and photo)
       officersData.forEach((offId, offData) {
-        if (offData is Map && offData['name'] != null) {
-          officerNames[offId.toString()] = offData['name'].toString();
+        if (offData is Map) {
+          final name = offData['name']?.toString() ?? 'Unknown';
+          final photoUrl = offData['photo_url']?.toString() ?? '';
+
+          officerInfo[offId.toString()] = {
+            'name': name,
+            'photo_url': photoUrl,
+          };
+
+          print(
+              'Officer: $offId, Name: $name, Has Photo: ${photoUrl.isNotEmpty}');
         }
       });
-
-      print('Found ${officerNames.length} officers in cluster');
 
       // Get all tasks for this cluster
       final taskSnapshot = await FirebaseDatabase.instance
@@ -159,17 +166,14 @@ class _HomeScreenState extends State<HomeScreen> {
           if (taskData is Map) {
             try {
               final userId = taskData['userId']?.toString() ?? '';
-              String? officerName = officerNames[userId];
-              String status = taskData['status']?.toString() ?? 'unknown';
+              final status = taskData['status']?.toString() ?? 'unknown';
 
-              print(
-                  'Processing task $taskId: status=$status, userId=$userId, officerName=$officerName');
+              print('Processing task $taskId: status=$status, userId=$userId');
 
               // Convert task data
               final task = PatrolTask(
                 taskId: taskId,
                 userId: userId,
-                officerName: officerName,
                 vehicleId: taskData['vehicleId']?.toString() ?? '',
                 status: status,
                 assignedStartTime:
@@ -194,6 +198,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     : null,
                 clusterId: taskData['clusterId'].toString(),
               );
+
+              // Set officer info if available from our map
+              if (officerInfo.containsKey(userId)) {
+                task.officerName = officerInfo[userId]!['name'].toString();
+                task.officerPhotoUrl =
+                    officerInfo[userId]!['photo_url'].toString();
+                print(
+                    'Set officer info for task $taskId: ${task.officerName}, photo: ${task.officerPhotoUrl?.isNotEmpty}');
+              } else {
+                print('No officer info found for userId: $userId');
+              }
 
               // Important: Check for active AND ongoing status
               if (status == 'finished') {
@@ -436,13 +451,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: neutral200,
       appBar: AppBar(
         title: Text(
           'Patrol Dashboard',
-          style: boldTextStyle(size: 20, color: Colors.white),
+          style: semiBoldTextStyle(size: 18, color: Colors.white),
         ),
         backgroundColor: kbpBlue900,
         automaticallyImplyLeading: false,
+        centerTitle: true,
+        elevation: 0.5,
         actions: [
           IconButton(
             icon: const Icon(
@@ -452,6 +470,23 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () {
               _loadUserData();
               _startTaskStream();
+
+              // Show refresh feedback
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Memperbarui data...',
+                    style: mediumTextStyle(color: Colors.white),
+                  ),
+                  backgroundColor: kbpBlue800,
+                  duration: const Duration(seconds: 1),
+                  behavior: SnackBarBehavior.floating,
+                  margin: const EdgeInsets.all(16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              );
             },
           ),
         ],
@@ -461,6 +496,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _loadUserData();
           _startTaskStream();
         },
+        color: kbpBlue900,
         child: _isLoading
             ? Center(
                 child: lottie.LottieBuilder.asset(
@@ -476,21 +512,41 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // For clusters (patrol role), use local state data
-                    if (_currentUser?.role == 'patrol')
-                      _buildUpcomingPatrolsForCluster()
-                    // For officers, use the Bloc state
-                    else
-                      _buildUpcomingPatrolsForOfficer(),
+                    // User greeting card
+                    _buildUserGreetingCard(),
 
-                    16.height,
+                    const SizedBox(height: 24),
 
-                    // For clusters (patrol role), use local state data
-                    if (_currentUser?.role == 'patrol')
-                      _buildPatrolHistoryForCluster()
-                    // For officers, use the Bloc state
-                    else
-                      _buildPatrolHistoryForOfficer(),
+                    // Section title - Upcoming Patrols
+                    _buildSectionHeader(
+                      icon: Icons.access_time,
+                      title: 'Patroli Mendatang',
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // Upcoming patrols content
+                    _currentUser?.role == 'patrol'
+                        ? _buildUpcomingPatrolsContent()
+                        : _buildUpcomingPatrolsForOfficer(),
+
+                    const SizedBox(height: 24),
+
+                    // Section title - History
+                    _buildSectionHeader(
+                      icon: Icons.history,
+                      title: 'Riwayat Patroli',
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // History content
+                    _currentUser?.role == 'patrol'
+                        ? _buildHistoryContent()
+                        : _buildPatrolHistoryForOfficer(),
+
+                    // Add some bottom padding
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),
@@ -498,525 +554,628 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildUpcomingPatrolsForCluster() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+// Consistent section header widget
+  Widget _buildSectionHeader({required IconData icon, required String title}) {
+    return Row(
       children: [
+        Icon(icon, color: kbpBlue900, size: 20),
+        const SizedBox(width: 8),
         Text(
-          'Patroli Mendatang',
-          style: boldTextStyle(size: 20),
+          title,
+          style: semiBoldTextStyle(size: 18, color: kbpBlue900),
         ),
-        8.height,
-        if (_upcomingTasks.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: neutral500,
-                width: 3,
+      ],
+    );
+  }
+
+// User greeting card - consistent height and padding
+  Widget _buildUserGreetingCard() {
+    final now = DateTime.now();
+    String greeting;
+
+    if (now.hour < 12) {
+      greeting = 'Selamat Pagi';
+    } else if (now.hour < 17) {
+      greeting = 'Selamat Siang';
+    } else if (now.hour < 20) {
+      greeting = 'Selamat Sore';
+    } else {
+      greeting = 'Selamat Malam';
+    }
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      color: kbpBlue50,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: kbpBlue900,
+                shape: BoxShape.circle,
               ),
-              color: neutral300,
+              child: Icon(
+                _currentUser?.role == 'patrol' ? Icons.group : Icons.person,
+                color: Colors.white,
+                size: 24,
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                SvgPicture.asset(
-                  'assets/state/noTask.svg',
-                  height: 60,
-                  width: 60,
-                ),
-                4.height,
-                Text(
-                  'Belum ada tugas patroli\nyang dijadwalkan',
-                  textAlign: TextAlign.center,
-                  style: regularTextStyle(),
-                ),
-              ],
-            ),
-          )
-        else
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _upcomingTasks.length,
-            itemBuilder: (context, index) {
-              final task = _upcomingTasks[index];
-              return Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 12),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: kbpBlue900,
-                    width: 3,
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    greeting,
+                    style: regularTextStyle(size: 14, color: kbpBlue800),
                   ),
-                  color: neutralWhite,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            rowInfo(task.vehicleId, task.vehicleId),
-                            rowInfo("${task.assignedRoute?.length ?? 0} Titik",
-                                "pin"),
-                            // Add officer name
-                            rowInfo("Petugas: ${task.officerName}", "people"),
-                          ],
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            rowInfo(
-                                task.assignedStartTime != null
-                                    ? formatDateFromString(
-                                        task.assignedStartTime.toString())
-                                    : 'Tanggal tidak tersedia',
-                                null),
-                            Row(
-                              children: [
-                                rowInfo(
-                                    task.assignedStartTime != null
-                                        ? formatTimeFromString(
-                                            task.assignedStartTime.toString())
-                                        : 'Waktu tidak tersedia',
-                                    null),
-                                8.width,
-                                rowInfo(
-                                    task.assignedStartTime != null &&
-                                            task.assignedEndTime != null
-                                        ? getDurasiPatroli(
-                                            task.assignedStartTime!,
-                                            task.assignedEndTime!)
-                                        : 'Durasi tidak tersedia',
-                                    null),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    8.height,
-                    ElevatedButton(
-                      onPressed: () => _showTaskDialog(task),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kbpBlue900,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              'Lihat Detail',
-                              style: semiBoldTextStyle(
-                                size: 14,
-                                color: neutralWhite,
-                              ),
-                            ),
-                            4.width,
-                            SvgPicture.asset(
-                              'assets/map.svg',
-                              height: 16,
-                              width: 16,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
+                  Text(
+                    _currentUser?.name ?? 'User',
+                    style: semiBoldTextStyle(size: 18, color: kbpBlue900),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    _currentUser?.role == 'patrol'
+                        ? 'Command Center'
+                        : 'Petugas Patroli',
+                    style: regularTextStyle(size: 14, color: kbpBlue700),
+                  ),
+                ],
+              ),
+            ),
+            // Current date with fixed width for alignment
+            Container(
+              width: 80,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${now.day}/${now.month}/${now.year}',
+                    style: mediumTextStyle(size: 14, color: kbpBlue900),
+                  ),
+                  Text(
+                    '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+                    style: boldTextStyle(size: 16, color: kbpBlue900),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+// Consistent empty state card with fixed height
+  Widget _buildEmptyStateCard({required String icon, required String message}) {
+    return Container(
+      width: double.infinity,
+      // height: 180,
+      child: Card(
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: neutral400, width: 1),
+        ),
+        color: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SvgPicture.asset(
+                icon,
+                height: 80,
+                width: 80,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: mediumTextStyle(size: 14, color: neutral700),
+              ),
+            ],
           ),
-      ],
+        ),
+      ),
     );
   }
 
-  Widget _buildUpcomingPatrolsForOfficer() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Patroli Mendatang',
-          style: boldTextStyle(size: 20),
-        ),
-        8.height,
-        BlocBuilder<PatrolBloc, PatrolState>(
-          builder: (context, state) {
-            if (state is PatrolLoading) {
-              return const Center(child: CircularProgressIndicator());
-            }
+// Wrapper for upcoming patrols content
+  Widget _buildUpcomingPatrolsContent() {
+    if (_upcomingTasks.isEmpty) {
+      return _buildEmptyStateCard(
+        icon: 'assets/state/noTask.svg',
+        message: 'Belum ada tugas patroli\nyang dijadwalkan',
+      );
+    }
 
-            if (state is PatrolLoaded && state.task != null) {
-              return Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: kbpBlue900,
-                    width: 3,
-                  ),
-                  color: neutralWhite,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Column(
-                          children: [
-                            rowInfo(
-                                state.task!.vehicleId, state.task!.vehicleId),
-                            rowInfo(
-                                "${state.task!.assignedRoute?.length ?? 0} Titik",
-                                "pin"),
-                          ],
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            rowInfo(
-                                state.task?.assignedStartTime != null
-                                    ? formatDateFromString(state
-                                        .task!.assignedStartTime
-                                        .toString())
-                                    : 'Tanggal tidak tersedia',
-                                null),
-                            Row(
-                              children: [
-                                rowInfo(
-                                    state.task?.assignedStartTime != null
-                                        ? formatTimeFromString(state
-                                            .task!.assignedStartTime
-                                            .toString())
-                                        : 'Waktu tidak tersedia',
-                                    null),
-                                8.width,
-                                rowInfo(
-                                    state.task?.assignedStartTime != null &&
-                                            state.task?.assignedEndTime != null
-                                        ? getDurasiPatroli(
-                                            state.task!.assignedStartTime!,
-                                            state.task!.assignedEndTime!)
-                                        : 'Durasi tidak tersedia',
-                                    null),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    8.height,
-                    ElevatedButton(
-                      onPressed: () => _showTaskDialog(state.task!),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kbpBlue900,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              'Lihat Detail',
-                              style: semiBoldTextStyle(
-                                size: 14,
-                                color: neutralWhite,
-                              ),
-                            ),
-                            4.width,
-                            SvgPicture.asset(
-                              'assets/map.svg',
-                              height: 16,
-                              width: 16,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            return Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: neutral500,
-                  width: 3,
-                ),
-                color: neutral300,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SvgPicture.asset(
-                    'assets/state/noTask.svg',
-                    height: 60,
-                    width: 60,
-                  ),
-                  4.height,
-                  Text(
-                    'Belum ada tugas patroli\nyang dijadwalkan',
-                    textAlign: TextAlign.center,
-                    style: regularTextStyle(),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
-      ],
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _upcomingTasks.length,
+      itemBuilder: (context, index) {
+        final task = _upcomingTasks[index];
+        return _buildTaskCard(task);
+      },
     );
   }
 
-  Widget _buildPatrolHistoryForCluster() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Riwayat Patroli', style: boldTextStyle(size: 20)),
-        8.height,
-        if (_historyTasks.isEmpty)
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              width: double.infinity,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: neutral500, width: 3),
-                color: neutral300,
-              ),
-              child: Column(
-                children: [
-                  SvgPicture.asset(
-                    'assets/nodata.svg',
-                    height: 150,
-                    width: 150,
-                  ),
-                  Text(
-                    'Tidak ada riwayat patroli',
-                    style: boldTextStyle(
-                      size: 16,
-                      color: neutral900,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          )
-        else
-          Container(
-            height: MediaQuery.of(context).size.height * 0.6,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey),
-              color: Colors.white,
-            ),
-            padding: const EdgeInsets.all(8),
-            child: ListView.separated(
-              itemCount: _historyTasks.length,
-              separatorBuilder: (context, index) => 4.height,
+// Wrapper for history content
+  Widget _buildHistoryContent() {
+    if (_historyTasks.isEmpty) {
+      return _buildEmptyStateCard(
+        icon: 'assets/nodata.svg',
+        message: 'Belum ada riwayat patroli',
+      );
+    }
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: kbpBlue200, width: 1),
+      ),
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _historyTasks.length > 5 ? 5 : _historyTasks.length,
+              separatorBuilder: (context, index) =>
+                  const Divider(height: 1, color: kbpBlue200),
               itemBuilder: (context, index) {
                 final task = _historyTasks[index];
-                final duration = task.endTime != null && task.startTime != null
-                    ? task.endTime!.difference(task.startTime!)
-                    : Duration.zero;
-
-                return Container(
-                  margin:
-                      const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    color: Colors.white,
-                    border: Border.all(
-                      color: Colors.grey,
-                      width: 1,
-                    ),
-                  ),
-                  child: ListTile(
-                    title: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(formatDateFromString(task.createdAt.toString())),
-                        Text('Petugas: ${task.officerName}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: kbpBlue900,
-                              fontSize: 12,
-                            )),
-                      ],
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        rowInfo(task.vehicleId, task.vehicleId),
-                        Text(
-                            '${formatTimeFromString(task.startTime?.toString())} - ${formatTimeFromString(task.endTime?.toString())}'),
-                        Text(
-                            '${_formatDuration(duration)} ${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km'),
-                      ],
-                    ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.map),
-                      onPressed: () => _showPatrolSummary(task),
-                    ),
-                  ),
-                );
+                return _buildHistoryItem(task);
               },
             ),
+            if (_historyTasks.length > 5)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: TextButton(
+                  onPressed: () {
+                    // Show all history
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Lihat Semua Riwayat',
+                        style: mediumTextStyle(color: kbpBlue900),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_forward,
+                          size: 16, color: kbpBlue900),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+// Consistent task card
+  Widget _buildTaskCard(PatrolTask task) {
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: kbpBlue200, width: 1),
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Vehicle icon - fixed size
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: kbpBlue100,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.directions_car,
+                      color: kbpBlue900,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+
+                  // Task info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          task.vehicleId.isEmpty
+                              ? 'Tanpa Kendaraan'
+                              : task.vehicleId,
+                          style: semiBoldTextStyle(size: 16, color: kbpBlue900),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.person,
+                                size: 16, color: kbpBlue700),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                task.officerName ?? 'Petugas',
+                                style: regularTextStyle(
+                                    size: 14, color: kbpBlue700),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.place,
+                                size: 16, color: kbpBlue700),
+                            const SizedBox(width: 4),
+                            Text(
+                              "${task.assignedRoute?.length ?? 0} Titik Patroli",
+                              style:
+                                  regularTextStyle(size: 14, color: kbpBlue700),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Date and time - fixed width for alignment
+                  Container(
+                    width: 110,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: kbpBlue100,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            task.assignedStartTime != null
+                                ? formatDateFromString(
+                                    task.assignedStartTime.toString())
+                                : 'Tidak tersedia',
+                            style: mediumTextStyle(size: 12, color: kbpBlue900),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          task.assignedStartTime != null
+                              ? formatTimeFromString(
+                                  task.assignedStartTime.toString())
+                              : 'Tidak tersedia',
+                          style: semiBoldTextStyle(size: 14, color: kbpBlue900),
+                        ),
+                        const Spacer(),
+                        Text(
+                          task.assignedStartTime != null &&
+                                  task.assignedEndTime != null
+                              ? getDurasiPatroli(task.assignedStartTime!,
+                                  task.assignedEndTime!)
+                              : 'Durasi tidak tersedia',
+                          style: regularTextStyle(size: 12, color: kbpBlue700),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton.icon(
+                onPressed: () => _showTaskDialog(task),
+                icon: const Icon(Icons.map, size: 18),
+                label: Text(
+                  'Lihat Detail',
+                  style: semiBoldTextStyle(size: 14),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kbpBlue900,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAvatarFallback(PatrolTask task) {
+    return Center(
+      child: Text(
+        task.officerName?.substring(0, 1).toUpperCase() ?? 'P',
+        style: semiBoldTextStyle(size: 16, color: kbpBlue900),
+      ),
+    );
+  }
+
+// Consistent history item
+  Widget _buildHistoryItem(PatrolTask task) {
+    final duration = task.endTime != null && task.startTime != null
+        ? task.endTime!.difference(task.startTime!)
+        : Duration.zero;
+
+    return Container(
+      height: 70,
+      child: InkWell(
+        onTap: () => _showPatrolSummary(task),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: kbpBlue100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: kbpBlue200, width: 1),
+                ),
+                child: task.officerPhotoUrl != null &&
+                        task.officerPhotoUrl!.isNotEmpty
+                    ? Image.network(
+                        task.officerPhotoUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return _buildAvatarFallback(task);
+                        },
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return _buildAvatarFallback(task);
+                        },
+                      )
+                    : _buildAvatarFallback(task),
+              ),
+              const SizedBox(width: 12),
+
+              // Task info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Officer & vehicle info
+                    Row(
+                      children: [
+                        if (task.officerName != null) ...[
+                          Expanded(
+                            child: Text(
+                              task.officerName!,
+                              style: semiBoldTextStyle(
+                                  size: 14, color: kbpBlue900),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Text(
+                          task.vehicleId.isEmpty
+                              ? 'Tanpa Kendaraan'
+                              : task.vehicleId,
+                          style: mediumTextStyle(size: 12, color: kbpBlue700),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // Time & distance info
+                    Row(
+                      children: [
+                        const Icon(Icons.timer, size: 14, color: kbpBlue700),
+                        const SizedBox(width: 4),
+                        Text(
+                          _formatDuration(duration),
+                          style: regularTextStyle(size: 12),
+                        ),
+                        const SizedBox(width: 12),
+                        const Icon(Icons.straighten,
+                            size: 14, color: kbpBlue700),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
+                          style: regularTextStyle(size: 12),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // View button - fixed size
+              Container(
+                width: 40,
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  icon: const Icon(Icons.navigate_next, color: kbpBlue900),
+                  onPressed: () => _showPatrolSummary(task),
+                  tooltip: 'Lihat Detail',
+                  constraints: const BoxConstraints(),
+                  padding: const EdgeInsets.all(8),
+                  iconSize: 24,
+                ),
+              ),
+            ],
           ),
-      ],
+        ),
+      ),
+    );
+  }
+
+// BLoC builders with consistent sizing
+  Widget _buildUpcomingPatrolsForOfficer() {
+    return BlocBuilder<PatrolBloc, PatrolState>(
+      builder: (context, state) {
+        if (state is PatrolLoading) {
+          return Container(
+            height: 180,
+            width: double.infinity,
+            child: const Center(
+              child: CircularProgressIndicator(color: kbpBlue900),
+            ),
+          );
+        }
+
+        if (state is PatrolLoaded && state.task != null) {
+          return _buildTaskCard(state.task!);
+        }
+
+        return _buildEmptyStateCard(
+          icon: 'assets/state/noTask.svg',
+          message: 'Belum ada tugas patroli\nyang dijadwalkan',
+        );
+      },
     );
   }
 
   Widget _buildPatrolHistoryForOfficer() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Riwayat Patroli', style: boldTextStyle(size: 20)),
-        8.height,
-        BlocBuilder<PatrolBloc, PatrolState>(
-          builder: (context, state) {
-            print('Building history with state: $state'); // Debug print
+    return BlocBuilder<PatrolBloc, PatrolState>(
+      builder: (context, state) {
+        if (state is PatrolLoading) {
+          return Container(
+            height: 180,
+            width: double.infinity,
+            child: const Center(
+              child: CircularProgressIndicator(color: kbpBlue900),
+            ),
+          );
+        }
 
-            if (state is PatrolLoading) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: lottie.LottieBuilder.asset(
-                    'assets/lottie/maps_loading.json',
-                    width: 200,
-                    height: 100,
-                    fit: BoxFit.cover,
+        if (state is PatrolLoaded) {
+          if (state.finishedTasks.isEmpty) {
+            return _buildEmptyStateCard(
+              icon: 'assets/nodata.svg',
+              message: 'Belum ada riwayat patroli',
+            );
+          }
+
+          return Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: kbpBlue200, width: 1),
+            ),
+            color: Colors.white,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: state.finishedTasks.length > 5
+                        ? 5
+                        : state.finishedTasks.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1, color: kbpBlue200),
+                    itemBuilder: (context, index) {
+                      final task = state.finishedTasks[index];
+                      return _buildHistoryItem(task);
+                    },
                   ),
-                ),
-              );
-            }
-
-            if (state is PatrolLoaded) {
-              if (state.finishedTasks.isEmpty) {
-                return Center(
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: neutral500, width: 3),
-                      color: neutral300,
+                  if (state.finishedTasks.length > 5)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: TextButton(
+                        onPressed: () {
+                          // Show all history
+                        },
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              'Lihat Semua Riwayat',
+                              style: mediumTextStyle(color: kbpBlue900),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.arrow_forward,
+                                size: 16, color: kbpBlue900),
+                          ],
+                        ),
+                      ),
                     ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        if (state is PatrolError) {
+          return Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            color: dangerR100,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: dangerR500),
+                  const SizedBox(width: 12),
+                  Expanded(
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SvgPicture.asset(
-                          'assets/nodata.svg',
-                          height: 150,
-                          width: 150,
+                        Text(
+                          'Gagal memuat riwayat',
+                          style: semiBoldTextStyle(color: dangerR300),
                         ),
                         Text(
-                          'Tidak ada riwayat patroli',
-                          style: boldTextStyle(
-                            size: 16,
-                            color: neutral900,
-                          ),
+                          state.message,
+                          style: regularTextStyle(size: 12, color: dangerR500),
                         ),
                       ],
                     ),
                   ),
-                );
-              }
+                ],
+              ),
+            ),
+          );
+        }
 
-              return Container(
-                height: MediaQuery.of(context).size.height * 0.6,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey),
-                  color: Colors.white,
-                ),
-                padding: const EdgeInsets.all(8),
-                child: ListView.separated(
-                  itemCount: state.finishedTasks.length,
-                  separatorBuilder: (context, index) => 4.height,
-                  itemBuilder: (context, index) {
-                    final task = state.finishedTasks[index];
-                    final duration =
-                        task.endTime != null && task.startTime != null
-                            ? task.endTime!.difference(task.startTime!)
-                            : Duration.zero;
-
-                    return Container(
-                      margin: const EdgeInsets.symmetric(
-                          vertical: 4, horizontal: 0),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        color: Colors.white,
-                        border: Border.all(
-                          color: Colors.grey,
-                          width: 1,
-                        ),
-                      ),
-                      child: ListTile(
-                        title: rowInfo(
-                            formatDateFromString(task.createdAt.toString()),
-                            null),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            rowInfo(task.vehicleId, task.vehicleId),
-                            Text(
-                                '${formatTimeFromString(task.startTime?.toString())} - ${formatTimeFromString(task.endTime?.toString())}'),
-                            Text(
-                                '${_formatDuration(duration)} ${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km'),
-                          ],
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.map),
-                          onPressed: () => _showPatrolSummary(task),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              );
-            }
-
-            if (state is PatrolError) {
-              return Card(
-                child: ListTile(
-                  leading: const Icon(Icons.error, color: dangerR300),
-                  title: const Text('Error loading history'),
-                  subtitle: Text(state.message),
-                ),
-              );
-            }
-
-            return const SizedBox.shrink();
-          },
-        ),
-      ],
+        return const SizedBox.shrink();
+      },
     );
   }
 }
