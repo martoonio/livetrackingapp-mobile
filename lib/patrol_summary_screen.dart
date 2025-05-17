@@ -75,8 +75,7 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
   }
 
   void _initializeMap() {
-    setState(() {
-    });
+    setState(() {});
     _prepareRouteAndMarkers();
   }
 
@@ -308,55 +307,181 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
     final duration = end.difference(start);
     final hours = duration.inHours;
     final minutes = duration.inMinutes % 60;
-    return '${hours}h ${minutes}m';
+    return '${hours}j ${minutes}m';
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: neutral200,
       appBar: AppBar(
-        title: const Text('Patrol Summary'),
+        title: Text(
+          'Ringkasan Patroli',
+          style: semiBoldTextStyle(size: 18, color: kbpBlue900),
+        ),
+        backgroundColor: neutralWhite,
+        elevation: 0.5,
         automaticallyImplyLeading: false,
+        centerTitle: true,
       ),
-      body: _buildMap(),
+      body: _buildBody(),
     );
   }
 
-  Widget _buildSummaryCard() {
+  Widget _buildBody() {
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Map card
+                _buildMapCard(),
+
+                // Summary cards
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Officer info card
+                      _buildOfficerInfoCard(),
+
+                      const SizedBox(height: 16),
+
+                      // Time info card
+                      _buildTimeInfoCard(),
+
+                      const SizedBox(height: 16),
+
+                      // Distance info card
+                      _buildDistanceInfoCard(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // Bottom button
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 4,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () async {
+                  final userRole = await _getUserRole();
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => MainNavigationScreen(
+                        userRole: userRole ?? 'User',
+                      ),
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kbpBlue800,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  elevation: 0,
+                ),
+                child: Text(
+                  'Kembali ke Beranda',
+                  style: semiBoldTextStyle(color: Colors.white, size: 16),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMapCard() {
     return Container(
-      height: 150,
+      height: 300,
+      margin: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black26,
-            blurRadius: 4,
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      margin: const EdgeInsets.all(16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
           children: [
-            Text(
-              'Patrol Task Summary',
-              style: Theme.of(context).textTheme.titleLarge,
+            GoogleMap(
+              onMapCreated: _onMapCreated,
+              initialCameraPosition: CameraPosition(
+                target: widget.routePath.isNotEmpty
+                    ? LatLng(widget.routePath[0][0], widget.routePath[0][1])
+                    : _defaultCenter,
+                zoom: 15.0,
+              ),
+              markers: _markers,
+              polylines: _polylines,
+              myLocationEnabled: true,
+              myLocationButtonEnabled: true,
+              zoomControlsEnabled: true,
+              mapType: MapType.normal,
             ),
-            8.height,
-            Text(
-              'Officer: ${widget.task.officerName}',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            8.height,
-            Text('Vehicle: ${widget.task.vehicleId}'),
-            8.height,
-            Text(
-              'Duration: ${_formatDuration(widget.startTime, widget.endTime)}',
-              style: Theme.of(context).textTheme.titleSmall,
+            Positioned(
+              top: 16,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.map, color: kbpBlue900, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Rute Patroli',
+                      style: semiBoldTextStyle(size: 14, color: kbpBlue900),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
@@ -364,44 +489,170 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
     );
   }
 
-  Widget _buildMap() {
-    return SizedBox(
-      height: MediaQuery.of(context).size.height,
-      child: Stack(
-        children: [
-          GoogleMap(
-            onMapCreated: _onMapCreated,
-            initialCameraPosition: CameraPosition(
-              target: widget.routePath.isNotEmpty
-                  ? LatLng(widget.routePath[0][0], widget.routePath[0][1])
-                  : _defaultCenter,
-              zoom: 15.0,
-            ),
-            markers: _markers,
-            polylines: _polylines,
-            myLocationEnabled: true,
-            myLocationButtonEnabled: true,
-            zoomControlsEnabled: true,
-            mapType: MapType.normal,
-          ),
-          _buildSummaryCard(),
-          Positioned(
-            bottom: 50,
-            left: 16,
-            right: 16,
-            child: ElevatedButton(
-                onPressed: () async {
-                  final userRole = await _getUserRole();
-                  Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) =>
-                              MainNavigationScreen(userRole: userRole ?? 'User')));
-                },
-                child: const Text('Continue')),
-          ),
-        ],
+  Widget _buildOfficerInfoCard() {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: kbpBlue200, width: 1),
       ),
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.person, color: kbpBlue900, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Informasi Petugas',
+                  style: semiBoldTextStyle(size: 16, color: kbpBlue900),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildInfoItem(
+                    'Nama Petugas',
+                    widget.task.officerName ?? 'Tidak diketahui',
+                  ),
+                ),
+                Expanded(
+                  child: _buildInfoItem(
+                    'ID Kendaraan',
+                    widget.task.vehicleId.isEmpty
+                        ? 'Tidak ada'
+                        : widget.task.vehicleId,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeInfoCard() {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: kbpBlue200, width: 1),
+      ),
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.access_time, color: kbpBlue900, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Waktu Patroli',
+                  style: semiBoldTextStyle(size: 16, color: kbpBlue900),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildInfoItem(
+                    'Mulai',
+                    _formatDateTime(widget.startTime),
+                  ),
+                ),
+                Expanded(
+                  child: _buildInfoItem(
+                    'Selesai',
+                    _formatDateTime(widget.endTime),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildInfoItem(
+              'Durasi',
+              _formatDuration(widget.startTime, widget.endTime),
+              valueColor: kbpBlue900,
+              valueSize: 18,
+              valueBold: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDistanceInfoCard() {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: kbpBlue200, width: 1),
+      ),
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.directions, color: kbpBlue900, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Jarak Tempuh',
+                  style: semiBoldTextStyle(size: 16, color: kbpBlue900),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '${(widget.distance / 1000).toStringAsFixed(2)} km',
+                  style: semiBoldTextStyle(size: 24, color: kbpBlue900),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoItem(
+    String label,
+    String value, {
+    Color? valueColor,
+    double valueSize = 14,
+    bool valueBold = false,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: regularTextStyle(size: 12, color: Colors.grey[600]),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: valueBold
+              ? semiBoldTextStyle(size: valueSize, color: valueColor)
+              : regularTextStyle(size: valueSize, color: valueColor),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
     );
   }
 

@@ -22,7 +22,8 @@ class ClusterDetailScreen extends StatefulWidget {
   State<ClusterDetailScreen> createState() => _ClusterDetailScreenState();
 }
 
-class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTickerProviderStateMixin {
+class _ClusterDetailScreenState extends State<ClusterDetailScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final Set<Marker> _markers = {};
   final List<LatLng> _selectedPoints = [];
@@ -34,13 +35,13 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: 3, 
+      length: 3,
       vsync: this,
       initialIndex: widget.initialTab,
     );
     _loadClusterDetails();
   }
-  
+
   @override
   void dispose() {
     _tabController.dispose();
@@ -50,8 +51,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
 
   void _loadClusterDetails() {
     context.read<AdminBloc>().add(
-      GetClusterDetail(widget.clusterId),
-    );
+          GetClusterDetail(widget.clusterId),
+        );
   }
 
   @override
@@ -87,7 +88,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
           } else if (state is ClusterDetailLoaded) {
             _cluster = state.cluster;
             _setupMarkersFromCluster(state.cluster);
-            
+
             return TabBarView(
               controller: _tabController,
               children: [
@@ -114,7 +115,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
     if (_markers.isEmpty && cluster.clusterCoordinates != null) {
       _selectedPoints.clear();
       _markers.clear();
-      
+
       for (var i = 0; i < cluster.clusterCoordinates!.length; i++) {
         final coord = cluster.clusterCoordinates![i];
         if (coord.length >= 2) {
@@ -156,12 +157,16 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
                   _infoRow('Nama', cluster.name),
                   _infoRow('Email', cluster.email),
                   _infoRow('Role', cluster.role),
-                  _infoRow('Jumlah Petugas', '${cluster.officers?.length ?? 0}'),
-                  _infoRow('Jumlah Titik', '${cluster.clusterCoordinates?.length ?? 0}'),
+                  _infoRow(
+                      'Jumlah Petugas', '${cluster.officers?.length ?? 0}'),
+                  _infoRow('Jumlah Titik',
+                      '${cluster.clusterCoordinates?.length ?? 0}'),
                   if (cluster.createdAt != null)
-                    _infoRow('Dibuat Pada', formatDateFromString(cluster.createdAt!.toString())),
+                    _infoRow('Dibuat Pada',
+                        formatDateFromString(cluster.createdAt!.toString())),
                   if (cluster.updatedAt != null)
-                    _infoRow('Diperbarui Pada', formatDateFromString(cluster.updatedAt!.toString())),
+                    _infoRow('Diperbarui Pada',
+                        formatDateFromString(cluster.updatedAt!.toString())),
                 ],
               ),
             ),
@@ -200,7 +205,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
                     icon: Icons.map,
                     label: 'Edit Titik Patroli',
                     onPressed: () {
-                      _tabController.animateTo(2); // Pindah ke tab Titik Patroli
+                      _tabController
+                          .animateTo(2); // Pindah ke tab Titik Patroli
                     },
                   ),
                   _buildActionButton(
@@ -229,7 +235,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
 
   Widget _buildOfficersTab(User cluster) {
     final officers = cluster.officers ?? [];
-    
+
     return Column(
       children: [
         Padding(
@@ -288,7 +294,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
                         ),
                         leading: CircleAvatar(
                           backgroundColor: kbpBlue100,
-                          child: officer.photoUrl != null && officer.photoUrl!.isNotEmpty
+                          child: officer.photoUrl != null &&
+                                  officer.photoUrl!.isNotEmpty
                               ? ClipRRect(
                                   borderRadius: BorderRadius.circular(50),
                                   child: Image.network(
@@ -296,7 +303,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
                                     width: 40,
                                     height: 40,
                                     fit: BoxFit.cover,
-                                    errorBuilder: (context, error, _) => const Icon(
+                                    errorBuilder: (context, error, _) =>
+                                        const Icon(
                                       Icons.person,
                                       color: kbpBlue900,
                                     ),
@@ -355,7 +363,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
             onMapTap: _handleMapTap,
           ),
         ),
-        
+
         // Edit toggle and actions bar
         Positioned(
           top: 16,
@@ -460,7 +468,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
 
   dynamic _handleMapTap(LatLng position) {
     if (!_isEditingPoints) return;
-    
+
     setState(() {
       _selectedPoints.add(position);
       _updateMarkers();
@@ -483,31 +491,31 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
 
   void _zoomToSelectedPoints() {
     if (_selectedPoints.isEmpty || _mapController == null) return;
-    
+
     double minLat = double.infinity;
     double maxLat = -double.infinity;
     double minLng = double.infinity;
     double maxLng = -double.infinity;
-    
+
     for (var point in _selectedPoints) {
       if (point.latitude < minLat) minLat = point.latitude;
       if (point.latitude > maxLat) maxLat = point.latitude;
       if (point.longitude < minLng) minLng = point.longitude;
       if (point.longitude > maxLng) maxLng = point.longitude;
     }
-    
+
     // Add padding
     final padding = 0.002; // About 200 meters
     minLat -= padding;
     maxLat += padding;
     minLng -= padding;
     maxLng += padding;
-    
+
     final bounds = LatLngBounds(
       southwest: LatLng(minLat, minLng),
       northeast: LatLng(maxLat, maxLng),
     );
-    
+
     _mapController?.animateCamera(
       CameraUpdate.newLatLngBounds(bounds, 50),
     );
@@ -546,18 +554,18 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
     final coordinates = _selectedPoints
         .map((point) => [point.latitude, point.longitude])
         .toList();
-        
+
     context.read<AdminBloc>().add(
-      UpdateClusterCoordinates(
-        clusterId: widget.clusterId,
-        coordinates: coordinates,
-      ),
-    );
-    
+          UpdateClusterCoordinates(
+            clusterId: widget.clusterId,
+            coordinates: coordinates,
+          ),
+        );
+
     setState(() {
       _isEditingPoints = false;
     });
-    
+
     showCustomSnackbar(
       context: context,
       title: 'Berhasil',
@@ -583,11 +591,11 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
             onPressed: () {
               Navigator.pop(context);
               context.read<AdminBloc>().add(
-                RemoveOfficerFromClusterEvent(
-                  clusterId: widget.clusterId,
-                  officerId: officer.id,
-                ),
-              );
+                    RemoveOfficerFromClusterEvent(
+                      clusterId: widget.clusterId,
+                      officerId: officer.id,
+                    ),
+                  );
               _loadClusterDetails();
             },
             style: ElevatedButton.styleFrom(
@@ -618,8 +626,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen> with SingleTi
             onPressed: () {
               Navigator.pop(context);
               context.read<AdminBloc>().add(
-                DeleteClusterEvent(widget.clusterId),
-              );
+                    DeleteClusterEvent(widget.clusterId),
+                  );
               Navigator.pop(context); // Kembali ke halaman sebelumnya
             },
             style: ElevatedButton.styleFrom(

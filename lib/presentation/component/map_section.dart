@@ -87,12 +87,12 @@ class _MapSectionState extends State<MapSection> {
           children: [
             lottie.LottieBuilder.asset(
               'assets/lottie/maps_loading.json',
-              width: 200,
+              width: 100,
               height: 100,
               fit: BoxFit.cover,
               repeat: true,
             ),
-            320.height,
+            // 320.height,
           ],
         ),
       );

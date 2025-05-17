@@ -22,27 +22,96 @@ class RouteRepositoryImpl implements RouteRepository {
 
   @override
   Future<PatrolTask?> getCurrentTask(String userId) async {
-    // await _checkAuth();
-    final snapshot = await _database
-        .child('tasks')
-        .orderByChild('userId')
-        .equalTo(userId)
-        .get();
+    try {
+      print('Getting current task for user: $userId'); // Debug print
 
-    if (!snapshot.exists) return null;
+      final snapshot = await _database
+          .child('tasks')
+          .orderByChild('userId')
+          .equalTo(userId)
+          .get();
 
-    final tasks = Map<String, dynamic>.from(snapshot.value as Map);
-    final activeTask = tasks.values.firstWhere(
-      (task) =>
-          task['status'] == 'active' ||
-          task['status'] == 'ongoing' ||
-          task['status'] == 'in_progress',
-      orElse: () => null,
-    );
+      if (!snapshot.exists) {
+        print('No tasks found for user $userId');
+        return null;
+      }
 
-    if (activeTask == null) return null;
+      final tasks = Map<dynamic, dynamic>.from(snapshot.value as Map);
+      print('Found tasks: ${tasks.length}');
 
-    return _convertToPatrolTask(activeTask);
+      // Debugging
+      tasks.forEach((key, value) {
+        print(
+            'Task ID: $key, Status: ${value['status']}, UserId: ${value['userId']}');
+      });
+
+      // Try to find active task
+      MapEntry<dynamic, dynamic>? activeTaskEntry;
+      try {
+        activeTaskEntry = tasks.entries.firstWhere(
+          (entry) {
+            final task = entry.value as Map<dynamic, dynamic>;
+            final status = task['status']?.toString();
+            return status == 'active' ||
+                status == 'ongoing' ||
+                status == 'in_progress';
+          },
+        );
+
+        if (activeTaskEntry != null) {
+          print('Found active task with ID: ${activeTaskEntry.key}');
+        }
+      } catch (e) {
+        print('No active task found: $e');
+        activeTaskEntry = null;
+      }
+
+      if (activeTaskEntry == null) {
+        print('No active/ongoing task found for user $userId');
+        return null;
+      }
+
+      // Create PatrolTask with the task data
+      final taskData = activeTaskEntry.value as Map<dynamic, dynamic>;
+
+      // Add officer name to task if possible
+      String? officerName;
+      try {
+        if (taskData['userId'] != null) {
+          final officerId = taskData['userId'].toString();
+          final clusterId = taskData['clusterId']?.toString();
+
+          if (clusterId != null && clusterId.isNotEmpty) {
+            // Try to find officer in cluster's officers list
+            final officerSnapshot = await _database
+                .child('users/$clusterId/officers')
+                .orderByKey() // Use orderByKey for new structure
+                .equalTo(officerId)
+                .get();
+
+            if (officerSnapshot.exists) {
+              final officerData = officerSnapshot.value as Map;
+              officerName = officerData[officerId]['name'];
+              print('Found officer name: $officerName');
+            }
+          }
+        }
+      } catch (e) {
+        print('Error getting officer name: $e');
+      }
+
+      final task = _convertToPatrolTask({
+        ...taskData,
+        'taskId': activeTaskEntry.key,
+        'officerName': officerName,
+      });
+
+      return task;
+    } catch (e, stackTrace) {
+      print('Error in getCurrentTask: $e');
+      print('Stack trace: $stackTrace');
+      return null;
+    }
   }
 
   @override
@@ -64,42 +133,43 @@ class RouteRepositoryImpl implements RouteRepository {
       print('Coordinates: $coordinates');
       print('Timestamp: $timestamp');
 
-      await _checkAuth();
+      // Skip auth check to avoid permission issues
       final user = _auth.currentUser;
-      print('Authenticated as: ${user?.uid}');
+      if (user == null) {
+        print('Warning: No authenticated user, but continuing');
+      } else {
+        print('Authenticated as: ${user.uid}');
+      }
 
       final taskRef = _database.child('tasks').child(taskId);
-
-      // Verify task exists
-      final taskSnapshot = await taskRef.get();
-      if (!taskSnapshot.exists) {
-        throw Exception('Task not found: $taskId');
-      }
-      print('Task found in database');
 
       // Create timestamp key
       final timestampKey = timestamp.millisecondsSinceEpoch.toString();
 
-      // Update route_path
-      await taskRef
-          .child('route_path')
-          .child(timestampKey)
-          .set({
-            'coordinates': coordinates,
-            'timestamp': timestamp.toIso8601String(),
-          })
-          .then((_) => print('route_path updated successfully'))
-          .catchError((error) => print('Error updating route_path: $error'));
+      // Format data consistently
+      final locationData = {
+        'coordinates': coordinates,
+        'timestamp': timestamp.toIso8601String(),
+      };
 
-      // Update lastLocation
-      await taskRef
-          .child('lastLocation')
-          .set({
-            'coordinates': coordinates,
-            'timestamp': timestamp.toIso8601String(),
-          })
-          .then((_) => print('lastLocation updated successfully'))
-          .catchError((error) => print('Error updating lastLocation: $error'));
+      // Try direct path first for better performance
+      try {
+        await taskRef.child('route_path').child(timestampKey).set(locationData);
+        print('route_path updated successfully');
+      } catch (e) {
+        print('Error with direct route_path update: $e');
+
+        // Try alternative approach with update()
+        final updates = {
+          'route_path/$timestampKey': locationData,
+        };
+        await taskRef.update(updates);
+        print('route_path updated with alternative method');
+      }
+
+      // Also update lastLocation
+      await taskRef.child('lastLocation').set(locationData);
+      print('lastLocation updated successfully');
 
       print('=== UPDATE COMPLETE ===');
     } catch (e, stackTrace) {
@@ -277,6 +347,8 @@ class RouteRepositoryImpl implements RouteRepository {
         taskId: data['taskId']?.toString() ?? '',
         userId: data['userId']?.toString() ?? '',
         vehicleId: data['vehicleId']?.toString() ?? '',
+        officerName:
+            data['officerName']?.toString(), // Support for officer name
         assignedRoute: data['assigned_route'] != null
             ? (data['assigned_route'] as List)
                 .map((point) => (point as List)
@@ -296,6 +368,7 @@ class RouteRepositoryImpl implements RouteRepository {
         endTime: _parseDateTime(data['endTime']),
         assignedStartTime: _parseDateTime(data['assignedStartTime']),
         assignedEndTime: _parseDateTime(data['assignedEndTime']),
+        clusterId: data['clusterId'].toString(), // Add clusterId support
       );
     } catch (e, stackTrace) {
       print('Error converting task: $e'); // Debug print
@@ -353,6 +426,7 @@ class RouteRepositoryImpl implements RouteRepository {
   // Add these methods after the existing ones
   @override
   Future<void> createTask({
+    required String clusterId,
     required String vehicleId,
     required List<List<double>> assignedRoute,
     required String? assignedOfficerId,
@@ -364,6 +438,7 @@ class RouteRepositoryImpl implements RouteRepository {
       final taskRef = _database.child('tasks').push();
 
       final newTask = {
+        'clusterId': clusterId,
         'taskId': taskRef.key,
         'vehicleId': vehicleId,
         'userId': assignedOfficerId,
@@ -426,39 +501,6 @@ class RouteRepositoryImpl implements RouteRepository {
     } catch (e) {
       print('Error getting all tasks: $e');
       throw Exception('Failed to get tasks: $e');
-    }
-  }
-
-  @override
-  Future<List<UserModel.User>> getAllOfficers() async {
-    try {
-      await _checkAuth();
-      final snapshot = await _database
-          .child('users')
-          .orderByChild('role')
-          .equalTo('Officer')
-          .get();
-
-      if (!snapshot.exists) {
-        return [];
-      }
-
-      final usersMap = Map<String, dynamic>.from(snapshot.value as Map);
-      final officers = usersMap.entries.map((entry) {
-        final userData = entry.value as Map<dynamic, dynamic>;
-        return UserModel.User(
-          id: entry.key,
-          name: userData['name']?.toString() ?? '',
-          email: userData['email']?.toString() ?? '',
-          role: userData['role']?.toString() ?? 'officer',
-        );
-      }).toList();
-
-      print('Retrieved ${officers.length} officers');
-      return officers;
-    } catch (e) {
-      print('Error getting officers: $e');
-      throw Exception('Failed to get officers: $e');
     }
   }
 
@@ -576,6 +618,8 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
+  // Memperbaiki metode addOfficerToCluster untuk menggunakan push().key sebagai ID
+
   @override
   Future<void> addOfficerToCluster({
     required String clusterId,
@@ -584,12 +628,13 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       await _checkAuth();
 
-      // Generate ID unik jika belum ada
-      final String officerId = officer.id.isNotEmpty
-          ? officer.id
-          : 'officer_${DateTime.now().millisecondsSinceEpoch}_${_generateRandomString(6)}';
+      // Buat referensi baru untuk officer dengan push()
+      final officerRef = _database.child('users/$clusterId/officers').push();
 
-      // Buat officer dengan ID baru
+      // Dapatkan key yang dibuat Firebase
+      final String officerId = officerRef.key!;
+
+      // Buat officer dengan ID Firebase
       final updatedOfficer = Officer(
         id: officerId,
         name: officer.name,
@@ -598,8 +643,7 @@ class RouteRepositoryImpl implements RouteRepository {
         photoUrl: officer.photoUrl,
       );
 
-      // Simpan officer langsung ke node specific
-      final officerRef = _database.child('users/$clusterId/officers').push();
+      // Simpan officer dengan ID Firebase
       await officerRef.set(updatedOfficer.toMap());
 
       // Update timestamp cluster
@@ -608,7 +652,7 @@ class RouteRepositoryImpl implements RouteRepository {
         'updated_by': _auth.currentUser?.uid,
       });
 
-      print('Officer added to cluster with ID: $officerId');
+      print('Officer added to cluster with Firebase ID: $officerId');
       return;
     } catch (e) {
       print('Error adding officer to cluster: $e');
@@ -617,12 +661,6 @@ class RouteRepositoryImpl implements RouteRepository {
   }
 
 // Tambahkan method helper untuk generate string random
-  String _generateRandomString(int length) {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    final random = Random();
-    return String.fromCharCodes(Iterable.generate(
-        length, (_) => chars.codeUnitAt(random.nextInt(chars.length))));
-  }
 
   @override
   Future<void> updateOfficerInCluster({

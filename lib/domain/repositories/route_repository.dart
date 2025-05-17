@@ -36,6 +36,7 @@ abstract class RouteRepository {
   
   // Create new task
   Future<void> createTask({
+    required String clusterId,
     required String vehicleId,
     required List<List<double>> assignedRoute,
     required String? assignedOfficerId,
@@ -51,7 +52,7 @@ abstract class RouteRepository {
   // ---------------------------------------------
   
   // Get all officers (legacy method for backward compatibility)
-  Future<List<User>> getAllOfficers();
+  // Future<List<Officer>> getAllOfficers();
   
   // Get all available vehicles
   Future<List<String>> getAllVehicles();

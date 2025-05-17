@@ -23,6 +23,7 @@ class LoadOfficersAndVehicles extends AdminEvent {
 }
 
 class CreateTask extends AdminEvent {
+  final String clusterId;
   final String vehicleId;
   final List<List<double>> assignedRoute;
   final String? assignedOfficerId;
@@ -30,6 +31,7 @@ class CreateTask extends AdminEvent {
   final DateTime? assignedEndTime;
 
   const CreateTask({
+    required this.clusterId,
     required this.vehicleId,
     required this.assignedRoute,
     required this.assignedOfficerId,
@@ -130,6 +132,13 @@ class DeleteClusterEvent extends AdminEvent {
   const DeleteClusterEvent(this.clusterId);
 }
 
+// Event untuk load tugas-tugas dari cluster tertentu
+class LoadClusterTasksEvent extends AdminEvent {
+  final String clusterId;
+
+  const LoadClusterTasksEvent(this.clusterId);
+}
+
 // States
 abstract class AdminState {}
 
@@ -140,17 +149,20 @@ class AdminLoading extends AdminState {}
 // Loading state khusus untuk cluster
 class ClustersLoading extends AdminState {}
 
+// Perbaikan definisi AdminLoaded state
 class AdminLoaded extends AdminState {
   final List<PatrolTask> activeTasks;
   final List<PatrolTask> completedTasks;
   final int totalOfficers;
   final List<String> vehicles;
+  final List<User> clusters;
 
   AdminLoaded({
     required this.activeTasks,
     required this.completedTasks,
     required this.totalOfficers,
     required this.vehicles,
+    required this.clusters,
   });
 }
 
@@ -201,11 +213,13 @@ class CreateTaskError extends AdminState {
 }
 
 class OfficersAndVehiclesLoaded extends AdminState {
-  final List<User> officers;
+  final List<Officer> officers;
+  final List<User> clusters;
   final List<String> vehicles;
 
   OfficersAndVehiclesLoaded({
     required this.officers,
+    required this.clusters,
     required this.vehicles,
   });
 }
@@ -261,6 +275,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     on<CreateTask>(_onCreateTask);
     on<LoadOfficersAndVehicles>(_onLoadOfficersAndVehicles);
     on<GetClusterDetail>(_onGetClusterDetail);
+    on<LoadClusterTasksEvent>(_onLoadClusterTasks);
 
     // Handlers for cluster-related events
     on<LoadClusters>(_onLoadClusters);
@@ -275,6 +290,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     on<DeleteClusterEvent>(_onDeleteCluster);
   }
 
+  // Updated _onLoadAllTasks method
   Future<void> _onLoadAllTasks(
     LoadAllTasks event,
     Emitter<AdminState> emit,
@@ -290,16 +306,29 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
 
       // Muat data baru
       final tasks = await repository.getAllTasks();
-      final officers = await repository.getAllOfficers();
+
+      // Load officers dari semua cluster
+      final clusters = await repository.getAllClusters();
+
+      // Hitung total officers dari semua cluster
+      int totalOfficers = 0;
+      for (var cluster in clusters) {
+        if (cluster.officers != null) {
+          totalOfficers += cluster.officers!.length;
+        }
+      }
+
       final vehicles = await repository.getAllVehicles();
 
       emit(AdminLoaded(
         activeTasks: tasks.where((t) => t.status == 'active').toList(),
         completedTasks: tasks.where((t) => t.status == 'finished').toList(),
-        totalOfficers: officers.length,
+        totalOfficers: totalOfficers,
         vehicles: vehicles,
+        clusters: clusters,
       ));
     } catch (e) {
+      print('Error loading all tasks: $e');
       emit(AdminError(e.toString()));
     }
   }
@@ -312,6 +341,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
       emit(CreateTaskLoading());
 
       await repository.createTask(
+        clusterId: event.clusterId,
         vehicleId: event.vehicleId,
         assignedRoute: event.assignedRoute,
         assignedOfficerId: event.assignedOfficerId,
@@ -326,16 +356,45 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     }
   }
 
+  // Updated _onLoadOfficersAndVehicles method
   Future<void> _onLoadOfficersAndVehicles(
     LoadOfficersAndVehicles event,
     Emitter<AdminState> emit,
   ) async {
     try {
       emit(OfficersAndVehiclesLoading());
-      final officers = await repository.getAllOfficers();
+
+      // Load all clusters first
+      final clusters = await repository.getAllClusters();
+
+      // Collect all officers from each cluster
+      List<Officer> allOfficers = [];
+      for (var cluster in clusters) {
+        if (cluster.officers != null) {
+          // Set clusterId for each officer to ensure proper filtering later
+          final officersWithClusterId = cluster.officers!.map((officer) {
+            if (officer.clusterId.isEmpty) {
+              return Officer(
+                id: officer.id,
+                name: officer.name,
+                shift: officer.shift,
+                clusterId: cluster.id, // Set the cluster ID
+                photoUrl: officer.photoUrl,
+              );
+            }
+            return officer;
+          }).toList();
+
+          allOfficers.addAll(officersWithClusterId);
+        }
+      }
+
       final vehicles = await repository.getAllVehicles();
-      emit(OfficersAndVehiclesLoaded(officers: officers, vehicles: vehicles));
+
+      emit(OfficersAndVehiclesLoaded(
+          officers: allOfficers, vehicles: vehicles, clusters: clusters));
     } catch (e) {
+      print('Error loading officers and vehicles: $e');
       emit(
           OfficersAndVehiclesError('Failed to load officers and vehicles: $e'));
     }
@@ -499,6 +558,20 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
       emit(ClustersLoaded(clusters));
     } catch (e) {
       emit(ClustersError('Failed to delete cluster: $e'));
+    }
+  }
+
+  // Tambahkan event handler untuk load tugas-tugas cluster
+  Future<void> _onLoadClusterTasks(
+    LoadClusterTasksEvent event,
+    Emitter<AdminState> emit,
+  ) async {
+    try {
+      emit(ClustersLoading());
+      final tasks = await repository.getClusterTasks(event.clusterId);
+      emit(ClusterTasksLoaded(clusterId: event.clusterId, tasks: tasks));
+    } catch (e) {
+      emit(ClustersError('Failed to load cluster tasks: $e'));
     }
   }
 }
