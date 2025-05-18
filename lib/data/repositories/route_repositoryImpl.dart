@@ -656,6 +656,7 @@ class RouteRepositoryImpl implements RouteRepository {
         id: officerId,
         name: officer.name,
         shift: officer.shift,
+        type: officer.type,
         clusterId: clusterId,
         photoUrl: officer.photoUrl,
       );

@@ -446,6 +446,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
+                  // Bagian officers.isEmpty ? ...
                   officers.isEmpty
                       ? const Text(
                           'Belum ada petugas di cluster ini',
@@ -455,7 +456,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ),
                         )
                       : SizedBox(
-                          height: 60,
+                          height:
+                              70, // Sedikit ditinggikan untuk menampung badge
                           child: ListView.builder(
                             scrollDirection: Axis.horizontal,
                             itemCount: officers.length,
@@ -464,6 +466,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               return Padding(
                                 padding: const EdgeInsets.only(right: 12),
                                 child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.start,
                                   children: [
                                     CircleAvatar(
                                       radius: 20,
@@ -472,18 +475,64 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                           ? NetworkImage(officer.photoUrl!)
                                           : null,
                                       child: officer.photoUrl == null
-                                          ? const Icon(
-                                              Icons.person,
-                                              color: kbpBlue900,
+                                          ? Text(
+                                              officer.name.isNotEmpty
+                                                  ? officer.name[0]
+                                                      .toUpperCase()
+                                                  : '?',
+                                              style: boldTextStyle(
+                                                  color: kbpBlue900, size: 14),
                                             )
                                           : null,
                                     ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      officer.name.length > 10
-                                          ? '${officer.name.substring(0, 10)}...'
-                                          : officer.name,
-                                      style: const TextStyle(fontSize: 12),
+                                    8.width,
+                                    SizedBox(
+                                      width: 70, // Batasi lebar
+                                      child: Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            officer.name.length > 10
+                                                ? '${officer.name.substring(0, 10)}...'
+                                                : officer.name,
+                                            style: boldTextStyle(size: 12),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                          Container(
+                                            margin:
+                                                const EdgeInsets.only(top: 2),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                              vertical: 1,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: officer.type ==
+                                                      OfficerType.organik
+                                                  ? successG50
+                                                  : warningY50,
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              officer.type ==
+                                                      OfficerType.organik
+                                                  ? 'Organik'
+                                                  : 'Outsource',
+                                              style: semiBoldTextStyle(
+                                                size: 10,
+                                                color: officer.type ==
+                                                        OfficerType.organik
+                                                    ? successG500
+                                                    : warningY500,
+                                              ),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -547,7 +596,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               orElse: () => Officer(
                                 id: '',
                                 name: 'Tidak diketahui',
-                                shift: '',
+                                type: OfficerType.organik, // Default tipe
+                                shift: ShiftType.pagi, // Default shift
                                 clusterId: cluster.id,
                               ),
                             );
@@ -555,67 +605,196 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             return Card(
                               margin: const EdgeInsets.only(bottom: 8),
                               elevation: 0,
-                              color: neutral300,
+                              color: neutral200,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
-                                side: const BorderSide(color: neutral300),
+                                side: BorderSide(color: neutral300),
                               ),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8,
-                                ),
-                                leading: CircleAvatar(
-                                  backgroundColor: _getStatusColor(task.status),
-                                  child: const Icon(
-                                    Icons.task_alt,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                title: Text(
-                                  'Tugas #${task.taskId.substring(0, 8)}',
-                                  style: semiBoldTextStyle(),
-                                ),
-                                subtitle: Column(
+                              child: Padding(
+                                padding: const EdgeInsets.all(12.0),
+                                child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const SizedBox(height: 4),
-                                    Text('Petugas: ${assignedOfficer.name}'),
-                                    Text(
-                                      'Status: ${_getStatusText(task.status)}',
-                                      style: TextStyle(
-                                        color: _getStatusColor(task.status),
-                                        fontWeight: FontWeight.w500,
-                                      ),
+                                    Row(
+                                      children: [
+                                        // Status indicator
+                                        CircleAvatar(
+                                          backgroundColor:
+                                              _getStatusColor(task.status),
+                                          radius: 16,
+                                          child: const Icon(
+                                            Icons.task_alt,
+                                            color: Colors.white,
+                                            size: 16,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+
+                                        // Task ID
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Tugas #${task.taskId.substring(0, 8)}',
+                                                style: boldTextStyle(size: 16),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                'Status: ${_getStatusText(task.status)}',
+                                                style: TextStyle(
+                                                  color: _getStatusColor(
+                                                      task.status),
+                                                  fontWeight: FontWeight.w500,
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+
+                                        // View action
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.arrow_forward_ios,
+                                            size: 16,
+                                          ),
+                                          onPressed: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    PatrolHistoryScreen(
+                                                  task: task,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
+
+                                    const Divider(height: 16),
+
+                                    // Officer info section with shift and type
+                                    Row(
+                                      children: [
+                                        // Officer avatar
+                                        CircleAvatar(
+                                          radius: 16,
+                                          backgroundColor: kbpBlue100,
+                                          backgroundImage:
+                                              assignedOfficer.photoUrl != null
+                                                  ? NetworkImage(
+                                                      assignedOfficer.photoUrl!)
+                                                  : null,
+                                          child:
+                                              assignedOfficer.photoUrl == null
+                                                  ? const Icon(Icons.person,
+                                                      color: kbpBlue900,
+                                                      size: 16)
+                                                  : null,
+                                        ),
+                                        const SizedBox(width: 12),
+
+                                        // Officer details with type and shift badges
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                assignedOfficer.name,
+                                                style:
+                                                    mediumTextStyle(size: 14),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Wrap(
+                                                spacing: 8,
+                                                children: [
+                                                  // Tipe badge
+                                                  Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: assignedOfficer
+                                                                  .type ==
+                                                              OfficerType
+                                                                  .organik
+                                                          ? successG50
+                                                          : warningY50,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              4),
+                                                    ),
+                                                    child: Text(
+                                                      assignedOfficer
+                                                          .typeDisplay,
+                                                      style: mediumTextStyle(
+                                                        size: 10,
+                                                        color: assignedOfficer
+                                                                    .type ==
+                                                                OfficerType
+                                                                    .organik
+                                                            ? successG500
+                                                            : warningY500,
+                                                      ),
+                                                    ),
+                                                  ),
+
+                                                  // Shift badge
+                                                  Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 6,
+                                                      vertical: 2,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: kbpBlue50,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              4),
+                                                    ),
+                                                    child: Text(
+                                                      getShortShiftText(
+                                                          assignedOfficer
+                                                              .shift),
+                                                      style: mediumTextStyle(
+                                                          size: 10,
+                                                          color: kbpBlue700),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+
+                                        // Show task start time
+                                        Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.end,
+                                          children: [
+                                            Text(
+                                              'Mulai:',
+                                              style: regularTextStyle(
+                                                  size: 12, color: neutral600),
+                                            ),
+                                            Text(
+                                              formatDateFromString(
+                                                  task.startTime.toString()),
+                                              style: mediumTextStyle(size: 12),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
-                                trailing: IconButton(
-                                  icon: const Icon(
-                                    Icons.arrow_forward_ios,
-                                    size: 16,
-                                  ),
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => PatrolHistoryScreen(
-                                          task: task,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => PatrolHistoryScreen(
-                                        task: task,
-                                      ),
-                                    ),
-                                  );
-                                },
                               ),
                             );
                           },

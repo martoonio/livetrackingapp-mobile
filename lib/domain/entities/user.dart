@@ -58,12 +58,10 @@ class User {
       officers: _parseOfficers(map['officers']),
       clusterCoordinates: _parseCoordinates(map['cluster_coordinates']),
       pushToken: map['push_token'],
-      createdAt: map['created_at'] != null 
-          ? DateTime.parse(map['created_at']) 
-          : null,
-      updatedAt: map['updated_at'] != null 
-          ? DateTime.parse(map['updated_at']) 
-          : null,
+      createdAt:
+          map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
+      updatedAt:
+          map['updated_at'] != null ? DateTime.parse(map['updated_at']) : null,
       updatedBy: map['updated_by'],
     );
   }
@@ -71,24 +69,24 @@ class User {
   // Helper method untuk parsing officers
   static List<Officer>? _parseOfficers(dynamic officersData) {
     if (officersData == null) return null;
-    
+
     try {
       if (officersData is List) {
         return officersData
             .map((officerMap) => Officer.fromMap(
-                  officerMap is Map<String, dynamic> 
-                      ? officerMap 
+                  officerMap is Map<String, dynamic>
+                      ? officerMap
                       : Map<String, dynamic>.from(officerMap),
                 ))
             .toList();
       }
-      
+
       if (officersData is Map) {
         // Jika data officers berbentuk map dengan key-value
         return officersData.entries
             .map((entry) => Officer.fromMap(
-                  entry.value is Map<String, dynamic> 
-                      ? entry.value 
+                  entry.value is Map<String, dynamic>
+                      ? entry.value
                       : Map<String, dynamic>.from(entry.value),
                 ))
             .toList();
@@ -96,14 +94,14 @@ class User {
     } catch (e) {
       print('Error parsing officers data: $e');
     }
-    
+
     return null;
   }
 
   // Helper method untuk parsing coordinates
   static List<List<double>>? _parseCoordinates(dynamic coordinatesData) {
     if (coordinatesData == null) return null;
-    
+
     try {
       if (coordinatesData is List) {
         return coordinatesData.map((point) {
@@ -120,7 +118,7 @@ class User {
     } catch (e) {
       print('Error parsing cluster coordinates: $e');
     }
-    
+
     return null;
   }
 
@@ -152,37 +150,167 @@ class User {
   }
 }
 
+// Enum untuk tipe officer
+enum OfficerType {
+  organik,
+  outsource,
+}
+
+// Enum untuk shift kerja
+enum ShiftType {
+  // Organik shifts
+  pagi, // 07:00-15:00
+  sore, // 15:00-23:00
+  malam, // 23:00-07:00
+
+  // Outsource shifts
+  siang, // 07:00-19:00
+  malamPanjang, // 19:00-07:00
+}
+
 // Kelas untuk memodelkan data Officer dalam cluster
 class Officer {
   final String id;
   final String name;
-  final String shift; // Shift kerja (misalnya: "pagi", "siang", "malam")
+  final OfficerType type; // Organik atau Outsource
+  final ShiftType shift; // Shift kerja
   final String clusterId; // ID cluster tempat officer ditugaskan
   final String? photoUrl; // URL foto officer
 
   Officer({
     required this.id,
     required this.name,
+    required this.type,
     required this.shift,
     required this.clusterId,
     this.photoUrl,
   });
 
+  // Konversi string shift menjadi enum ShiftType
+  static ShiftType _parseShiftType(String? shiftStr, String? typeStr) {
+    final officerType = _parseOfficerType(typeStr);
+
+    if (officerType == OfficerType.outsource) {
+      // Outsource hanya memiliki 2 shift
+      if (shiftStr?.toLowerCase().contains('malam') == true) {
+        return ShiftType.malamPanjang;
+      }
+      return ShiftType.siang;
+    } else {
+      // Organik memiliki 3 shift
+      if (shiftStr?.toLowerCase().contains('sore') == true) {
+        return ShiftType.sore;
+      } else if (shiftStr?.toLowerCase().contains('malam') == true) {
+        return ShiftType.malam;
+      }
+      return ShiftType.pagi;
+    }
+  }
+
+  // Konversi string tipe menjadi enum OfficerType
+  static OfficerType _parseOfficerType(String? typeStr) {
+    if (typeStr?.toLowerCase() == 'outsource') {
+      return OfficerType.outsource;
+    }
+    return OfficerType.organik;
+  }
+
+  // Konversi ShiftType ke string untuk tampilan
+  String get shiftDisplay {
+    switch (shift) {
+      case ShiftType.pagi:
+        return 'Pagi (07:00 - 15:00)';
+      case ShiftType.sore:
+        return 'Sore (15:00 - 23:00)';
+      case ShiftType.malam:
+        return 'Malam (23:00 - 07:00)';
+      case ShiftType.siang:
+        return 'Siang (07:00 - 19:00)';
+      case ShiftType.malamPanjang:
+        return 'Malam (19:00 - 07:00)';
+    }
+  }
+
+  // Konversi OfficerType ke string untuk tampilan
+  String get typeDisplay {
+    switch (type) {
+      case OfficerType.organik:
+        return 'Organik';
+      case OfficerType.outsource:
+        return 'Outsource';
+    }
+  }
+
+  // Mendapatkan jam mulai shift dalam format jam lengkap
+  DateTime getShiftStartTime(DateTime date) {
+    switch (shift) {
+      case ShiftType.pagi:
+        return DateTime(date.year, date.month, date.day, 7, 0);
+      case ShiftType.sore:
+        return DateTime(date.year, date.month, date.day, 15, 0);
+      case ShiftType.malam:
+        return DateTime(date.year, date.month, date.day, 23, 0);
+      case ShiftType.siang:
+        return DateTime(date.year, date.month, date.day, 7, 0);
+      case ShiftType.malamPanjang:
+        return DateTime(date.year, date.month, date.day, 19, 0);
+    }
+  }
+
+  // Mendapatkan jam selesai shift dalam format jam lengkap
+  DateTime getShiftEndTime(DateTime date) {
+    switch (shift) {
+      case ShiftType.pagi:
+        return DateTime(date.year, date.month, date.day, 15, 0);
+      case ShiftType.sore:
+        return DateTime(date.year, date.month, date.day, 23, 0);
+      case ShiftType.malam:
+        return DateTime(date.year, date.month, date.day, 7, 0)
+            .add(const Duration(days: 1));
+      case ShiftType.siang:
+        return DateTime(date.year, date.month, date.day, 19, 0);
+      case ShiftType.malamPanjang:
+        return DateTime(date.year, date.month, date.day, 7, 0)
+            .add(const Duration(days: 1));
+    }
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,
       'name': name,
-      'shift': shift,
+      'type': type == OfficerType.organik ? 'organik' : 'outsource',
+      'shift': _shiftTypeToString(shift),
       'cluster_id': clusterId,
       'photo_url': photoUrl,
     };
   }
 
+  // Konversi ShiftType ke string untuk database
+  String _shiftTypeToString(ShiftType shiftType) {
+    switch (shiftType) {
+      case ShiftType.pagi:
+        return 'pagi';
+      case ShiftType.sore:
+        return 'sore';
+      case ShiftType.malam:
+        return 'malam';
+      case ShiftType.siang:
+        return 'siang';
+      case ShiftType.malamPanjang:
+        return 'malam_panjang';
+    }
+  }
+
   factory Officer.fromMap(Map<String, dynamic> map) {
+    final typeStr = map['type'] ?? 'organik';
+    final shiftStr = map['shift'] ?? 'pagi';
+
     return Officer(
       id: map['id'] ?? '',
       name: map['name'] ?? '',
-      shift: map['shift'] ?? '',
+      type: _parseOfficerType(typeStr),
+      shift: _parseShiftType(shiftStr, typeStr),
       clusterId: map['cluster_id'] ?? '',
       photoUrl: map['photo_url'],
     );

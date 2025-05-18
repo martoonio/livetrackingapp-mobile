@@ -39,6 +39,11 @@ class PatrolTask {
   set vehicleName(String value) => _vehicleName = value;
   set officerPhotoUrl(String value) => _officerPhotoUrl = value;
 
+  // Tambahkan field baru
+  String? finalReportPhotoUrl;
+  final String? finalReportNote;
+  final DateTime? finalReportTime;
+
   PatrolTask({
     required this.taskId,
     required this.userId,
@@ -61,6 +66,11 @@ class PatrolTask {
     String? clusterName,
     String? vehicleName,
     String? officerPhotoUrl,
+
+    // Parameter baru
+    this.finalReportPhotoUrl,
+    this.finalReportNote,
+    this.finalReportTime,
   }) {
     _officerName = officerName;
     _clusterName = clusterName;
@@ -105,6 +115,11 @@ class PatrolTask {
       clusterName: json['clusterName'] as String?,
       vehicleName: json['vehicleName'] as String?,
       officerPhotoUrl: json['officerPhotoUrl'] as String?,
+
+      // Field baru
+      finalReportPhotoUrl: json['finalReportPhotoUrl'] as String?,
+      finalReportNote: json['finalReportNote'] as String?,
+      finalReportTime: _parseDateTime(json['finalReportTime']),
     );
   }
 
@@ -126,6 +141,11 @@ class PatrolTask {
       'createdAt': createdAt.toIso8601String(),
       'createdBy': createdBy,
       'notes': notes,
+
+      // Field baru
+      'finalReportPhotoUrl': finalReportPhotoUrl,
+      'finalReportNote': finalReportNote,
+      'finalReportTime': finalReportTime?.toIso8601String(),
     };
   }
 
@@ -442,6 +462,11 @@ class PatrolTask {
     String? clusterName,
     String? vehicleName,
     String? officerPhotoUrl, // Tambahkan parameter ini
+
+    // Parameter baru
+    String? finalReportPhotoUrl,
+    String? finalReportNote,
+    DateTime? finalReportTime,
   }) {
     return PatrolTask(
       taskId: taskId ?? this.taskId,
@@ -465,6 +490,11 @@ class PatrolTask {
       clusterName: clusterName ?? _clusterName,
       vehicleName: vehicleName ?? _vehicleName,
       officerPhotoUrl: officerPhotoUrl ?? _officerPhotoUrl, // Tambahkan ini
+
+      // Field baru
+      finalReportPhotoUrl: finalReportPhotoUrl ?? this.finalReportPhotoUrl,
+      finalReportNote: finalReportNote ?? this.finalReportNote,
+      finalReportTime: finalReportTime ?? this.finalReportTime,
     );
   }
 

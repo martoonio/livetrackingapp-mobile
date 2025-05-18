@@ -74,32 +74,36 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   // Tambahkan metode-metode ini di dalam class _CreateTaskScreenState
 
 // Cek apakah waktu yang dipilih sesuai dengan range shift
-  bool _isTimeInShiftRange(TimeOfDay time, String shift) {
+  bool _isTimeInShiftRange(TimeOfDay time, ShiftType shift) {
     int hour = time.hour;
 
     switch (shift) {
-      case 'Pagi':
-        return hour >= 7 && hour < 15;
-      case 'Siang':
-        return hour >= 15 && hour < 23;
-      case 'Malam':
-        return hour >= 23 || hour < 7; // Antara 23:00 - 07:00
-      default:
-        return false;
+      case ShiftType.pagi:
+        return hour >= 7 && hour < 15; // 07:00-15:00
+      case ShiftType.sore:
+        return hour >= 15 && hour < 23; // 15:00-23:00
+      case ShiftType.malam:
+        return hour >= 23 || hour < 7; // 23:00-07:00
+      case ShiftType.siang:
+        return hour >= 7 && hour < 19; // 07:00-19:00
+      case ShiftType.malamPanjang:
+        return hour >= 19 || hour < 7; // 19:00-07:00
     }
   }
 
 // Dapatkan pesan range waktu untuk shift tertentu
-  String _getShiftTimeRangeMessage(String shift) {
+  String _getShiftTimeRangeMessage(ShiftType shift) {
     switch (shift) {
-      case 'Pagi':
+      case ShiftType.pagi:
         return 'Shift Pagi hanya dapat dijadwalkan antara pukul 07:00 - 15:00';
-      case 'Siang':
-        return 'Shift Siang hanya dapat dijadwalkan antara pukul 15:00 - 23:00';
-      case 'Malam':
+      case ShiftType.sore:
+        return 'Shift Sore hanya dapat dijadwalkan antara pukul 15:00 - 23:00';
+      case ShiftType.malam:
         return 'Shift Malam hanya dapat dijadwalkan antara pukul 23:00 - 07:00';
-      default:
-        return 'Waktu tidak sesuai dengan shift petugas';
+      case ShiftType.siang:
+        return 'Shift Siang hanya dapat dijadwalkan antara pukul 07:00 - 19:00';
+      case ShiftType.malamPanjang:
+        return 'Shift Malam hanya dapat dijadwalkan antara pukul 19:00 - 07:00';
     }
   }
 
@@ -115,7 +119,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     DateTime maxEndTime;
 
     switch (_selectedOfficer!.shift) {
-      case 'Pagi':
+      case ShiftType.pagi:
         // Batas waktu maksimum untuk shift pagi: jam 15:00 di hari yang sama
         maxEndTime = DateTime(
           _assignedStartTime.year,
@@ -125,8 +129,8 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           0,
         );
         break;
-      case 'Siang':
-        // Batas waktu maksimum untuk shift siang: jam 23:00 di hari yang sama
+      case ShiftType.sore:
+        // Batas waktu maksimum untuk shift sore: jam 23:00 di hari yang sama
         maxEndTime = DateTime(
           _assignedStartTime.year,
           _assignedStartTime.month,
@@ -135,7 +139,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           0,
         );
         break;
-      case 'Malam':
+      case ShiftType.malam:
         // Batas waktu maksimum untuk shift malam: jam 7:00 di hari berikutnya
         maxEndTime = DateTime(
           _assignedStartTime.year,
@@ -145,10 +149,26 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           0,
         ).add(const Duration(days: 1));
         break;
-      default:
-        // Default: tidak ada batas maksimum
-        maxEndTime =
-            endTime.add(const Duration(hours: 8)); // 8 jam dari waktu mulai
+      case ShiftType.siang:
+        // Batas waktu maksimum untuk shift siang outsource: jam 19:00 di hari yang sama
+        maxEndTime = DateTime(
+          _assignedStartTime.year,
+          _assignedStartTime.month,
+          _assignedStartTime.day,
+          19,
+          0,
+        );
+        break;
+      case ShiftType.malamPanjang:
+        // Batas waktu maksimum untuk shift malam outsource: jam 7:00 di hari berikutnya
+        maxEndTime = DateTime(
+          _assignedStartTime.year,
+          _assignedStartTime.month,
+          _assignedStartTime.day,
+          7,
+          0,
+        ).add(const Duration(days: 1));
+        break;
     }
 
     // Gunakan waktu yang lebih awal antara endTime (waktu mulai + 1 jam) atau maxEndTime (batas shift)
@@ -438,14 +458,35 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   Future<bool?> _showConfirmationDialog() async {
     String officerName = _selectedOfficer?.name ?? 'Tidak ditemukan';
     String clusterName = 'Unknown Cluster';
-    String officerShift = _selectedOfficer?.shift ?? 'Tidak diketahui';
+
+    // Get readable shift display text
+    String shiftText = '';
+    if (_selectedOfficer != null) {
+      switch (_selectedOfficer!.shift) {
+        case ShiftType.pagi:
+          shiftText = 'Pagi (07-15)';
+          break;
+        case ShiftType.sore:
+          shiftText = 'Sore (15-23)';
+          break;
+        case ShiftType.malam:
+          shiftText = 'Malam (23-07)';
+          break;
+        case ShiftType.siang:
+          shiftText = 'Siang (07-19)';
+          break;
+        case ShiftType.malamPanjang:
+          shiftText = 'Malam (19-07)';
+          break;
+      }
+    }
+
+    // Get readable type display text
+    String typeText =
+        _selectedOfficer?.type == OfficerType.organik ? 'Organik' : 'Outsource';
 
     // Cari info cluster dari state
     final adminState = context.read<AdminBloc>().state;
-
-    // Debug - cetak tipe state saat ini dan cluster ID yang dipilih
-    print(
-        'Current state type: ${adminState.runtimeType}, selected clusterId: $_selectedClusterId');
 
     // Pendekatan lebih sederhana untuk menemukan cluster yang dipilih
     List<User> availableClusters = [];
@@ -460,17 +501,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
     // Coba temukan cluster berdasarkan ID
     if (_selectedClusterId != null && availableClusters.isNotEmpty) {
-      print(
-          'Searching for cluster in ${availableClusters.length} available clusters');
-
-      // Periksa semua cluster ID yang tersedia untuk debugging
-      availableClusters
-          .forEach((c) => print('Available cluster: ${c.id} - ${c.name}'));
-
       for (var cluster in availableClusters) {
         if (cluster.id == _selectedClusterId) {
           clusterName = cluster.name;
-          print('Found cluster: $clusterName');
           break;
         }
       }
@@ -492,7 +525,8 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
               children: [
                 Text('Detail Tugas:', style: semiBoldTextStyle()),
                 _infoRow('Cluster', clusterName),
-                _infoRow('Petugas', '$officerName (Shift $officerShift)'),
+                _infoRow(
+                    'Petugas', '$officerName ($typeText - Shift $shiftText)'),
                 _infoRow('Kendaraan', _vehicleId),
                 _infoRow(
                     'Jumlah Titik Patroli', _selectedPoints.length.toString()),
@@ -510,9 +544,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
               ),
               child: Text(
                 'Batal',
-                style: mediumTextStyle(
-                  color: kbpBlue900,
-                ),
+                style: mediumTextStyle(color: kbpBlue900),
               ),
               onPressed: () {
                 Navigator.of(context).pop(false);
@@ -562,22 +594,26 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   void _updateSelectedOfficer(String officerId, List<Officer> officers) {
     final officer = officers.firstWhere(
       (o) => o.id == officerId,
-      orElse: () => Officer(id: '', name: '', shift: '', clusterId: ''),
+      orElse: () => Officer(
+        id: '',
+        name: '',
+        type: OfficerType.organik, // Default ke organik
+        shift: ShiftType.pagi, // Default ke pagi
+        clusterId: '',
+      ),
     );
 
     setState(() {
       _selectedOfficer = officer;
     });
 
-    // Jika officer memiliki shift, atur waktu sesuai shift
-    if (officer.shift.isNotEmpty) {
-      _setInitialTimeBasedOnShift(officer.shift);
-    }
+    // Atur waktu berdasarkan shift petugas
+    _setInitialTimeBasedOnShift(officer.type, officer.shift);
   }
 
-// Perbaikan pada metode _setInitialTimeBasedOnShift
+// 3. Tambah metode baru untuk set awal waktu berdasarkan type dan shift
 
-  void _setInitialTimeBasedOnShift(String shift) {
+  void _setInitialTimeBasedOnShift(OfficerType type, ShiftType shift) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final tomorrow = today.add(const Duration(days: 1));
@@ -585,30 +621,36 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     DateTime startDate;
     DateTime endDate;
 
+    // Tentukan jam mulai dan selesai default berdasarkan type dan shift
     switch (shift) {
-      case 'Pagi':
-        // Default waktu mulai pagi: besok jam 7
+      case ShiftType.pagi:
+        // Organik: 07:00-15:00
         startDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 7, 0);
-        // Default waktu selesai: 1 jam setelah waktu mulai
-        endDate = startDate.add(const Duration(hours: 1));
+        endDate = startDate.add(const Duration(hours: 1)); // Default 1 jam
         break;
-      case 'Siang':
-        // Default waktu mulai siang: besok jam 15
+      case ShiftType.sore:
+        // Organik: 15:00-23:00
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 15, 0);
-        // Default waktu selesai: 1 jam setelah waktu mulai
         endDate = startDate.add(const Duration(hours: 1));
         break;
-      case 'Malam':
-        // Default waktu mulai malam: besok jam 23
+      case ShiftType.malam:
+        // Organik: 23:00-07:00
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 0);
-        // Default waktu selesai: 1 jam setelah waktu mulai
         endDate = startDate.add(const Duration(hours: 1));
         break;
-      default:
-        startDate = tomorrow;
-        endDate = tomorrow.add(const Duration(hours: 1));
+      case ShiftType.siang:
+        // Outsource: 07:00-19:00
+        startDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 7, 0);
+        endDate = startDate.add(const Duration(hours: 1));
+        break;
+      case ShiftType.malamPanjang:
+        // Outsource: 19:00-07:00
+        startDate =
+            DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 19, 0);
+        endDate = startDate.add(const Duration(hours: 1));
+        break;
     }
 
     setState(() {
@@ -617,7 +659,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     });
 
     print(
-        'Initial times set for $shift shift: Start=${DateFormat('dd/MM/yyyy HH:mm').format(startDate)}, End=${DateFormat('dd/MM/yyyy HH:mm').format(endDate)}');
+        'Initial times set based on type ${type.toString()} and shift ${shift.toString()}: Start=${DateFormat('dd/MM/yyyy HH:mm').format(startDate)}, End=${DateFormat('dd/MM/yyyy HH:mm').format(endDate)}');
   }
 
   @override
@@ -977,10 +1019,36 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                               hint: const Text('Pilih Petugas'),
                               isExpanded: true,
                               items: filteredOfficers.map((officer) {
+                                // Get readable shift display text
+                                String shiftText = '';
+                                switch (officer.shift) {
+                                  case ShiftType.pagi:
+                                    shiftText = 'Pagi (07-15)';
+                                    break;
+                                  case ShiftType.sore:
+                                    shiftText = 'Sore (15-23)';
+                                    break;
+                                  case ShiftType.malam:
+                                    shiftText = 'Malam (23-07)';
+                                    break;
+                                  case ShiftType.siang:
+                                    shiftText = 'Siang (07-19)';
+                                    break;
+                                  case ShiftType.malamPanjang:
+                                    shiftText = 'Malam (19-07)';
+                                    break;
+                                }
+
+                                // Get readable type display text
+                                String typeText =
+                                    officer.type == OfficerType.organik
+                                        ? 'Organik'
+                                        : 'Outsource';
+
                                 return DropdownMenuItem(
                                   value: officer.id,
                                   child: Text(
-                                      '${officer.name} (Shift ${officer.shift})'),
+                                      '${officer.name} ($typeText - $shiftText)'),
                                 );
                               }).toList(),
                               onChanged: (value) {
@@ -1090,112 +1158,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 // Waktu Mulai
                         GestureDetector(
                           onTap: () async {
-                            if (_selectedOfficer == null) {
-                              showCustomSnackbar(
-                                context: context,
-                                title: 'Perhatian',
-                                subtitle:
-                                    'Silakan pilih petugas terlebih dahulu untuk menentukan waktu patroli',
-                                type: SnackbarType.warning,
-                              );
-                              return;
-                            }
-
-                            // Pilih tanggal terlebih dahulu
-                            final selectedDate = await showDatePicker(
-                              context: context,
-                              initialDate: _assignedStartTime,
-                              firstDate: DateTime.now(),
-                              lastDate:
-                                  DateTime.now().add(const Duration(days: 365)),
-                            );
-
-                            if (selectedDate != null) {
-                              // Tentukan batas jam berdasarkan shift petugas
-                              TimeOfDay minTime;
-                              TimeOfDay maxTime;
-
-                              switch (_selectedOfficer!.shift) {
-                                case 'Pagi':
-                                  minTime = const TimeOfDay(hour: 7, minute: 0);
-                                  maxTime =
-                                      const TimeOfDay(hour: 15, minute: 0);
-                                  break;
-                                case 'Siang':
-                                  minTime =
-                                      const TimeOfDay(hour: 15, minute: 0);
-                                  maxTime =
-                                      const TimeOfDay(hour: 23, minute: 0);
-                                  break;
-                                case 'Malam':
-                                  minTime =
-                                      const TimeOfDay(hour: 23, minute: 0);
-                                  maxTime = const TimeOfDay(
-                                      hour: 7,
-                                      minute: 0); // Jam 7 pagi hari berikutnya
-                                  break;
-                                default:
-                                  minTime = const TimeOfDay(hour: 0, minute: 0);
-                                  maxTime =
-                                      const TimeOfDay(hour: 23, minute: 59);
-                              }
-
-                              // Tampilkan time picker
-                              final selectedTime = await showTimePicker(
-                                context: context,
-                                initialTime:
-                                    TimeOfDay.fromDateTime(_assignedStartTime),
-                                builder: (BuildContext context, Widget? child) {
-                                  return MediaQuery(
-                                    data: MediaQuery.of(context).copyWith(
-                                      alwaysUse24HourFormat:
-                                          true, // Gunakan format 24 jam
-                                    ),
-                                    child: child!,
-                                  );
-                                },
-                              );
-
-                              if (selectedTime != null) {
-                                // Validasi jam yang dipilih sesuai shift
-                                bool isValidTime = _isTimeInShiftRange(
-                                    selectedTime, _selectedOfficer!.shift);
-
-                                if (!isValidTime) {
-                                  if (mounted) {
-                                    showCustomSnackbar(
-                                      context: context,
-                                      title: 'Waktu Tidak Valid',
-                                      subtitle: _getShiftTimeRangeMessage(
-                                          _selectedOfficer!.shift),
-                                      type: SnackbarType.danger,
-                                    );
-                                  }
-                                  return;
-                                }
-
-                                setState(() {
-                                  // Gabungkan tanggal dan waktu yang dipilih
-                                  _assignedStartTime = DateTime(
-                                    selectedDate.year,
-                                    selectedDate.month,
-                                    selectedDate.day,
-                                    selectedTime.hour,
-                                    selectedTime.minute,
-                                  );
-
-                                  // Untuk shift malam, jika jam lebih kecil dari 7, artinya ini adalah dini hari (pagi berikutnya)
-                                  if (_selectedOfficer!.shift == 'Malam' &&
-                                      selectedTime.hour < 7) {
-                                    _assignedStartTime = _assignedStartTime
-                                        .add(const Duration(days: 1));
-                                  }
-
-                                  // Update juga waktu selesai
-                                  _updateEndTimeBasedOnStartTime();
-                                });
-                              }
-                            }
+                            _showStartTimePicker();
                           },
                           child: Container(
                             padding: const EdgeInsets.all(12),
@@ -1528,7 +1491,8 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
             final updatedOfficer = Officer(
               id: officer.id,
               name: officer.name,
-              shift: officer.shift,
+              type: officer.type, // Use the officer type
+              shift: officer.shift, // Use the officer shift
               clusterId: cluster.id, // Set clusterId dari parent cluster
               photoUrl: officer.photoUrl,
             );
@@ -1541,5 +1505,86 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     }
 
     return allOfficers;
+  }
+
+  // Di dalam GestureDetector untuk memilih waktu mulai
+  void _showStartTimePicker() async {
+    if (_selectedOfficer == null) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Perhatian',
+        subtitle:
+            'Silakan pilih petugas terlebih dahulu untuk menentukan waktu patroli',
+        type: SnackbarType.warning,
+      );
+      return;
+    }
+
+    // Pilih tanggal terlebih dahulu
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: _assignedStartTime,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+
+    if (selectedDate != null) {
+      // Tentukan range waktu yang valid berdasarkan shift
+      TimeOfDay initialTime = TimeOfDay.fromDateTime(_assignedStartTime);
+
+      // Tampilkan time picker
+      final selectedTime = await showTimePicker(
+        context: context,
+        initialTime: initialTime,
+        builder: (BuildContext context, Widget? child) {
+          return MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              alwaysUse24HourFormat: true,
+            ),
+            child: child!,
+          );
+        },
+      );
+
+      if (selectedTime != null) {
+        // Validasi jam yang dipilih sesuai shift
+        bool isValidTime =
+            _isTimeInShiftRange(selectedTime, _selectedOfficer!.shift);
+
+        if (!isValidTime) {
+          if (mounted) {
+            showCustomSnackbar(
+              context: context,
+              title: 'Waktu Tidak Valid',
+              subtitle: _getShiftTimeRangeMessage(_selectedOfficer!.shift),
+              type: SnackbarType.danger,
+            );
+          }
+          return;
+        }
+
+        setState(() {
+          // Gabungkan tanggal dan waktu yang dipilih
+          _assignedStartTime = DateTime(
+            selectedDate.year,
+            selectedDate.month,
+            selectedDate.day,
+            selectedTime.hour,
+            selectedTime.minute,
+          );
+
+          // Untuk shift malam, jika jam lebih kecil dari 7, artinya ini adalah dini hari (pagi berikutnya)
+          if ((_selectedOfficer!.shift == ShiftType.malam ||
+                  _selectedOfficer!.shift == ShiftType.malamPanjang) &&
+              selectedTime.hour < 7) {
+            _assignedStartTime =
+                _assignedStartTime.add(const Duration(days: 1));
+          }
+
+          // Update juga waktu selesai
+          _updateEndTimeBasedOnStartTime();
+        });
+      }
+    }
   }
 }

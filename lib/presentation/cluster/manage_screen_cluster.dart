@@ -44,6 +44,7 @@ class _ManageClustersScreenState extends State<ManageClustersScreen> {
         title: const Text('Manajemen Cluster'),
         backgroundColor: kbpBlue900,
         foregroundColor: Colors.white,
+        automaticallyImplyLeading: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),

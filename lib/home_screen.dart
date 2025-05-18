@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_svg/svg.dart';
 import 'package:livetrackingapp/map_screen.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
+import 'package:livetrackingapp/presentation/patrol/patrol_history_list_screen.dart';
 import 'package:lottie/lottie.dart' as lottie;
 import '../../domain/entities/patrol_task.dart';
 import '../../domain/entities/user.dart';
@@ -352,6 +354,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Perbaiki fungsi _showPatrolSummary untuk memastikan finalReportPhotoUrl diambil dengan benar
   void _showPatrolSummary(PatrolTask task) {
     try {
       print('=== Converting Route Path ===');
@@ -392,18 +395,28 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PatrolSummaryScreen(
-            task: task,
-            routePath: convertedPath,
-            startTime: task.startTime ?? DateTime.now(),
-            endTime: task.endTime ?? DateTime.now(),
-            distance: task.distance ?? 0,
+      // PERBAIKAN: Tampilkan debug info dan ambil data finalReportPhotoUrl dari database secara langsung jika null
+      log('photo url summary: ${task.finalReportPhotoUrl}');
+
+      // PERBAIKAN: Refresh task dari database untuk memastikan data terbaru
+      _refreshTaskDataForSummary(task).then((updatedTask) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PatrolSummaryScreen(
+              task:
+                  updatedTask ?? task, // Gunakan data yang diperbarui jika ada
+              routePath: convertedPath,
+              startTime:
+                  updatedTask?.startTime ?? task.startTime ?? DateTime.now(),
+              endTime: updatedTask?.endTime ?? task.endTime ?? DateTime.now(),
+              distance: updatedTask?.distance ?? task.distance ?? 0,
+              finalReportPhotoUrl:
+                  updatedTask?.finalReportPhotoUrl ?? task.finalReportPhotoUrl,
+            ),
           ),
-        ),
-      );
+        );
+      });
     } catch (e, stackTrace) {
       print('Error showing patrol summary: $e');
       print('Stack trace: $stackTrace');
@@ -411,6 +424,72 @@ class _HomeScreenState extends State<HomeScreen> {
         SnackBar(content: Text('Error loading patrol summary: $e')),
       );
     }
+  }
+
+// TAMBAHKAN: Fungsi baru untuk refresh data task langsung dari database
+  Future<PatrolTask?> _refreshTaskDataForSummary(
+      PatrolTask originalTask) async {
+    try {
+      // Ambil data task langsung dari Firebase
+      final snapshot = await FirebaseDatabase.instance
+          .ref()
+          .child('tasks')
+          .child(originalTask.taskId)
+          .get();
+
+      if (snapshot.exists) {
+        final data = snapshot.value as Map<dynamic, dynamic>;
+        print('Refreshed task data: $data');
+
+        // Cek apakah ada finalReportPhotoUrl
+        if (data.containsKey('finalReportPhotoUrl')) {
+          print('Found finalReportPhotoUrl: ${data['finalReportPhotoUrl']}');
+        } else {
+          print('finalReportPhotoUrl not found in database');
+        }
+
+        // Konversi data ke PatrolTask
+        final updatedTask = PatrolTask(
+          taskId: originalTask.taskId,
+          userId: data['userId']?.toString() ?? '',
+          vehicleId: data['vehicleId']?.toString() ?? '',
+          status: data['status']?.toString() ?? '',
+          assignedStartTime: _parseDateTime(data['assignedStartTime']),
+          assignedEndTime: _parseDateTime(data['assignedEndTime']),
+          startTime: _parseDateTime(data['startTime']),
+          endTime: _parseDateTime(data['endTime']),
+          distance: data['distance'] != null
+              ? (data['distance'] as num).toDouble()
+              : null,
+          createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
+          assignedRoute: data['assigned_route'] != null
+              ? (data['assigned_route'] as List)
+                  .map((point) => (point as List)
+                      .map((coord) => (coord as num).toDouble())
+                      .toList())
+                  .toList()
+              : null,
+          routePath: data['route_path'] != null
+              ? Map<String, dynamic>.from(data['route_path'] as Map)
+              : null,
+          clusterId: data['clusterId']?.toString() ?? '',
+          // Tambahkan field baru yang dibutuhkan
+          finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
+          finalReportNote: data['finalReportNote']?.toString(),
+          finalReportTime: _parseDateTime(data['finalReportTime']),
+        );
+
+        // Set properti tambahan
+        updatedTask.officerName = originalTask.officerName;
+        updatedTask.officerPhotoUrl = originalTask.officerPhotoUrl;
+
+        return updatedTask;
+      }
+    } catch (e) {
+      print('Error refreshing task data: $e');
+    }
+
+    return null;
   }
 
   String _formatDuration(Duration duration) {
@@ -743,7 +822,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.only(top: 12),
                 child: TextButton(
                   onPressed: () {
-                    // Show all history
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PatrolHistoryListScreen(
+                          tasksList: _historyTasks,
+                          isClusterView: _currentUser?.role == 'patrol',
+                        ),
+                      ),
+                    );
                   },
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -1117,7 +1204,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       padding: const EdgeInsets.only(top: 12),
                       child: TextButton(
                         onPressed: () {
-                          // Show all history
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PatrolHistoryListScreen(
+                                tasksList: _historyTasks,
+                                isClusterView: _currentUser?.role == 'patrol',
+                              ),
+                            ),
+                          );
                         },
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,

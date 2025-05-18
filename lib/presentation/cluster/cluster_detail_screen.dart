@@ -3,7 +3,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
-import 'package:livetrackingapp/presentation/cluster/edit_officer_screen.dart';
+import 'package:livetrackingapp/presentation/cluster/cluster_patrol_history_screen.dart';
+import 'package:livetrackingapp/presentation/cluster/officer_management_screen.dart';
 import 'package:livetrackingapp/presentation/component/map_section.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'package:lottie/lottie.dart' as lottie;
@@ -72,6 +73,15 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
             Tab(text: 'Petugas'),
             Tab(text: 'Titik Patroli'),
           ],
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            Navigator.pop(context);
+            context.read<AdminBloc>().add(
+                  LoadAllClusters(),
+                );
+          },
         ),
       ),
       body: BlocBuilder<AdminBloc, AdminState>(
@@ -213,7 +223,15 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                     icon: Icons.task_alt,
                     label: 'Lihat Riwayat Patroli',
                     onPressed: () {
-                      // Navigasi ke riwayat patroli
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ClusterPatrolHistoryScreen(
+                            clusterId: widget.clusterId,
+                            clusterName: _cluster?.name ?? '',
+                          ),
+                        ),
+                      );
                     },
                   ),
                   _buildActionButton(
@@ -232,6 +250,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
       ),
     );
   }
+
+  // Perbaikan untuk bagian _buildOfficersTab
 
   Widget _buildOfficersTab(User cluster) {
     final officers = cluster.officers ?? [];
@@ -252,14 +272,15 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => EditOfficerScreen(
+                      builder: (context) => OfficerManagementScreen(
                         clusterId: widget.clusterId,
+                        clusterName: cluster.name,
                       ),
                     ),
                   ).then((_) => _loadClusterDetails());
                 },
                 icon: const Icon(Icons.add, color: Colors.white),
-                label: const Text('Tambah Petugas'),
+                label: const Text('Kelola Petugas'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: kbpBlue900,
                   foregroundColor: Colors.white,
@@ -270,10 +291,38 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
         ),
         Expanded(
           child: officers.isEmpty
-              ? const Center(
-                  child: Text(
-                    'Belum ada petugas di cluster ini',
-                    style: TextStyle(fontSize: 16, color: neutral600),
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.people_outline,
+                          size: 64, color: neutral400),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Belum ada petugas di cluster ini',
+                        style: TextStyle(fontSize: 16, color: neutral600),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => OfficerManagementScreen(
+                                clusterId: widget.clusterId,
+                                clusterName: cluster.name,
+                              ),
+                            ),
+                          ).then((_) => _loadClusterDetails());
+                        },
+                        icon: const Icon(Icons.add, color: Colors.white),
+                        label: const Text('Tambah Petugas'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kbpBlue900,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
                 )
               : ListView.builder(
@@ -303,35 +352,85 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                                     width: 40,
                                     height: 40,
                                     fit: BoxFit.cover,
-                                    errorBuilder: (context, error, _) =>
-                                        const Icon(
-                                      Icons.person,
-                                      color: kbpBlue900,
+                                    errorBuilder: (context, error, _) => Text(
+                                      officer.name.isNotEmpty
+                                          ? officer.name[0].toUpperCase()
+                                          : '?',
+                                      style: boldTextStyle(
+                                          color: kbpBlue900, size: 18),
                                     ),
                                   ),
                                 )
-                              : const Icon(Icons.person, color: kbpBlue900),
+                              : Text(
+                                  officer.name.isNotEmpty
+                                      ? officer.name[0].toUpperCase()
+                                      : '?',
+                                  style: boldTextStyle(
+                                      color: kbpBlue900, size: 18),
+                                ),
                         ),
                         title: Text(
                           officer.name,
                           style: semiBoldTextStyle(),
                         ),
-                        subtitle: Text('Shift: ${officer.shift}'),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                // Badge tipe
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: officer.type == OfficerType.organik
+                                        ? successG50
+                                        : warningY50,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    officer.type == OfficerType.organik
+                                        ? 'Organik'
+                                        : 'Outsource',
+                                    style: mediumTextStyle(
+                                      size: 12,
+                                      color: officer.type == OfficerType.organik
+                                          ? successG500
+                                          : warningY500,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                // Badge shift
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: kbpBlue50,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    getShortShiftText(officer.shift),
+                                    style: mediumTextStyle(
+                                        size: 12, color: kbpBlue700),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
                               icon: const Icon(Icons.edit, color: kbpBlue900),
                               onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => EditOfficerScreen(
-                                      clusterId: widget.clusterId,
-                                      officer: officer,
-                                    ),
-                                  ),
-                                ).then((_) => _loadClusterDetails());
+                                _showEditOfficerDialog(officer);
                               },
                             ),
                             IconButton(
@@ -349,6 +448,199 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
         ),
       ],
     );
+  }
+
+// Tambahkan method untuk menampilkan dialog edit petugas
+  void _showEditOfficerDialog(Officer officer) {
+    final formKey = GlobalKey<FormState>();
+    final nameController = TextEditingController(text: officer.name);
+    OfficerType selectedType = officer.type;
+    ShiftType selectedShift = officer.shift;
+
+    // Map untuk menampung shift options berdasarkan tipe
+    final Map<OfficerType, List<ShiftType>> typeShifts = {
+      OfficerType.organik: [
+        ShiftType.pagi, // 07:00-15:00
+        ShiftType.sore, // 15:00-23:00
+        ShiftType.malam, // 23:00-07:00
+      ],
+      OfficerType.outsource: [
+        ShiftType.siang, // 07:00-19:00
+        ShiftType.malamPanjang, // 19:00-07:00
+      ],
+    };
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(
+            'Edit Petugas',
+            style: boldTextStyle(),
+          ),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Name field
+                const Text(
+                  'Nama Petugas',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: neutral800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    hintText: 'Masukkan nama petugas',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Nama petugas wajib diisi';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // Tipe Petugas selection
+                const Text(
+                  'Tipe Petugas',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: neutral800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<OfficerType>(
+                  value: selectedType,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                  ),
+                  items: OfficerType.values.map((type) {
+                    return DropdownMenuItem(
+                      value: type,
+                      child: Text(type == OfficerType.organik
+                          ? 'Organik'
+                          : 'Outsource'),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        selectedType = value;
+                        // Reset shift ke opsi pertama untuk tipe yang dipilih
+                        if (!typeShifts[value]!.contains(selectedShift)) {
+                          selectedShift = typeShifts[value]!.first;
+                        }
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // Shift selection - dinamis berdasarkan tipe
+                const Text(
+                  'Shift Kerja',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: neutral800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<ShiftType>(
+                  value: typeShifts[selectedType]!.contains(selectedShift)
+                      ? selectedShift
+                      : typeShifts[selectedType]!.first,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                  ),
+                  items: typeShifts[selectedType]!.map((shift) {
+                    return DropdownMenuItem(
+                      value: shift,
+                      child: Text(_getShiftDisplayText(shift)),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        selectedShift = value;
+                      });
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Batal'),
+              onPressed: () => Navigator.pop(context),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kbpBlue900,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  // Update officer
+                  final updatedOfficer = Officer(
+                    id: officer.id,
+                    name: nameController.text,
+                    type: selectedType,
+                    shift: selectedShift,
+                    clusterId: widget.clusterId,
+                    photoUrl: officer.photoUrl,
+                  );
+
+                  context.read<AdminBloc>().add(
+                        UpdateOfficerInClusterEvent(
+                          clusterId: widget.clusterId,
+                          officer: updatedOfficer,
+                        ),
+                      );
+
+                  Navigator.pop(context);
+
+                  showCustomSnackbar(
+                    context: context,
+                    title: 'Berhasil',
+                    subtitle: 'Informasi petugas telah diperbarui',
+                    type: SnackbarType.success,
+                  );
+
+                  // Refresh data
+                  _loadClusterDetails();
+                }
+              },
+              child: const Text('Simpan'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+// Helper untuk mendapatkan teks shift lengkap
+  String _getShiftDisplayText(ShiftType shift) {
+    switch (shift) {
+      case ShiftType.pagi:
+        return 'Pagi (07:00 - 15:00)';
+      case ShiftType.sore:
+        return 'Sore (15:00 - 23:00)';
+      case ShiftType.malam:
+        return 'Malam (23:00 - 07:00)';
+      case ShiftType.siang:
+        return 'Siang (07:00 - 19:00)';
+      case ShiftType.malamPanjang:
+        return 'Malam (19:00 - 07:00)';
+    }
   }
 
   Widget _buildMapTab(User cluster) {
@@ -398,6 +690,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                           });
                         },
                         activeColor: kbpBlue900,
+                        inactiveTrackColor: neutral600,
                       ),
                     ],
                   ),
@@ -406,10 +699,9 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                     _isEditingPoints
                         ? 'Mode Edit: Klik pada peta untuk menambah titik'
                         : 'Mode Lihat: Aktifkan switch untuk mengedit',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: neutral600,
-                      fontStyle: FontStyle.italic,
+                    style: regularTextStyle(
+                      color: kbpBlue900,
+                      size: 14,
                     ),
                   ),
                   if (_isEditingPoints) ...[
@@ -613,14 +905,20 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Hapus Cluster'),
+        title: Text('Hapus Cluster',
+            style: boldTextStyle(color: dangerR300, size: 18)),
         content: const Text(
           'Anda yakin ingin menghapus cluster ini? Tindakan ini tidak dapat dibatalkan dan akan menghapus semua data terkait cluster.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
+            child: Text(
+              'Batal',
+              style: boldTextStyle(
+                color: dangerR300,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () {

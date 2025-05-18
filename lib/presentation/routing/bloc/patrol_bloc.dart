@@ -91,6 +91,22 @@ class SyncOfflineData extends PatrolEvent {}
 
 class DebugOfflineData extends PatrolEvent {}
 
+// Tambahkan event baru
+class SubmitFinalReport extends PatrolEvent {
+  final String photoUrl;
+  final String? note;
+  final DateTime reportTime;
+
+  SubmitFinalReport({
+    required this.photoUrl,
+    this.note,
+    required this.reportTime,
+  });
+
+  @override
+  List<Object?> get props => [photoUrl, note, reportTime];
+}
+
 // States
 abstract class PatrolState {}
 
@@ -203,6 +219,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     on<ResumePatrol>(_onResumePatrol);
     on<SyncOfflineData>(_onSyncOfflineData);
     on<DebugOfflineData>(_onDebugOfflineData);
+    on<SubmitFinalReport>(_onSubmitFinalReport); // Tambahkan ini
 
     // Setup connectivity monitoring and local storage
     _initializeStorage();
@@ -1172,6 +1189,54 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     await _connectivitySubscription?.cancel();
     await _offlineLocationBox?.close();
     return super.close();
+  }
+
+  // Tambahkan handler event baru
+  // Perbaiki method _onSubmitFinalReport
+  Future<void> _onSubmitFinalReport(
+    SubmitFinalReport event,
+    Emitter<PatrolState> emit,
+  ) async {
+    if (state is PatrolLoaded) {
+      final currentState = state as PatrolLoaded;
+
+      try {
+        emit(PatrolLoading());
+
+        // Perbarui task dengan final report
+        final updatedTask = currentState.task?.copyWith(
+          finalReportPhotoUrl: event.photoUrl,
+          finalReportNote: event.note,
+          finalReportTime: event.reportTime,
+        );
+
+        if (updatedTask != null) {
+          // Update task di database - PERBAIKAN DISINI
+          // Ganti updatePatrolTask dengan updateTask
+          await repository.updateTask(
+            updatedTask.taskId,
+            {
+              'finalReportPhotoUrl': event.photoUrl,
+              'finalReportNote': event.note,
+              'finalReportTime': event.reportTime.toIso8601String(),
+            },
+          );
+
+          emit(PatrolLoaded(
+            task: updatedTask,
+            isPatrolling: currentState.isPatrolling,
+            distance: currentState.distance,
+            finishedTasks: currentState.finishedTasks,
+            routePath: currentState.routePath,
+            isOffline: currentState.isOffline,
+          ));
+        }
+      } catch (e) {
+        emit(PatrolError('Failed to submit final report: $e'));
+        // Emit kembali state sebelumnya
+        emit(currentState);
+      }
+    }
   }
 }
 

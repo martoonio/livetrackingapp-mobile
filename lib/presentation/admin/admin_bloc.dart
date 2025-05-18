@@ -258,10 +258,12 @@ class ClusterOfficersLoaded extends AdminState {
 class ClusterTasksLoaded extends AdminState {
   final String clusterId;
   final List<PatrolTask> tasks;
+  User? cluster;
 
   ClusterTasksLoaded({
     required this.clusterId,
     required this.tasks,
+    this.cluster,
   });
 }
 
@@ -377,6 +379,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
               return Officer(
                 id: officer.id,
                 name: officer.name,
+                type: officer.type,
                 shift: officer.shift,
                 clusterId: cluster.id, // Set the cluster ID
                 photoUrl: officer.photoUrl,
@@ -401,13 +404,57 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
   }
 
   Future<void> _onGetClusterDetail(
-    GetClusterDetail event,
-    Emitter<AdminState> emit,
-  ) async {
+      GetClusterDetail event, Emitter<AdminState> emit) async {
     try {
       emit(AdminLoading());
       final cluster = await repository.getClusterById(event.clusterId);
-      emit(ClusterDetailLoaded(cluster));
+
+      // Validasi tipe dan shift officer
+      if (cluster.officers != null && cluster.officers!.isNotEmpty) {
+        final validatedOfficers = cluster.officers!.map((officer) {
+          // Pastikan officer memiliki properti type yang valid
+          final officerType = officer.type ?? OfficerType.organik;
+          ShiftType officerShift = officer.shift;
+
+          // Validasi kompatibilitas shift dengan tipe
+          if (officerType == OfficerType.organik &&
+              (officerShift == ShiftType.siang ||
+                  officerShift == ShiftType.malamPanjang)) {
+            officerShift = ShiftType.pagi;
+          } else if (officerType == OfficerType.outsource &&
+              (officerShift == ShiftType.pagi ||
+                  officerShift == ShiftType.sore ||
+                  officerShift == ShiftType.malam)) {
+            officerShift = ShiftType.siang;
+          }
+
+          return Officer(
+            id: officer.id,
+            name: officer.name,
+            type: officerType,
+            shift: officerShift,
+            clusterId:
+                officer.clusterId.isNotEmpty ? officer.clusterId : cluster.id,
+            photoUrl: officer.photoUrl,
+          );
+        }).toList();
+
+        // Update cluster dengan officers tervalidasi
+        final updatedCluster = User(
+          id: cluster.id,
+          name: cluster.name,
+          email: cluster.email,
+          role: cluster.role,
+          officers: validatedOfficers,
+          createdAt: cluster.createdAt,
+          updatedAt: cluster.updatedAt,
+          clusterCoordinates: cluster.clusterCoordinates,
+        );
+
+        emit(ClusterDetailLoaded(updatedCluster));
+      } else {
+        emit(ClusterDetailLoaded(cluster));
+      }
     } catch (e) {
       emit(AdminError('Failed to get cluster details: $e'));
     }
@@ -568,8 +615,9 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
   ) async {
     try {
       emit(ClustersLoading());
+      final cluster = await repository.getClusterById(event.clusterId);
       final tasks = await repository.getClusterTasks(event.clusterId);
-      emit(ClusterTasksLoaded(clusterId: event.clusterId, tasks: tasks));
+      emit(ClusterTasksLoaded(clusterId: event.clusterId, tasks: tasks, cluster: cluster));
     } catch (e) {
       emit(ClustersError('Failed to load cluster tasks: $e'));
     }

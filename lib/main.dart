@@ -158,10 +158,24 @@ class MyApp extends StatelessWidget {
           },
         ),
         BlocProvider<AdminBloc>(
-          create: (context) => AdminBloc(
-            repository: getIt<RouteRepository>(),
-          )..add(LoadAllTasks()),
+          create: (context) {
+            // Inisialisasi AdminBloc dengan repository dari GetIt
+            final bloc = AdminBloc(
+              repository: getIt<RouteRepository>(),
+            );
+            // Load data awal yang diperlukan
+            bloc.add(LoadAllClusters());
+            // Load cluster details will be handled after selecting a cluster
+            bloc.add(LoadAllTasks());
+            bloc.add(LoadOfficersAndVehicles());
+            return bloc;
+          },
           lazy: false, // Initialize immediately
+        ),
+        BlocProvider<ReportBloc>(
+          create: (context) => ReportBloc(
+            getIt<CreateReportUseCase>(),
+          ),
         ),
         BlocProvider<AdminBloc>(
           create: (context) => AdminBloc(
