@@ -675,7 +675,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Container(
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: kbpBlue900,
                 shape: BoxShape.circle,
               ),
@@ -767,6 +767,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 // Wrapper for upcoming patrols content
+  // Wrapper untuk menampilkan upcoming patrols content dikelompokkan berdasarkan officer
   Widget _buildUpcomingPatrolsContent() {
     if (_upcomingTasks.isEmpty) {
       return _buildEmptyStateCard(
@@ -775,15 +776,333 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    // Kelompokkan tugas berdasarkan officerId (userId)
+    final Map<String, List<PatrolTask>> tasksByOfficer = {};
+
+    // Populate map dengan task dikelompokkan berdasarkan officer
+    for (final task in _upcomingTasks) {
+      if (!tasksByOfficer.containsKey(task.userId)) {
+        tasksByOfficer[task.userId] = [];
+      }
+      tasksByOfficer[task.userId]!.add(task);
+    }
+
+    // Sortir officers berdasarkan nama jika tersedia, atau userId jika tidak
+    final sortedOfficerIds = tasksByOfficer.keys.toList()
+      ..sort((a, b) {
+        final taskA = tasksByOfficer[a]!.first;
+        final taskB = tasksByOfficer[b]!.first;
+
+        // Jika kedua officer memiliki nama, sortir berdasarkan nama
+        if (taskA.officerName != null && taskB.officerName != null) {
+          return taskA.officerName!.compareTo(taskB.officerName!);
+        }
+        // Jika hanya salah satu yang memiliki nama
+        else if (taskA.officerName != null) {
+          return -1; // A sebelum B
+        } else if (taskB.officerName != null) {
+          return 1; // B sebelum A
+        }
+        // Jika keduanya tidak memiliki nama, sortir berdasarkan userId
+        return a.compareTo(b);
+      });
+
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _upcomingTasks.length,
+      itemCount: sortedOfficerIds.length,
       itemBuilder: (context, index) {
-        final task = _upcomingTasks[index];
-        return _buildTaskCard(task);
+        final officerId = sortedOfficerIds[index];
+        final officerTasks = tasksByOfficer[officerId]!;
+
+        // Ambil nama officer dari task pertama
+        final officerName = officerTasks.first.officerName ??
+            'Petugas (ID: ${officerId.substring(0, 6)}...)';
+        final officerPhotoUrl = officerTasks.first.officerPhotoUrl;
+
+        // Sortir tugas untuk officer ini berdasarkan waktu mulai
+        officerTasks.sort((a, b) => (a.assignedStartTime ?? DateTime.now())
+            .compareTo(b.assignedStartTime ?? DateTime.now()));
+
+        return Card(
+          elevation: 0,
+          margin: const EdgeInsets.only(bottom: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: kbpBlue300, width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Officer header
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  children: [
+                    // Officer avatar
+                    Container(
+                      width: 48,
+                      height: 48,
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        color: kbpBlue100,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: kbpBlue300, width: 1),
+                      ),
+                      child: officerPhotoUrl != null &&
+                              officerPhotoUrl.isNotEmpty
+                          ? Image.network(
+                              officerPhotoUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Center(
+                                  child: Text(
+                                    officerName.substring(0, 1).toUpperCase(),
+                                    style: semiBoldTextStyle(
+                                        size: 18, color: kbpBlue900),
+                                  ),
+                                );
+                              },
+                            )
+                          : Center(
+                              child: Text(
+                                officerName.substring(0, 1).toUpperCase(),
+                                style: semiBoldTextStyle(
+                                    size: 18, color: kbpBlue900),
+                              ),
+                            ),
+                    ),
+                    const SizedBox(width: 12),
+
+                    // Officer name and task count
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            officerName,
+                            style:
+                                semiBoldTextStyle(size: 16, color: kbpBlue900),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            '${officerTasks.length} tugas patroli mendatang',
+                            style:
+                                regularTextStyle(size: 14, color: kbpBlue700),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Collapse/expand icon
+                    IconButton(
+                      icon: Icon(
+                        Icons.keyboard_arrow_down,
+                        color: kbpBlue900,
+                      ),
+                      onPressed: () {
+                        // Implementasi expand/collapse jika dibutuhkan
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+              // Divider between header and tasks
+              const Divider(height: 1, color: kbpBlue200),
+
+              // Officer's tasks
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: officerTasks.length,
+                itemBuilder: (context, taskIndex) {
+                  return _buildOfficerTaskItem(officerTasks[taskIndex]);
+                },
+              ),
+            ],
+          ),
+        );
       },
     );
+  }
+
+// Individual task item within officer group
+  Widget _buildOfficerTaskItem(PatrolTask task) {
+    return InkWell(
+      onTap: () => _showTaskDialog(task),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Vehicle icon
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: kbpBlue100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.directions_car,
+                    color: kbpBlue900,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // Task info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task.vehicleId.isEmpty
+                            ? 'Tanpa Kendaraan'
+                            : task.vehicleId,
+                        style: mediumTextStyle(size: 14, color: kbpBlue900),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(Icons.place, size: 14, color: kbpBlue700),
+                          const SizedBox(width: 4),
+                          Text(
+                            "${task.assignedRoute?.length ?? 0} Titik Patroli",
+                            style:
+                                regularTextStyle(size: 12, color: kbpBlue700),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _getStatusColor(task.status),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              _getStatusText(task.status),
+                              style: mediumTextStyle(
+                                  size: 10, color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Date and time
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: kbpBlue100,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        task.assignedStartTime != null
+                            ? formatDateFromString(
+                                task.assignedStartTime.toString())
+                            : 'Tidak tersedia',
+                        style: mediumTextStyle(size: 10, color: kbpBlue900),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      task.assignedStartTime != null
+                          ? formatTimeFromString(
+                              task.assignedStartTime.toString())
+                          : 'Tidak tersedia',
+                      style: mediumTextStyle(size: 12, color: kbpBlue900),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      task.assignedStartTime != null &&
+                              task.assignedEndTime != null
+                          ? getDurasiPatroli(
+                              task.assignedStartTime!, task.assignedEndTime!)
+                          : 'Durasi tidak tersedia',
+                      style: regularTextStyle(size: 10, color: kbpBlue700),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+
+            // Action button
+            Padding(
+              padding: const EdgeInsets.only(top: 12.0),
+              child: SizedBox(
+                width: double.infinity,
+                height: 36,
+                child: ElevatedButton.icon(
+                  onPressed: () => _showTaskDialog(task),
+                  icon: const Icon(Icons.map, size: 16),
+                  label: Text(
+                    'Lihat Detail',
+                    style: mediumTextStyle(size: 12, color: neutralWhite),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kbpBlue900,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    elevation: 0,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+// Helper untuk menentukan warna status
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'active':
+        return kbpBlue700;
+      case 'ongoing':
+      case 'in_progress':
+        return successG500;
+      case 'finished':
+        return neutral700;
+      default:
+        return kbpBlue700;
+    }
+  }
+
+// Helper untuk menerjemahkan status
+  String _getStatusText(String status) {
+    switch (status.toLowerCase()) {
+      case 'active':
+        return 'Aktif';
+      case 'ongoing':
+      case 'in_progress':
+        return 'Sedang Berjalan';
+      case 'finished':
+        return 'Selesai';
+      default:
+        return status;
+    }
   }
 
 // Wrapper for history content

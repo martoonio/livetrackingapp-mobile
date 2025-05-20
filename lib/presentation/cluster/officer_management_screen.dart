@@ -10,10 +10,10 @@ class OfficerManagementScreen extends StatefulWidget {
   final String clusterName;
 
   const OfficerManagementScreen({
-    Key? key,
+    super.key,
     required this.clusterId,
     required this.clusterName,
-  }) : super(key: key);
+  });
 
   @override
   State<OfficerManagementScreen> createState() =>
@@ -512,6 +512,7 @@ class _OfficerManagementScreenState extends State<OfficerManagementScreen> {
                               );
 
                           Navigator.pop(context);
+                          Navigator.pop(context);
 
                           showCustomSnackbar(
                             context: context,
@@ -743,6 +744,7 @@ class _OfficerManagementScreenState extends State<OfficerManagementScreen> {
                               );
 
                           Navigator.pop(context);
+                          Navigator.pop(context);
 
                           showCustomSnackbar(
                             context: context,
@@ -843,6 +845,7 @@ class _OfficerManagementScreenState extends State<OfficerManagementScreen> {
                         );
 
                     Navigator.pop(context);
+                    Navigator.pop(context);
 
                     showCustomSnackbar(
                       context: context,
@@ -864,35 +867,33 @@ class _OfficerManagementScreenState extends State<OfficerManagementScreen> {
     );
   }
 
-  // Helper untuk mendapatkan text shift pendek
   String getShortShiftText(ShiftType shift) {
     switch (shift) {
       case ShiftType.pagi:
-        return 'Pagi (07-15)';
+        return 'Pagi';
       case ShiftType.sore:
-        return 'Sore (15-23)';
+        return 'Sore';
       case ShiftType.malam:
-        return 'Malam (23-07)';
+        return 'Malam';
       case ShiftType.siang:
-        return 'Siang (07-19)';
+        return 'Siang';
       case ShiftType.malamPanjang:
-        return 'Malam (19-07)';
+        return 'Malam';
     }
   }
 
-  // Helper untuk mendapatkan teks shift lengkap
   String _getShiftDisplayText(ShiftType shift) {
     switch (shift) {
       case ShiftType.pagi:
-        return 'Pagi (07:00 - 15:00)';
+        return 'Pagi';
       case ShiftType.sore:
-        return 'Sore (15:00 - 23:00)';
+        return 'Sore';
       case ShiftType.malam:
-        return 'Malam (23:00 - 07:00)';
+        return 'Malam';
       case ShiftType.siang:
-        return 'Siang (07:00 - 19:00)';
+        return 'Siang';
       case ShiftType.malamPanjang:
-        return 'Malam (19:00 - 07:00)';
+        return 'Malam';
     }
   }
 }

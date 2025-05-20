@@ -77,7 +77,14 @@ class _ManageClustersScreenState extends State<ManageClustersScreen> {
                     ),
                   );
                 }
-                return const Center(child: Text('Pilih opsi di atas'));
+                return Center(
+                  child: LottieBuilder.asset(
+                    'assets/lottie/maps_loading.json',
+                    width: 200,
+                    height: 100,
+                    fit: BoxFit.cover,
+                  ),
+                );
               },
             ),
           ),

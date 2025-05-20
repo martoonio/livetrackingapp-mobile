@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/domain/repositories/route_repository.dart';
@@ -408,12 +410,12 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     try {
       emit(AdminLoading());
       final cluster = await repository.getClusterById(event.clusterId);
-
+      // log('ini debug isi officers cluster: ${cluster.officers}');
       // Validasi tipe dan shift officer
       if (cluster.officers != null && cluster.officers!.isNotEmpty) {
         final validatedOfficers = cluster.officers!.map((officer) {
           // Pastikan officer memiliki properti type yang valid
-          final officerType = officer.type ?? OfficerType.organik;
+          final officerType = officer.type;
           ShiftType officerShift = officer.shift;
 
           // Validasi kompatibilitas shift dengan tipe
@@ -532,16 +534,23 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     Emitter<AdminState> emit,
   ) async {
     try {
-      emit(ClustersLoading());
+      emit(ClusterDetailsLoading()); // Ubah dari ClustersLoading
+
+      // Tambahkan petugas ke cluster
       await repository.addOfficerToCluster(
         clusterId: event.clusterId,
         officer: event.officer,
       );
-      final officers = await repository.getClusterOfficers(event.clusterId);
-      emit(ClusterOfficersLoaded(
-          clusterId: event.clusterId, officers: officers));
+
+      // Load data cluster lengkap, bukan hanya officers
+      final cluster = await repository.getClusterById(event.clusterId);
+
+      // Emit state ClusterDetailLoaded yang digunakan oleh OfficerManagementScreen
+      emit(ClusterDetailLoaded(cluster));
     } catch (e) {
-      emit(ClustersError('Failed to add officer to cluster: $e'));
+      print('Error adding officer to cluster: $e');
+      emit(ClusterDetailsError(
+          'Failed to add officer to cluster: $e')); // Ubah jenis error state
     }
   }
 
@@ -550,16 +559,21 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     Emitter<AdminState> emit,
   ) async {
     try {
-      emit(ClustersLoading());
+      emit(ClusterDetailsLoading()); // Ubah dari ClustersLoading
+
       await repository.updateOfficerInCluster(
         clusterId: event.clusterId,
         officer: event.officer,
       );
-      final officers = await repository.getClusterOfficers(event.clusterId);
-      emit(ClusterOfficersLoaded(
-          clusterId: event.clusterId, officers: officers));
+
+      // Load data cluster lengkap, bukan hanya officers
+      final cluster = await repository.getClusterById(event.clusterId);
+
+      // Emit state yang sesuai
+      emit(ClusterDetailLoaded(cluster));
     } catch (e) {
-      emit(ClustersError('Failed to update officer in cluster: $e'));
+      print('Error updating officer in cluster: $e');
+      emit(ClusterDetailsError('Failed to update officer in cluster: $e'));
     }
   }
 
@@ -568,16 +582,21 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     Emitter<AdminState> emit,
   ) async {
     try {
-      emit(ClustersLoading());
+      emit(ClusterDetailsLoading()); // Ubah dari ClustersLoading
+
       await repository.removeOfficerFromCluster(
         clusterId: event.clusterId,
         officerId: event.officerId,
       );
-      final officers = await repository.getClusterOfficers(event.clusterId);
-      emit(ClusterOfficersLoaded(
-          clusterId: event.clusterId, officers: officers));
+
+      // Load data cluster lengkap, bukan hanya officers
+      final cluster = await repository.getClusterById(event.clusterId);
+
+      // Emit state yang sesuai
+      emit(ClusterDetailLoaded(cluster));
     } catch (e) {
-      emit(ClustersError('Failed to remove officer from cluster: $e'));
+      print('Error removing officer from cluster: $e');
+      emit(ClusterDetailsError('Failed to remove officer from cluster: $e'));
     }
   }
 
@@ -617,7 +636,8 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
       emit(ClustersLoading());
       final cluster = await repository.getClusterById(event.clusterId);
       final tasks = await repository.getClusterTasks(event.clusterId);
-      emit(ClusterTasksLoaded(clusterId: event.clusterId, tasks: tasks, cluster: cluster));
+      emit(ClusterTasksLoaded(
+          clusterId: event.clusterId, tasks: tasks, cluster: cluster));
     } catch (e) {
       emit(ClustersError('Failed to load cluster tasks: $e'));
     }

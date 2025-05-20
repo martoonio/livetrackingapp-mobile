@@ -590,17 +590,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           itemCount: activeTasks.length,
                           itemBuilder: (context, taskIndex) {
                             final task = activeTasks[taskIndex];
-                            // Cari officer yang mengerjakan task ini
-                            final assignedOfficer = officers.firstWhere(
-                              (officer) => officer.id == task.officerId,
-                              orElse: () => Officer(
-                                id: '',
-                                name: 'Tidak diketahui',
-                                type: OfficerType.organik, // Default tipe
-                                shift: ShiftType.pagi, // Default shift
-                                clusterId: cluster.id,
-                              ),
-                            );
+// Cari officer yang mengerjakan task ini
+                            final assignedOfficer =
+                                _findOfficerByUserId(officers, task.userId) ??
+                                    Officer(
+                                      id: task.userId ?? '',
+                                      name: task.userId != null
+                                          ? 'Petugas ${task.userId.substring(0, 4)}...'
+                                          : 'Tidak diketahui',
+                                      type: OfficerType.organik,
+                                      shift: ShiftType.pagi,
+                                      clusterId: cluster.id,
+                                    );
 
                             return Card(
                               margin: const EdgeInsets.only(bottom: 8),
@@ -608,7 +609,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               color: neutral200,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
-                                side: BorderSide(color: neutral300),
+                                side: const BorderSide(color: neutral300),
                               ),
                               child: Padding(
                                 padding: const EdgeInsets.all(12.0),
@@ -806,6 +807,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
     );
+  }
+
+  Officer? _findOfficerByUserId(List<Officer> officers, String? userId) {
+    if (userId == null || userId.isEmpty) {
+      return null;
+    }
+
+    try {
+      return officers.firstWhere(
+        (officer) => officer.id == userId,
+        orElse: () => Officer(
+          id: userId,
+          name: 'Petugas ${userId.substring(0, 4)}...',
+          type: OfficerType.organik,
+          shift: ShiftType.pagi,
+          clusterId: '', // Atau nilai default lainnya
+        ),
+      );
+    } catch (e) {
+      print('Error finding officer by userId: $e');
+      return null;
+    }
   }
 
   Color _getStatusColor(String status) {

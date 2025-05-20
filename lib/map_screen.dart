@@ -43,7 +43,7 @@ class _MapScreenState extends State<MapScreen> {
   double _totalDistance = 0;
   Position? _lastPosition;
 
-  double _longPressProgress = 0.0; // Progress untuk animasi long press
+  double _longPressProgress = 0.0;
   Timer? _longPressTimer;
 
   List<File> selectedPhotos = [];
@@ -55,9 +55,8 @@ class _MapScreenState extends State<MapScreen> {
   static const Color _polylineColor = kbpBlue900;
 
   void _startLongPressAnimation(BuildContext context, PatrolState state) {
-    const duration = Duration(seconds: 3); // Durasi long press
-    const interval =
-        Duration(milliseconds: 50); // Interval untuk update animasi
+    const duration = Duration(seconds: 3);
+    const interval = Duration(milliseconds: 50);
     double increment = interval.inMilliseconds / duration.inMilliseconds;
 
     _longPressTimer = Timer.periodic(interval, (timer) {
@@ -125,22 +124,17 @@ class _MapScreenState extends State<MapScreen> {
     _lastPosition = newPosition;
   }
 
-  // Perbaikan initState untuk deteksi patroli aktif
-
   @override
   void initState() {
     super.initState();
 
-    // Capture task from widget
     final task = widget.task;
 
-    // Debug for task status
     print('=== MAP INITIALIZATION ===');
     print('Task ID: ${task.taskId}');
     print('Task Status: ${task.status}');
     print('Task Start Time: ${task.startTime}');
 
-    // Get officer name immediately
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
       if (mounted) {
@@ -148,10 +142,8 @@ class _MapScreenState extends State<MapScreen> {
       }
     });
 
-    // Initial state from bloc
     currentState = context.read<PatrolBloc>().state;
 
-    // IMPORTANT: Check task status to detect ongoing patrol
     if (task.status == 'ongoing' || task.status == 'in_progress') {
       print('Task is already in progress, resuming patrol...');
       // We need to wait for widget to be built before triggering resume
@@ -455,7 +447,6 @@ class _MapScreenState extends State<MapScreen> {
           builder: (context, setState) {
             return WillPopScope(
               onWillPop: () async {
-                // Konfirmasi jika user mencoba keluar
                 bool exitConfirmed = await showDialog(
                   context: context,
                   builder: (context) => AlertDialog(
@@ -469,14 +460,20 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                     actions: [
                       TextButton(
-                        onPressed: () => Navigator.pop(context, false),
+                        onPressed: () {
+                          Navigator.pop(context, false);
+                          _resetLongPressAnimation();
+                        },
                         child: Text(
                           'Tidak',
                           style: mediumTextStyle(color: kbpBlue900),
                         ),
                       ),
                       ElevatedButton(
-                        onPressed: () => Navigator.pop(context, true),
+                        onPressed: () {
+                          Navigator.pop(context, true);
+                          _resetLongPressAnimation();
+                        },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: kbpBlue900,
                         ),
@@ -669,8 +666,10 @@ class _MapScreenState extends State<MapScreen> {
                                               ),
                                             ),
                                             ElevatedButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context, true),
+                                              onPressed: () {
+                                                Navigator.pop(context, true);
+                                                _resetLongPressAnimation();
+                                              },
                                               style: ElevatedButton.styleFrom(
                                                 backgroundColor: kbpBlue900,
                                               ),
@@ -1160,7 +1159,10 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                     actions: [
                       TextButton(
-                        onPressed: () => Navigator.pop(context, false),
+                        onPressed: () {
+                          Navigator.pop(context, false);
+                          _resetLongPressAnimation();
+                        },
                         child: Text(
                           'Tidak',
                           style: mediumTextStyle(color: kbpBlue900),

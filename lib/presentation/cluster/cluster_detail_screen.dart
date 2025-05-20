@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -255,6 +257,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
 
   Widget _buildOfficersTab(User cluster) {
     final officers = cluster.officers ?? [];
+    log('Officers: ${officers.length}');
 
     return Column(
       children: [
