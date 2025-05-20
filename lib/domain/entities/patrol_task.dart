@@ -21,7 +21,7 @@ class PatrolTask {
   final String createdBy; // User yang membuat task
   final Map<String, dynamic>? routePath;
   final Map<String, dynamic>? lastLocation;
-  final String? notes; // Catatan tambahan tentang tugas
+  final String? notes;
 
   // Data officer yang akan di-lazy load
   String? _officerName;
@@ -29,10 +29,39 @@ class PatrolTask {
   String? _clusterName;
   String? _vehicleName;
 
-  String get officerName => _officerName ?? 'Loading...';
-  String get clusterName => _clusterName ?? 'Loading...';
-  String get vehicleName => _vehicleName ?? vehicleId;
-  String get officerPhotoUrl => _officerPhotoUrl ?? 'P';
+  String get officerName {
+    if (_officerName == null || _officerName == 'Loading...') {
+      return userId.isNotEmpty
+          ? 'Officer #${userId.substring(0, Math.min(5, userId.length))}'
+          : 'Unknown Officer';
+    }
+    return _officerName!;
+  }
+
+  String get clusterName {
+    if (_clusterName == null || _clusterName == 'Loading...') {
+      return clusterId.isNotEmpty
+          ? 'Cluster #${clusterId.substring(0, Math.min(5, clusterId.length))}'
+          : 'Unknown Cluster';
+    }
+    return _clusterName!;
+  }
+
+  String get vehicleName {
+    if (_vehicleName == null || _vehicleName!.isEmpty) {
+      return vehicleId.isEmpty ? 'Unknown Vehicle' : vehicleId;
+    }
+    return _vehicleName!;
+  }
+
+  String get officerPhotoUrl {
+    if (_officerPhotoUrl == null ||
+        _officerPhotoUrl == 'P' ||
+        _officerPhotoUrl!.isEmpty) {
+      return ''; // Return empty string untuk menghindari issue loading image
+    }
+    return _officerPhotoUrl!;
+  }
 
   set officerName(String value) => _officerName = value;
   set clusterName(String value) => _clusterName = value;
@@ -46,6 +75,8 @@ class PatrolTask {
   String? initialReportPhotoUrl;
   final String? initialReportNote;
   final DateTime? initialReportTime;
+  bool? mockLocationDetected;
+  int? mockLocationCount;
 
   PatrolTask({
     required this.taskId,
@@ -77,6 +108,8 @@ class PatrolTask {
     this.initialReportPhotoUrl,
     this.initialReportNote,
     this.initialReportTime,
+    this.mockLocationDetected,
+    this.mockLocationCount,
   }) {
     _officerName = officerName;
     _clusterName = clusterName;
@@ -129,6 +162,8 @@ class PatrolTask {
       initialReportPhotoUrl: json['initialReportPhotoUrl'] as String?,
       initialReportNote: json['initialReportNote'] as String?,
       initialReportTime: _parseDateTime(json['initialReportTime']),
+      mockLocationDetected: json['mockLocationDetected'] as bool?,
+      mockLocationCount: json['mockLocationCount'] as int?,
     );
   }
 
@@ -158,6 +193,8 @@ class PatrolTask {
       'initialReportPhotoUrl': initialReportPhotoUrl,
       'initialReportNote': initialReportNote,
       'initialReportTime': initialReportTime?.toIso8601String(),
+      'mockLocationDetected': mockLocationDetected,
+      'mockLocationCount': mockLocationCount,
     };
   }
 
@@ -222,96 +259,86 @@ class PatrolTask {
   // Fetch officer name
   // Perbaikan metode fetchOfficerName
 
+  // Perbaiki method fetchOfficerName untuk mendapatkan nama officer dengan lebih baik
+
   Future<void> fetchOfficerName(DatabaseReference database) async {
     try {
-      if (clusterId.isNotEmpty) {
-        final officerSnapshot =
-            await database.child('users/$clusterId/officers/$userId').get();
+      if (clusterId.isEmpty || userId.isEmpty) {
+        _officerName = 'Unknown Officer';
+        return;
+      }
 
-        if (officerSnapshot.exists && officerSnapshot.value != null) {
-          final officerData = officerSnapshot.value as Map<dynamic, dynamic>;
-          _officerName = officerData['name']?.toString() ?? 'Unknown Officer';
-          _officerPhotoUrl =
-              officerData['photo_url']?.toString(); // Ambil URL foto
-          print('Found officer by direct path: $_officerName');
-          return;
-        }
+      print('Fetching officer name for userId: $userId in cluster: $clusterId');
 
-        // Jika tidak ditemukan dengan path langsung, cari di semua officers
-        final clusterSnapshot =
-            await database.child('users/$clusterId/officers').get();
+      // PERBAIKAN UTAMA: Cek database struktur baru dengan officers sebagai array
+      final officersSnapshot =
+          await database.child('users/$clusterId/officers').get();
 
-        if (clusterSnapshot.exists && clusterSnapshot.value != null) {
-          final officersData = clusterSnapshot.value as Map<dynamic, dynamic>;
+      if (officersSnapshot.exists && officersSnapshot.value != null) {
+        final data = officersSnapshot.value;
 
-          for (var officerId in officersData.keys) {
-            final officerData =
-                officersData[officerId] as Map<dynamic, dynamic>;
+        // Handle array of officers (sesuai dengan data sebenarnya di database)
+        if (data is List) {
+          // Filter out null entries
+          final officersList = List.from(data.where((item) => item != null));
+          print('Officers data is a List with ${officersList.length} entries');
 
-            if (officerData['id']?.toString() == userId) {
+          // Find officer by ID
+          for (var officerData in officersList) {
+            if (officerData is Map && officerData['id'] == userId) {
               _officerName =
                   officerData['name']?.toString() ?? 'Unknown Officer';
-              _officerPhotoUrl =
-                  officerData['photo_url']?.toString(); // Ambil URL foto
-              print(
-                  'Found officer by id in users/$clusterId/officers: $_officerName');
+              _officerPhotoUrl = officerData['photo_url']?.toString();
+              print('Found officer in array: $_officerName');
               return;
             }
           }
         }
+        // Handle untuk kasus struktur Map (backward compatibility)
+        else if (data is Map<dynamic, dynamic>) {
+          // Case 1: Officer ID is direct key
+          if (data.containsKey(userId) && data[userId] is Map) {
+            final officerData = data[userId];
+            _officerName = officerData['name']?.toString() ?? 'Unknown Officer';
+            _officerPhotoUrl = officerData['photo_url']?.toString();
+            print('Found officer directly by key: $_officerName');
+            return;
+          }
 
-        // Mencoba path lama (untuk kompatibilitas dengan data lama)
-        final oldPathSnapshot =
-            await database.child('clusters/$clusterId/officers').get();
-
-        if (oldPathSnapshot.exists && oldPathSnapshot.value != null) {
-          final officersData = oldPathSnapshot.value;
-
-          if (officersData is List) {
-            // Array format
-            for (var i = 0; i < officersData.length; i++) {
-              final officerData = officersData[i];
-              if (officerData is Map &&
-                  officerData['id']?.toString() == userId) {
-                _officerName =
-                    officerData['name']?.toString() ?? 'Unknown Officer';
-                _officerPhotoUrl =
-                    officerData['photo_url']?.toString(); // Ambil URL foto
-                print(
-                    'Found officer by id in clusters/$clusterId/officers array: $_officerName');
-                return;
-              }
-            }
-          } else if (officersData is Map) {
-            // Map format
-            final officersMap = officersData as Map<dynamic, dynamic>;
-
-            for (var entry in officersMap.entries) {
-              final officerData = entry.value;
-              if (officerData is Map &&
-                  officerData['id']?.toString() == userId) {
-                _officerName =
-                    officerData['name']?.toString() ?? 'Unknown Officer';
-                _officerPhotoUrl =
-                    officerData['photo_url']?.toString(); // Ambil URL foto
-                print(
-                    'Found officer by id in clusters/$clusterId/officers: $_officerName');
-                return;
-              }
+          // Case 2: Loop through map entries to find by ID property
+          for (var entry in data.entries) {
+            final officerData = entry.value;
+            if (officerData is Map && officerData['id'] == userId) {
+              _officerName =
+                  officerData['name']?.toString() ?? 'Unknown Officer';
+              _officerPhotoUrl = officerData['photo_url']?.toString();
+              print('Found officer by ID property: $_officerName');
+              return;
             }
           }
         }
       }
 
-      // Jika sampai sini belum ketemu, gunakan nilai default yang lebih baik
-      _officerName =
-          'Officer #${userId.substring(0, Math.min(5, userId.length))}';
-      print('Could not find officer name, using default: $_officerName');
-    } catch (e, stackTrace) {
-      print('Error fetching officer name: $e');
-      print('Stack trace: $stackTrace');
+      // Direct lookup as fallback
+      final userSnapshot = await database.child('users/$userId').get();
+      if (userSnapshot.exists && userSnapshot.value != null) {
+        final userData = userSnapshot.value;
+        if (userData is Map<dynamic, dynamic>) {
+          _officerName = userData['name']?.toString() ?? 'Unknown Officer';
+          _officerPhotoUrl = userData['photo_url']?.toString() ??
+              userData['photoUrl']?.toString();
+          print('Found officer from direct user lookup: $_officerName');
+          return;
+        }
+      }
 
-      // Nilai default yang lebih baik jika terjadi error
+      // Default fallback if all methods fail
+      _officerName = userId.isNotEmpty
+          ? 'Officer #${userId.substring(0, Math.min(5, userId.length))}'
+          : 'Unknown Officer';
+    } catch (e, stack) {
+      print('Error fetching officer name: $e');
+      print('Stack trace: $stack');
       _officerName = userId.isNotEmpty
           ? 'Officer #${userId.substring(0, Math.min(5, userId.length))}'
           : 'Unknown Officer';
@@ -479,10 +506,11 @@ class PatrolTask {
     String? finalReportPhotoUrl,
     String? finalReportNote,
     DateTime? finalReportTime,
-
     String? initialReportPhotoUrl,
     String? initialReportNote,
     DateTime? initialReportTime,
+    bool? mockLocationDetected,
+    int? mockLocationCount,
   }) {
     return PatrolTask(
       taskId: taskId ?? this.taskId,
@@ -515,6 +543,8 @@ class PatrolTask {
           initialReportPhotoUrl ?? this.initialReportPhotoUrl,
       initialReportNote: initialReportNote ?? this.initialReportNote,
       initialReportTime: initialReportTime ?? this.initialReportTime,
+      mockLocationDetected: mockLocationDetected ?? this.mockLocationDetected,
+      mockLocationCount: mockLocationCount ?? this.mockLocationCount,
     );
   }
 

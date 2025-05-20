@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../domain/entities/patrol_task.dart';
@@ -7,6 +8,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import '../../../services/location_validator.dart';
 
 // Events
 abstract class PatrolEvent {}
@@ -127,6 +129,10 @@ class PatrolLoaded extends PatrolState {
   final List<PatrolTask> finishedTasks;
   final bool isSyncing;
   final bool isOffline;
+  // Tambahkan property mock detection
+  final bool mockLocationDetected;
+  final DateTime? lastMockDetection;
+  final int mockLocationCount;
 
   PatrolLoaded({
     this.task,
@@ -141,8 +147,12 @@ class PatrolLoaded extends PatrolState {
     this.finishedTasks = const [],
     this.isSyncing = false,
     this.isOffline = false,
+    this.mockLocationDetected = false,
+    this.lastMockDetection,
+    this.mockLocationCount = 0,
   });
 
+  @override
   List<Object?> get props => [
         task,
         isPatrolling,
@@ -156,6 +166,9 @@ class PatrolLoaded extends PatrolState {
         finishedTasks,
         isSyncing,
         isOffline,
+        mockLocationDetected,
+        lastMockDetection,
+        mockLocationCount,
       ];
 
   PatrolLoaded copyWith({
@@ -171,6 +184,9 @@ class PatrolLoaded extends PatrolState {
     List<PatrolTask>? finishedTasks,
     bool? isSyncing,
     bool? isOffline,
+    bool? mockLocationDetected,
+    DateTime? lastMockDetection,
+    int? mockLocationCount,
   }) {
     return PatrolLoaded(
       task: task ?? this.task,
@@ -185,6 +201,9 @@ class PatrolLoaded extends PatrolState {
       finishedTasks: finishedTasks ?? this.finishedTasks,
       isSyncing: isSyncing ?? this.isSyncing,
       isOffline: isOffline ?? this.isOffline,
+      mockLocationDetected: mockLocationDetected ?? this.mockLocationDetected,
+      lastMockDetection: lastMockDetection ?? this.lastMockDetection,
+      mockLocationCount: mockLocationCount ?? this.mockLocationCount,
     );
   }
 }
@@ -625,6 +644,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     }
   }
 
+  // Perbaiki metode _onLoadPatrolHistory untuk menangani active/ongoing tasks
+
   Future<void> _onLoadPatrolHistory(
     LoadPatrolHistory event,
     Emitter<PatrolState> emit,
@@ -643,26 +664,49 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       }
 
       // Get current active task and finished tasks in parallel
-      final currentTaskFuture = repository.getCurrentTask(event.userId);
-      final finishedTasksFuture = repository.getFinishedTasks(event.userId);
+      PatrolTask? currentTask;
+      List<PatrolTask> finishedTasks = [];
 
-      final results =
-          await Future.wait([currentTaskFuture, finishedTasksFuture]);
-      final currentTask = results[0] as PatrolTask?;
-      final finishedTasks = results[1] as List<PatrolTask>;
+      try {
+        currentTask = await repository.getCurrentTask(event.userId);
+        print('Current task loaded: ${currentTask?.taskId}');
+      } catch (e) {
+        print('Error loading current task: $e');
+        currentTask = null;
+      }
 
-      print('Loaded ${finishedTasks.length} finished tasks');
+      try {
+        finishedTasks = await repository.getFinishedTasks(event.userId);
+        print('Loaded ${finishedTasks.length} finished tasks');
+      } catch (e) {
+        print('Error loading finished tasks: $e');
+        finishedTasks = [];
+      }
+
+      // Perbaikan: Pastikan isPatrolling true jika task status active/ongoing
+      bool isActiveTask = false;
+      if (currentTask != null) {
+        final status = currentTask.status.toLowerCase();
+        isActiveTask = (status == 'active' ||
+            status == 'ongoing' ||
+            status == 'in_progress');
+        print(
+            'Current task status: ${currentTask.status}, isActiveTask: $isActiveTask');
+      }
 
       // Always emit PatrolLoaded, even without current task
       emit(PatrolLoaded(
         task: currentTask,
         finishedTasks: finishedTasks,
         distance: currentTask?.distance,
-        isPatrolling: currentTask?.status == 'ongoing',
+        isPatrolling: isActiveTask,
+        startTime: currentTask?.startTime,
+        routePath: currentTask?.routePath as Map<String, dynamic>?,
         isOffline: !_isConnected,
       ));
-    } catch (e) {
+    } catch (e, stack) {
       print('Error in _onLoadPatrolHistory: $e');
+      print('Stack trace: $stack');
       emit(PatrolError('Failed to load patrol history: $e'));
     }
   }
@@ -682,26 +726,39 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     }
   }
 
+  // Perbaiki metode _onUpdateCurrentTask untuk menangani perubahan task dengan benar
+
   void _onUpdateCurrentTask(
     UpdateCurrentTask event,
     Emitter<PatrolState> emit,
   ) {
     try {
-      print('Updating current task: ${event.task.taskId}');
+      print(
+          'Updating current task: ${event.task.taskId}, status: ${event.task.status}');
+
+      final isActiveTask = event.task.status == 'active' ||
+          event.task.status == 'ongoing' ||
+          event.task.status == 'in_progress';
+
+      print('Task is active: $isActiveTask');
 
       if (state is PatrolLoaded) {
         final currentState = state as PatrolLoaded;
         emit(currentState.copyWith(
           task: event.task,
-          isPatrolling: event.task.status == 'ongoing',
+          isPatrolling: event.task.status == 'ongoing' ||
+              event.task.status == 'in_progress',
         ));
+        print('Updated current task in existing PatrolLoaded state');
       } else {
         emit(PatrolLoaded(
           task: event.task,
-          isPatrolling: event.task.status == 'ongoing',
+          isPatrolling: event.task.status == 'ongoing' ||
+              event.task.status == 'in_progress',
           finishedTasks: const [],
           isOffline: !_isConnected,
         ));
+        print('Created new PatrolLoaded state with task');
       }
     } catch (e) {
       print('Error updating current task: $e');
@@ -893,6 +950,68 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               'Position: ${event.position.latitude}, ${event.position.longitude}');
           print('Connection status: ${_isConnected ? "Online" : "Offline"}');
 
+          // TAMBAHKAN: Deteksi mock location
+          final isMocked =
+              await LocationValidator.isLocationMocked(event.position);
+
+          if (isMocked) {
+            print(
+                'MOCK LOCATION DETECTED: ${event.position.latitude}, ${event.position.longitude}');
+
+            // Hitung jumlah deteksi
+            final newMockCount = currentState.mockLocationCount + 1;
+
+            // Catat ke Firebase jika online
+            if (_isConnected) {
+              await repository.updateTask(
+                currentState.task!.taskId,
+                {
+                  'mockLocationDetected': true,
+                  'mockLocationCount': newMockCount,
+                  'lastMockDetection': event.timestamp.toIso8601String(),
+                },
+              );
+
+              // Catat detail percobaan
+              final database = FirebaseDatabase.instance.ref();
+              await database
+                  .child('tasks/${currentState.task!.taskId}/mock_detections')
+                  .push()
+                  .set({
+                'timestamp': event.timestamp.toIso8601String(),
+                'coordinates': [
+                  event.position.latitude,
+                  event.position.longitude
+                ],
+                'count': newMockCount,
+              });
+            } else {
+              // Simpan di offline storage
+              if (_offlineLocationBox != null) {
+                final key =
+                    'mock_detection_${currentState.task!.taskId}_${event.timestamp.millisecondsSinceEpoch}';
+                await _offlineLocationBox!.put(key, {
+                  'taskId': currentState.task!.taskId,
+                  'timestamp': event.timestamp.toIso8601String(),
+                  'latitude': event.position.latitude,
+                  'longitude': event.position.longitude,
+                  'mockCount': newMockCount,
+                });
+              }
+            }
+
+            // Update state
+            emit(currentState.copyWith(
+              mockLocationDetected: true,
+              lastMockDetection: event.timestamp,
+              mockLocationCount: newMockCount,
+            ));
+
+            // Skip processing lokasi ini
+            return;
+          }
+
+          // Lanjutkan dengan kode yang sudah ada
           // Prepare location data
           final List<double> coordinates = [
             event.position.latitude,
@@ -1008,6 +1127,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             distance: newDistance,
             task: updatedTask,
             isOffline: !_isConnected,
+            // Reset mock detection flag
+            mockLocationDetected: false,
           ));
 
           print('State updated with ${updatedRoutePath.length} route points');
@@ -1015,7 +1136,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         } catch (e, stackTrace) {
           print('Error in location update flow: $e');
           print('Stack trace: $stackTrace');
-          // Don't emit error state to prevent disrupting tracking
         }
       }
     }

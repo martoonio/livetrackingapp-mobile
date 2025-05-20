@@ -66,36 +66,87 @@ class User {
     );
   }
 
-  // Helper method untuk parsing officers
+  // Perbaiki _parseOfficers method untuk menangani berbagai struktur data
+
   static List<Officer>? _parseOfficers(dynamic officersData) {
     if (officersData == null) return null;
 
-    try {
-      if (officersData is List) {
-        return officersData
-            .map((officerMap) => Officer.fromMap(
-                  officerMap is Map<String, dynamic>
-                      ? officerMap
-                      : Map<String, dynamic>.from(officerMap),
-                ))
-            .toList();
-      }
+    List<Officer> result = [];
 
-      if (officersData is Map) {
-        // Jika data officers berbentuk map dengan key-value
-        return officersData.entries
-            .map((entry) => Officer.fromMap(
-                  entry.value is Map<String, dynamic>
-                      ? entry.value
-                      : Map<String, dynamic>.from(entry.value),
-                ))
-            .toList();
+    try {
+      print('Parsing officers data type: ${officersData.runtimeType}');
+
+      if (officersData is List) {
+        // Filter null entries
+        final nonNullEntries =
+            officersData.where((item) => item != null).toList();
+        print('Found ${nonNullEntries.length} non-null officers in list');
+
+        for (var officerData in nonNullEntries) {
+          try {
+            if (officerData is Map) {
+              // Pastikan data officer memiliki semua properti yang diperlukan
+              final Map<String, dynamic> officerMap = {};
+
+              // Convert dynamic map to string keys map
+              officerData.forEach((key, value) {
+                officerMap[key.toString()] = value;
+              });
+
+              // Pastikan ID ada
+              if (!officerMap.containsKey('id') || officerMap['id'] == null) {
+                print('Officer missing ID, skipping: $officerMap');
+                continue;
+              }
+
+              final officer = Officer.fromMap(officerMap);
+              result.add(officer);
+              print(
+                  'Successfully parsed officer: ${officer.name} (ID: ${officer.id})');
+            }
+          } catch (e) {
+            print('Error parsing individual officer: $e');
+          }
+        }
+      } else if (officersData is Map) {
+        // Handle officers as Map
+        print('Officers data is Map with ${officersData.length} entries');
+
+        officersData.forEach((key, value) {
+          try {
+            if (value != null && value is Map) {
+              // Convert to string key map
+              final Map<String, dynamic> officerMap = {};
+
+              // Populate map with string keys
+              value.forEach((k, v) {
+                officerMap[k.toString()] = v;
+              });
+
+              // Use key as ID if missing
+              if (!officerMap.containsKey('id') ||
+                  officerMap['id'] == null ||
+                  officerMap['id'].toString().isEmpty) {
+                officerMap['id'] = key.toString();
+              }
+
+              final officer = Officer.fromMap(officerMap);
+              result.add(officer);
+              print('Successfully parsed officer from Map: ${officer.name}');
+            }
+          } catch (e) {
+            print('Error parsing officer with key $key: $e');
+          }
+        });
+      } else {
+        print('Unsupported officers data type: ${officersData.runtimeType}');
       }
-    } catch (e) {
+    } catch (e, stack) {
       print('Error parsing officers data: $e');
+      print('Stack trace: $stack');
     }
 
-    return null;
+    return result.isEmpty ? null : result;
   }
 
   // Helper method untuk parsing coordinates

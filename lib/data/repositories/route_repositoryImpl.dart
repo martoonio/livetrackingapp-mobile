@@ -36,37 +36,72 @@ class RouteRepositoryImpl implements RouteRepository {
         return null;
       }
 
-      final tasks = Map<dynamic, dynamic>.from(snapshot.value as Map);
+      // PERBAIKAN: Cek tipe data sebelum casting
+      Map<dynamic, dynamic> tasks;
+      try {
+        if (snapshot.value is Map) {
+          tasks = snapshot.value as Map<dynamic, dynamic>;
+        } else if (snapshot.value is List) {
+          // Handle jika bentuknya List
+          final list = snapshot.value as List;
+          tasks = {};
+          for (int i = 0; i < list.length; i++) {
+            if (list[i] != null) {
+              tasks[i.toString()] = list[i];
+            }
+          }
+        } else {
+          print('Unexpected data type: ${snapshot.value.runtimeType}');
+          return null;
+        }
+      } catch (e) {
+        print('Error parsing tasks data: $e');
+        print('Value type: ${snapshot.value.runtimeType}');
+        print('Value: ${snapshot.value}');
+        return null;
+      }
+
       print('Found tasks: ${tasks.length}');
 
       // Debugging
       tasks.forEach((key, value) {
-        print(
-            'Task ID: $key, Status: ${value['status']}, UserId: ${value['userId']}');
+        if (value is Map) {
+          print(
+              'Task ID: $key, Status: ${value['status']}, UserId: ${value['userId']}');
+        } else {
+          print('Task ID: $key, Value type: ${value.runtimeType}');
+        }
       });
 
-      // Try to find active task
+      // Perbaikan: Mencari tugas dengan status active, ongoing, atau in_progress
       MapEntry<dynamic, dynamic>? activeTaskEntry;
       try {
         activeTaskEntry = tasks.entries.firstWhere(
           (entry) {
+            if (entry.value is! Map) return false;
+
             final task = entry.value as Map<dynamic, dynamic>;
-            final status = task['status']?.toString();
+            final status = task['status']?.toString().toLowerCase();
             return status == 'active' ||
                 status == 'ongoing' ||
                 status == 'in_progress';
           },
+          orElse: () => MapEntry(null, null),
         );
 
-        if (activeTaskEntry != null) {
-          print('Found active task with ID: ${activeTaskEntry.key}');
+        if (activeTaskEntry.key != null) {
+          print(
+              'Found active task with ID: ${activeTaskEntry.key}, status: ${(activeTaskEntry.value as Map)['status']}');
+        } else {
+          print('No active task found using firstWhere');
+          return null;
         }
       } catch (e) {
-        print('No active task found: $e');
+        print('Error finding active task: $e');
         activeTaskEntry = null;
       }
 
-      if (activeTaskEntry == null) {
+      if (activeTaskEntry == null || activeTaskEntry.key == null) {
         print('No active/ongoing task found for user $userId');
         return null;
       }
@@ -76,6 +111,7 @@ class RouteRepositoryImpl implements RouteRepository {
 
       // Add officer name to task if possible
       String? officerName;
+      String? officerPhotoUrl;
       try {
         if (taskData['userId'] != null) {
           final officerId = taskData['userId'].toString();
@@ -90,9 +126,18 @@ class RouteRepositoryImpl implements RouteRepository {
                 .get();
 
             if (officerSnapshot.exists) {
-              final officerData = officerSnapshot.value as Map;
-              officerName = officerData[officerId]['name'];
-              print('Found officer name: $officerName');
+              // PERBAIKAN: Handle tipe data dengan benar
+              if (officerSnapshot.value is Map) {
+                final officerData = officerSnapshot.value as Map;
+                if (officerData.containsKey(officerId) &&
+                    officerData[officerId] is Map) {
+                  officerName = officerData[officerId]['name']?.toString();
+                  officerPhotoUrl =
+                      officerData[officerId]['photoUrl']?.toString();
+                  print(
+                      'Found officer name: $officerName, photo: $officerPhotoUrl');
+                }
+              }
             }
           }
         }
@@ -104,6 +149,7 @@ class RouteRepositoryImpl implements RouteRepository {
         ...taskData,
         'taskId': activeTaskEntry.key,
         'officerName': officerName,
+        'officerPhotoUrl': officerPhotoUrl,
       });
 
       return task;
@@ -183,7 +229,7 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<List<PatrolTask>> getFinishedTasks(String userId) async {
     try {
-      print('Getting finished tasks for user: $userId'); // Debug print
+      print('Getting finished tasks for user: $userId');
 
       final snapshot = await _database
           .child('tasks')
@@ -192,28 +238,100 @@ class RouteRepositoryImpl implements RouteRepository {
           .get();
 
       if (!snapshot.exists) {
-        print('No tasks found for user');
+        print('No tasks found for user $userId');
         return [];
       }
 
-      final tasks = Map<String, dynamic>.from(snapshot.value as Map);
-      final finishedTasks = tasks.entries
-          .where((entry) => (entry.value as Map)['status'] == 'finished')
-          .map((entry) => _convertToPatrolTask({
-                ...entry.value as Map<dynamic, dynamic>,
-                'taskId': entry.key,
-              }))
-          .toList();
+      // PERBAIKAN: Cek tipe data sebelum casting
+      Map<dynamic, dynamic> tasks;
+      if (snapshot.value is Map) {
+        tasks = snapshot.value as Map<dynamic, dynamic>;
+      } else if (snapshot.value is List) {
+        final list = snapshot.value as List;
+        tasks = {};
+        for (int i = 0; i < list.length; i++) {
+          if (list[i] != null) {
+            tasks[i.toString()] = list[i];
+          }
+        }
+      } else {
+        print('Unexpected data type for tasks: ${snapshot.value.runtimeType}');
+        return [];
+      }
+
+      print('Total tasks found: ${tasks.length}');
+
+      List<PatrolTask> finishedTasks = [];
+
+      await Future.forEach(tasks.entries,
+          (MapEntry<dynamic, dynamic> entry) async {
+        try {
+          if (entry.value is! Map) {
+            print('Task ${entry.key} is not a Map: ${entry.value.runtimeType}');
+            return;
+          }
+
+          final taskData = entry.value as Map<dynamic, dynamic>;
+          final status = taskData['status']?.toString() ?? '';
+
+          if (status.toLowerCase() == 'finished') {
+            print('Found finished task: ${entry.key}');
+
+            // Get officer name if possible
+            String? officerName;
+            String? officerPhotoUrl;
+
+            if (taskData['clusterId'] != null) {
+              final clusterId = taskData['clusterId'].toString();
+              final officerId = taskData['userId'].toString();
+
+              try {
+                final officerSnapshot = await _database
+                    .child('users/$clusterId/officers')
+                    .orderByKey()
+                    .equalTo(officerId)
+                    .get();
+
+                if (officerSnapshot.exists) {
+                  if (officerSnapshot.value is Map) {
+                    final officerData = officerSnapshot.value as Map;
+                    if (officerData.containsKey(officerId) &&
+                        officerData[officerId] is Map) {
+                      officerName = officerData[officerId]['name']?.toString();
+                      officerPhotoUrl =
+                          officerData[officerId]['photoUrl']?.toString();
+                    }
+                  }
+                }
+              } catch (e) {
+                print('Error getting officer info: $e');
+              }
+            }
+
+            final task = _convertToPatrolTask({
+              ...taskData,
+              'taskId': entry.key,
+              'officerName': officerName,
+              'officerPhotoUrl': officerPhotoUrl,
+            });
+
+            finishedTasks.add(task);
+          }
+        } catch (e) {
+          print('Error processing task ${entry.key}: $e');
+        }
+      });
+
+      print('Found ${finishedTasks.length} finished tasks');
 
       // Sort by end time, most recent first
       finishedTasks.sort((a, b) =>
           (b.endTime ?? DateTime.now()).compareTo(a.endTime ?? DateTime.now()));
 
-      print('Found ${finishedTasks.length} finished tasks'); // Debug print
       return finishedTasks;
     } catch (e) {
-      print('Error getting finished tasks: $e'); // Debug print
-      throw Exception('Failed to get finished tasks: $e');
+      print('Error in getFinishedTasks: $e');
+      return [];
     }
   }
 
@@ -340,15 +458,19 @@ class RouteRepositoryImpl implements RouteRepository {
     return null;
   }
 
+  // Perbaiki metode _convertToPatrolTask untuk menangani semua properti penting
+
   PatrolTask _convertToPatrolTask(Map<dynamic, dynamic> data) {
-    print('Converting data: $data'); // Debug print
+    print('Converting task data: $data'); // Debug print
     try {
-      return PatrolTask(
+      final task = PatrolTask(
         taskId: data['taskId']?.toString() ?? '',
         userId: data['userId']?.toString() ?? '',
         vehicleId: data['vehicleId']?.toString() ?? '',
         officerName:
             data['officerName']?.toString(), // Support for officer name
+        officerPhotoUrl:
+            data['officerPhotoUrl']?.toString(), // Support for officer photo
         assignedRoute: data['assigned_route'] != null
             ? (data['assigned_route'] as List)
                 .map((point) => (point as List)
@@ -368,8 +490,19 @@ class RouteRepositoryImpl implements RouteRepository {
         endTime: _parseDateTime(data['endTime']),
         assignedStartTime: _parseDateTime(data['assignedStartTime']),
         assignedEndTime: _parseDateTime(data['assignedEndTime']),
-        clusterId: data['clusterId'].toString(), // Add clusterId support
+        clusterId: data['clusterId']?.toString() ?? '', // Add clusterId support
+        finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
+        finalReportNote: data['finalReportNote']?.toString(),
+        finalReportTime: _parseDateTime(data['finalReportTime']),
+        mockLocationDetected: data['mockLocationDetected'] == true,
+        mockLocationCount: data['mockLocationCount'] is num
+            ? (data['mockLocationCount'] as num).toInt()
+            : 0,
       );
+
+      print(
+          'Task converted successfully: ID=${task.taskId}, Status=${task.status}');
+      return task;
     } catch (e, stackTrace) {
       print('Error converting task: $e'); // Debug print
       print('Stack trace: $stackTrace');

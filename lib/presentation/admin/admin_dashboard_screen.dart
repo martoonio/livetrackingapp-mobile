@@ -18,7 +18,6 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _isLoading = false;
-  bool _isExpanded = false;
   int? _expandedClusterIndex;
 
   @override
@@ -30,8 +29,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   void _loadData() {
     setState(() => _isLoading = true);
     // Load clusters dan tasks
-    context.read<AdminBloc>().add(LoadAllClusters());
-    context.read<AdminBloc>().add(LoadAllTasks());
+    context.read<AdminBloc>().add(const LoadAllClusters());
+    context.read<AdminBloc>().add(const LoadAllTasks());
     setState(() => _isLoading = false);
   }
 
@@ -39,7 +38,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Command Center Dashboard'),
+        automaticallyImplyLeading: false,
+        title: Text(
+          'Command Center Dashboard',
+          style: boldTextStyle(color: neutralWhite, size: 20),
+        ),
         backgroundColor: kbpBlue900,
         foregroundColor: Colors.white,
         actions: [
@@ -113,7 +116,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             );
           }
 
-          return Center(child: Text('Memuat data...'));
+          return const Center(child: Text('Memuat data...'));
         },
       ),
       floatingActionButton: FloatingActionButton(
@@ -561,7 +564,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => CreateTaskScreen(
+                              builder: (_) => const CreateTaskScreen(
                                   // initialClusterId: cluster.id,
                                   ),
                             ),

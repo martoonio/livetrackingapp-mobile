@@ -11,6 +11,7 @@ import 'package:livetrackingapp/domain/entities/report.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
+import 'package:livetrackingapp/services/location_validator.dart';
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
@@ -37,6 +38,9 @@ class _MapScreenState extends State<MapScreen> {
   final Set<Marker> _markers = {};
   bool _isMapReady = false;
   late final currentState;
+
+  bool _mockLocationDetected = false;
+  bool _snackbarShown = false;
 
   Timer? _patrolTimer;
   Duration _elapsedTime = Duration.zero;
@@ -269,8 +273,46 @@ class _MapScreenState extends State<MapScreen> {
         distanceFilter: 10,
       ),
     ).listen(
-      (Position position) {
+      (Position position) async {
         if (mounted) {
+          // TAMBAHKAN: Check for mock location
+          final isMocked = await LocationValidator.isLocationMocked(position);
+
+          if (isMocked) {
+            print(
+                'MOCK LOCATION DETECTED: ${position.latitude}, ${position.longitude}');
+
+            // Tampilkan peringatan di UI
+            setState(() {
+              _mockLocationDetected = true;
+            });
+
+            // Tampilkan snackbar jika belum ditampilkan
+            if (!_snackbarShown) {
+              _snackbarShown = true;
+              showCustomSnackbar(
+                context: context,
+                title: 'Fake GPS Terdeteksi!',
+                subtitle:
+                    'Penggunaan fake GPS tidak diperbolehkan dan akan dilaporkan',
+                type: SnackbarType.danger,
+              );
+
+              // Reset flag setelah beberapa detik
+              Future.delayed(Duration(seconds: 6), () {
+                _snackbarShown = false;
+              });
+            }
+
+            // Jangan update UI map
+            return;
+          } else if (_mockLocationDetected) {
+            // Reset mock flag jika sudah tidak terdeteksi lagi
+            setState(() {
+              _mockLocationDetected = false;
+            });
+          }
+
           setState(() {
             userCurrentLocation = position;
             if (mapController != null) {
@@ -2075,6 +2117,57 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  void _showMockLocationInfoDialog(BuildContext context, int detectionCount) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          'Fake GPS Terdeteksi',
+          style: boldTextStyle(size: 18),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Aplikasi mendeteksi penggunaan Fake GPS atau Mock Location. Hal ini tidak diperbolehkan dan akan dicatat untuk keperluan pelaporan.',
+              style: regularTextStyle(size: 14),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Untuk melanjutkan patroli:',
+              style: semiBoldTextStyle(size: 14),
+            ),
+            const SizedBox(height: 8),
+            Text('1. Nonaktifkan Fake GPS atau Mock Location'),
+            Text('2. Pastikan Developer Options tidak aktif'),
+            Text('3. Restart aplikasi jika diperlukan'),
+            if (detectionCount >= 3)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Text(
+                  'PERINGATAN: Patroli dengan fake GPS yang terdeteksi lebih dari 3 kali akan ditandai tidak valid.',
+                  style: TextStyle(
+                    color: dangerR500,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Mengerti',
+              style: mediumTextStyle(color: kbpBlue900),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _patrolTimer?.cancel();
@@ -2101,6 +2194,11 @@ class _MapScreenState extends State<MapScreen> {
       },
       child: BlocBuilder<PatrolBloc, PatrolState>(builder: (context, state) {
         print('MapScreen state: ${state is PatrolLoaded && state.isOffline}');
+        final isPatrolling = state is PatrolLoaded && state.isPatrolling;
+        final isMockDetected =
+            (state is PatrolLoaded && state.mockLocationDetected) ||
+                _mockLocationDetected;
+        final mockCount = state is PatrolLoaded ? state.mockLocationCount : 0;
         return Scaffold(
           appBar: AppBar(
             title: Text(
@@ -2378,6 +2476,68 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                 ),
               ),
+
+              if (isMockDetected)
+                Positioned(
+                  top: (state is PatrolLoaded && state.isOffline) ? 30 : 0,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    color: dangerR500,
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                    child: SafeArea(
+                      bottom: false,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.warning_amber_rounded,
+                                  color: Colors.white),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'PERINGATAN: Fake GPS Terdeteksi',
+                                  style: boldTextStyle(color: Colors.white),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Penggunaan fake GPS tidak diperbolehkan dan akan dilaporkan',
+                            style:
+                                mediumTextStyle(color: Colors.white, size: 12),
+                          ),
+                          if (mockCount >= 3)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                'Terdeteksi $mockCount kali. Patroli mungkin dibatalkan.',
+                                style: boldTextStyle(
+                                    color: Colors.white, size: 12),
+                              ),
+                            ),
+                          const SizedBox(height: 4),
+                          ElevatedButton(
+                            onPressed: () {
+                              _showMockLocationInfoDialog(context, mockCount);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: dangerR500,
+                            ),
+                            child: Text(
+                              'Pelajari Lebih Lanjut',
+                              style: semiBoldTextStyle(size: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
 
               // Panel bawah - tombol kontrol
               Positioned(

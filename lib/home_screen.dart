@@ -37,6 +37,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Improved _loadUserData
 
+  // Perbaiki metode _loadUserData() untuk memastikan data dimuat dengan benar
+
   Future<void> _loadUserData() async {
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) return;
@@ -52,11 +54,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Load patrol history
       if (_currentUser!.role == 'patrol') {
-        // For cluster users, load tasks for their officers
+        // Perbaikan 1: Untuk user cluster, muat tugas dengan metode yang tepat
         await _loadClusterOfficerTasks();
       } else {
-        // For individual officers
+        // Perbaikan 2: Load data untuk petugas individu dengan PatrolBloc
         print('Loading patrol data for officer');
+
+        // Tambahkan event untuk memuat riwayat patroli
+        context
+            .read<PatrolBloc>()
+            .add(LoadPatrolHistory(userId: _currentUser!.id));
 
         // First check if there's an ongoing patrol
         final currentTask = await context
@@ -72,8 +79,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // If the task is ongoing, update the state to reflect that
           if (currentTask.status == 'ongoing' ||
-              currentTask.status == 'in_progress') {
-            print('Task is ongoing - restoring patrol state');
+              currentTask.status == 'in_progress' ||
+              currentTask.status == 'active') {
+            print('Task is ongoing/active - restoring patrol state');
             context.read<PatrolBloc>().add(ResumePatrol(
                   task: currentTask,
                   startTime: currentTask.startTime ?? DateTime.now(),
@@ -83,11 +91,6 @@ class _HomeScreenState extends State<HomeScreen> {
         } else {
           print('No current task found');
         }
-
-        // Load history tasks
-        context
-            .read<PatrolBloc>()
-            .add(LoadPatrolHistory(userId: _currentUser!.id));
 
         // Start task stream to listen for new tasks
         _startTaskStream();
@@ -102,7 +105,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-// Improved _loadClusterOfficerTasks for better status detection
   Future<void> _loadClusterOfficerTasks() async {
     if (_currentUser == null) {
       print('Current user is null');
@@ -130,24 +132,86 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       // Parse officer data
-      final officersData = officerSnapshot.value as Map<dynamic, dynamic>;
+      // PERBAIKAN: Tambahkan pengecekan tipe data sebelum casting
+      Map<dynamic, dynamic> officersData;
+      if (officerSnapshot.value is Map) {
+        officersData = officerSnapshot.value as Map<dynamic, dynamic>;
+      } else if (officerSnapshot.value is List) {
+        // Konversi List menjadi Map dengan index sebagai key
+        final list = officerSnapshot.value as List;
+        officersData = {};
+        for (int i = 0; i < list.length; i++) {
+          if (list[i] != null) {
+            officersData[i.toString()] = list[i];
+          }
+        }
+      } else {
+        print(
+            'Unexpected format for officers data: ${officerSnapshot.value.runtimeType}');
+        setState(() {
+          _upcomingTasks = [];
+          _historyTasks = [];
+          _isLoading = false;
+        });
+        return;
+      }
+
+      print('Officer data type: ${officerSnapshot.value.runtimeType}');
+      print('Officers data after conversion: $officersData');
+
+      // Saat membuat Map<String, Map<String, String>> officerInfo
+      // Ubah cara pemrosesan officers data
+
       Map<String, Map<String, String>> officerInfo = {};
 
-      // Create mapping of officer IDs to info (name and photo)
-      officersData.forEach((offId, offData) {
-        if (offData is Map) {
-          final name = offData['name']?.toString() ?? 'Unknown';
-          final photoUrl = offData['photo_url']?.toString() ?? '';
+      try {
+        // Untuk kasus officers adalah array (struktur yang benar)
+        if (officerSnapshot.value is List) {
+          final officersList = List.from(
+              (officerSnapshot.value as List).where((item) => item != null));
+          print('Officers data is an array with ${officersList.length} items');
 
-          officerInfo[offId.toString()] = {
-            'name': name,
-            'photo_url': photoUrl,
-          };
+          for (var officer in officersList) {
+            if (officer is Map) {
+              final offId = officer['id']?.toString();
+              if (offId != null && offId.isNotEmpty) {
+                final name = officer['name']?.toString() ?? 'Unknown';
+                final photoUrl = officer['photo_url']?.toString() ?? '';
 
-          print(
-              'Officer: $offId, Name: $name, Has Photo: ${photoUrl.isNotEmpty}');
+                officerInfo[offId] = {
+                  'name': name,
+                  'photo_url': photoUrl,
+                };
+
+                print(
+                    'Officer in array: $offId, Name: $name, Has Photo: ${photoUrl.isNotEmpty}');
+              }
+            }
+          }
         }
-      });
+        // Fallback untuk kasus lama (map)
+        else if (officerSnapshot.value is Map) {
+          final officersData = officerSnapshot.value as Map<dynamic, dynamic>;
+          officersData.forEach((offId, offData) {
+            if (offData is Map) {
+              // Jika ID ada sebagai properti, gunakan itu
+              final idKey = offData['id']?.toString() ?? offId.toString();
+              final name = offData['name']?.toString() ?? 'Unknown';
+              final photoUrl = offData['photo_url']?.toString() ?? '';
+
+              officerInfo[idKey] = {
+                'name': name,
+                'photo_url': photoUrl,
+              };
+
+              print(
+                  'Officer in map: $idKey, Name: $name, Has Photo: ${photoUrl.isNotEmpty}');
+            }
+          });
+        }
+      } catch (e) {
+        print('Error processing officers data: $e');
+      }
 
       // Get all tasks for this cluster
       final taskSnapshot = await FirebaseDatabase.instance
@@ -161,7 +225,21 @@ class _HomeScreenState extends State<HomeScreen> {
       List<PatrolTask> allUpcomingTasks = [];
 
       if (taskSnapshot.exists) {
-        final tasksData = taskSnapshot.value as Map<dynamic, dynamic>;
+        // PERBAIKAN: Tambahkan pengecekan tipe data sebelum casting
+        Map<dynamic, dynamic> tasksData;
+        if (taskSnapshot.value is Map) {
+          tasksData = taskSnapshot.value as Map<dynamic, dynamic>;
+        } else {
+          print(
+              'Unexpected format for tasks data: ${taskSnapshot.value.runtimeType}');
+          setState(() {
+            _upcomingTasks = [];
+            _historyTasks = [];
+            _isLoading = false;
+          });
+          return;
+        }
+
         print('Found ${tasksData.length} tasks for cluster');
 
         tasksData.forEach((taskId, taskData) {
@@ -199,6 +277,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? Map<String, dynamic>.from(taskData['route_path'] as Map)
                     : null,
                 clusterId: taskData['clusterId'].toString(),
+                mockLocationDetected: taskData['mockLocationDetected'] == true,
+                mockLocationCount: taskData['mockLocationCount'] is num
+                    ? (taskData['mockLocationCount'] as num).toInt()
+                    : 0,
               );
 
               // Set officer info if available from our map
@@ -213,15 +295,16 @@ class _HomeScreenState extends State<HomeScreen> {
               }
 
               // Important: Check for active AND ongoing status
-              if (status == 'finished') {
+              if (status.toLowerCase() == 'finished') {
                 allHistoryTasks.add(task);
-              } else if (status == 'active' ||
-                  status == 'ongoing' ||
-                  status == 'in_progress') {
+              } else if (status.toLowerCase() == 'active' ||
+                  status.toLowerCase() == 'ongoing' ||
+                  status.toLowerCase() == 'in_progress') {
                 allUpcomingTasks.add(task);
               }
-            } catch (e) {
+            } catch (e, stack) {
               print('Error processing task $taskId: $e');
+              print('Stack trace: $stack');
             }
           }
         });
@@ -541,6 +624,27 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: true,
         elevation: 0.5,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.bug_report, color: Colors.white),
+            onPressed: () {
+              // Picu debug event untuk memeriksa status saat ini
+              context.read<PatrolBloc>().add(DebugOfflineData());
+
+              // Muat ulang data
+              _loadUserData();
+
+              // Print status saat ini
+              final state = context.read<PatrolBloc>().state;
+              if (state is PatrolLoaded) {
+                print(
+                    'Current task: ${state.task?.taskId}, status: ${state.task?.status}');
+                print('isPatrolling: ${state.isPatrolling}');
+                print('FinishedTasks count: ${state.finishedTasks.length}');
+              } else {
+                print('Current state: ${state.runtimeType}');
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(
               Icons.refresh,
@@ -1447,10 +1551,14 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// BLoC builders with consistent sizing
+// Di dalam metode _buildUpcomingPatrolsForOfficer(), tambahkan log debug
+
   Widget _buildUpcomingPatrolsForOfficer() {
     return BlocBuilder<PatrolBloc, PatrolState>(
       builder: (context, state) {
+        // Tambahkan log debug untuk state
+        print('BlocBuilder for upcoming tasks: state = ${state.runtimeType}');
+
         if (state is PatrolLoading) {
           return Container(
             height: 180,
@@ -1461,8 +1569,19 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
 
-        if (state is PatrolLoaded && state.task != null) {
-          return _buildTaskCard(state.task!);
+        if (state is PatrolLoaded) {
+          // Tambahkan log detail untuk memeriksa task
+          print(
+              'PatrolLoaded state with task: ${state.task?.taskId}, status: ${state.task?.status}');
+          print('isPatrolling: ${state.isPatrolling}');
+          print('FinishedTasks count: ${state.finishedTasks.length}');
+
+          if (state.task != null &&
+              (state.task!.status == 'active' ||
+                  state.task!.status == 'ongoing' ||
+                  state.task!.status == 'in_progress')) {
+            return _buildTaskCard(state.task!);
+          }
         }
 
         return _buildEmptyStateCard(
