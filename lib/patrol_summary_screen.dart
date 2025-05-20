@@ -1039,6 +1039,10 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
                 // Tampilkan foto final report jika ada
                 if (widget.finalReportPhotoUrl != null)
                   _buildFinalReportPhotoCard(),
+                8.height,
+
+                if (widget.task.initialReportPhotoUrl != null)
+                  _buildInitialReportSection(),
 
                 // Summary cards
                 Padding(
@@ -1180,6 +1184,111 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // Tambahkan widget untuk menampilkan laporan awal
+  Widget _buildInitialReportSection() {
+    if (widget.task.initialReportPhotoUrl == null) {
+      return SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Laporan Awal Patroli',
+          style: boldTextStyle(size: 16, color: kbpBlue900),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: kbpBlue300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Waktu laporan awal
+              if (widget.task.initialReportTime != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.access_time, size: 16, color: kbpBlue700),
+                      SizedBox(width: 8),
+                      Text(
+                        formatDateFromString(
+                            widget.task.initialReportTime.toString()),
+                        style: regularTextStyle(size: 14),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Foto laporan awal
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  widget.task.initialReportPhotoUrl!,
+                  width: double.infinity,
+                  height: 180,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Container(
+                      height: 180,
+                      width: double.infinity,
+                      color: kbpBlue100,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
+                                  loadingProgress.expectedTotalBytes!
+                              : null,
+                        ),
+                      ),
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      height: 180,
+                      width: double.infinity,
+                      color: kbpBlue100,
+                      child: Center(
+                        child: Icon(Icons.error, color: dangerR300),
+                      ),
+                    );
+                  },
+                ),
+              ),
+
+              // Catatan laporan awal
+              if (widget.task.initialReportNote != null &&
+                  widget.task.initialReportNote!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Catatan Awal:',
+                        style: mediumTextStyle(size: 14),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        widget.task.initialReportNote!,
+                        style: regularTextStyle(size: 14),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 

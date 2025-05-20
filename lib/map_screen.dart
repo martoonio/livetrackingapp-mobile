@@ -320,7 +320,7 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-// Improved _handlePatrolButtonPress for better detection of ongoing patrol
+// Modifikasi fungsi _handlePatrolButtonPress untuk menampilkan dialog laporan awal
   void _handlePatrolButtonPress(BuildContext context, PatrolState state) async {
     // Check status from both sources
     final isPatrollingInBloc = state is PatrolLoaded && state.isPatrolling;
@@ -348,9 +348,504 @@ class _MapScreenState extends State<MapScreen> {
         await _stopPatrol(context, tempState);
       }
     } else {
-      print('No active patrol - starting new patrol');
-      _startPatrol(context);
+      print('No active patrol - showing initial report dialog');
+      // Tampilkan dialog untuk photo dan catatan awal
+      final shouldStart = await _showInitialReportDialog(context);
+      if (shouldStart) {
+        _startPatrol(context);
+      }
     }
+  }
+
+  // Tombol mulai/stop
+  Widget _buildPatrolButtonUI(bool isPatrolling) {
+    return GestureDetector(
+      onTap: () {
+        // Tampilkan tooltip manual saat tap biasa
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              isPatrolling
+                  ? 'Tekan 3 detik untuk selesai'
+                  : 'Tekan 3 detik untuk mulai',
+              style: mediumTextStyle(color: Colors.white),
+            ),
+            backgroundColor: isPatrolling ? dangerR300 : kbpBlue900,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+      },
+      onLongPressStart: (_) {
+        final state = context.read<PatrolBloc>().state;
+        _startLongPressAnimation(context, state);
+      },
+      onLongPressEnd: (_) {
+        _resetLongPressAnimation();
+      },
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Progress indicator
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(
+              begin: 0.0,
+              end: _longPressProgress,
+            ),
+            duration: const Duration(milliseconds: 50),
+            builder: (context, value, child) {
+              return SizedBox(
+                width: 80,
+                height: 80,
+                child: CircularProgressIndicator(
+                  value: value,
+                  strokeWidth: 6.0,
+                  color: isPatrolling ? dangerR300 : successG300,
+                  backgroundColor: isPatrolling
+                      ? dangerR300.withOpacity(0.3)
+                      : successG300.withOpacity(0.3),
+                ),
+              );
+            },
+          ),
+          // Tombol
+          Container(
+            width: 70,
+            height: 70,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isPatrolling ? dangerR300 : successG300,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Icon(
+                isPatrolling ? Icons.stop : Icons.play_arrow,
+                color: Colors.white,
+                size: 32,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+// Tambahkan metode untuk menampilkan dialog laporan awal
+  Future<bool> _showInitialReportDialog(BuildContext context) async {
+    File? capturedImage;
+    final noteController = TextEditingController();
+    bool isSubmitting = false;
+    bool result = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return WillPopScope(
+              onWillPop: () async {
+                // Konfirmasi jika user mencoba keluar
+                bool exitConfirmed = await showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: Text(
+                      'Batalkan Memulai Patroli?',
+                      style: boldTextStyle(size: 18),
+                    ),
+                    content: Text(
+                      'Anda akan membatalkan memulai patroli. Yakin ingin keluar?',
+                      style: regularTextStyle(size: 14),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: Text(
+                          'Tidak',
+                          style: mediumTextStyle(color: kbpBlue900),
+                        ),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kbpBlue900,
+                        ),
+                        child: Text(
+                          'Ya, Batalkan',
+                          style: mediumTextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+
+                return exitConfirmed;
+              },
+              child: Dialog(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Dialog title
+                      Row(
+                        children: [
+                          const Icon(Icons.play_circle_filled,
+                              color: successG500, size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Mulai Patroli',
+                                  style: boldTextStyle(
+                                      size: 18, color: kbpBlue900),
+                                  textAlign: TextAlign.left,
+                                ),
+                                Text(
+                                  'Ambil foto sebagai bukti awal patroli',
+                                  style: regularTextStyle(
+                                      size: 14, color: neutral700),
+                                  textAlign: TextAlign.left,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Foto preview container
+                      Container(
+                        width: double.infinity,
+                        height: 200,
+                        decoration: BoxDecoration(
+                          color: kbpBlue100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: kbpBlue300),
+                        ),
+                        child: capturedImage == null
+                            ? Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.camera_alt,
+                                    size: 48,
+                                    color: kbpBlue700,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'Foto wajib diambil',
+                                    style: mediumTextStyle(color: kbpBlue700),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Pastikan lokasi terlihat dengan jelas',
+                                    style: regularTextStyle(
+                                        color: kbpBlue700, size: 12),
+                                  ),
+                                ],
+                              )
+                            : ClipRRect(
+                                borderRadius: BorderRadius.circular(11),
+                                child: Image.file(
+                                  capturedImage!,
+                                  width: double.infinity,
+                                  height: 200,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Tombol ambil foto
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.camera_alt),
+                          label: Text(
+                            capturedImage == null
+                                ? 'Ambil Foto'
+                                : 'Ambil Ulang',
+                            style: mediumTextStyle(color: Colors.white),
+                          ),
+                          onPressed: () async {
+                            try {
+                              final ImagePicker picker = ImagePicker();
+                              final XFile? photo = await picker.pickImage(
+                                source: ImageSource.camera,
+                                preferredCameraDevice: CameraDevice.rear,
+                                maxWidth: 1024,
+                                maxHeight: 1024,
+                                imageQuality: 80,
+                              );
+
+                              if (photo != null) {
+                                setState(() {
+                                  capturedImage = File(photo.path);
+                                });
+                              }
+                            } catch (e) {
+                              print('Error taking photo: $e');
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Error: $e')),
+                              );
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kbpBlue900,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Catatan tambahan
+                      TextField(
+                        controller: noteController,
+                        decoration: InputDecoration(
+                          labelText: 'Catatan Awal Patroli (Opsional)',
+                          labelStyle: regularTextStyle(color: neutral600),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          hintText: 'Tambahkan catatan sebelum memulai patroli',
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                        maxLines: 2,
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Button baris
+                      Row(
+                        children: [
+                          // Tombol Batal
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: isSubmitting
+                                  ? null
+                                  : () async {
+                                      bool exit = await showDialog(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title: Text(
+                                            'Batalkan Memulai Patroli?',
+                                            style: boldTextStyle(size: 18),
+                                          ),
+                                          content: Text(
+                                            'Anda akan membatalkan memulai patroli. Yakin ingin keluar?',
+                                            style: regularTextStyle(size: 14),
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, false),
+                                              child: Text(
+                                                'Tidak',
+                                                style: mediumTextStyle(
+                                                    color: kbpBlue900),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, true),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: kbpBlue900,
+                                              ),
+                                              child: Text(
+                                                'Ya, Batalkan',
+                                                style: mediumTextStyle(
+                                                    color: Colors.white),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+
+                                      if (exit) {
+                                        Navigator.pop(dialogContext, false);
+                                      }
+                                    },
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: neutral700,
+                                side: BorderSide(color: neutral700),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: Text(
+                                'Batal',
+                                style: mediumTextStyle(color: neutral700),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+
+                          // Tombol Mulai Patroli
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: isSubmitting || capturedImage == null
+                                  ? null // Disable jika belum ada foto atau sedang submit
+                                  : () async {
+                                      setState(() {
+                                        isSubmitting = true;
+                                      });
+
+                                      try {
+                                        // Tampilkan overlay loading untuk mengunci layar
+                                        showDialog(
+                                          context: context,
+                                          barrierDismissible: false,
+                                          builder: (context) => WillPopScope(
+                                            onWillPop: () async => false,
+                                            child: Center(
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.all(16),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white,
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                child: Column(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    const CircularProgressIndicator(),
+                                                    const SizedBox(height: 16),
+                                                    Text(
+                                                      'Mengunggah foto...',
+                                                      style: mediumTextStyle(),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+
+                                        // Upload foto ke Firebase Storage
+                                        final fileName =
+                                            'initial_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+                                        // Upload foto ke Firebase Storage
+                                        final photoUrl =
+                                            await _uploadPhotoToFirebase(
+                                                capturedImage!, fileName);
+
+                                        // Menutup dialog loading
+                                        Navigator.of(context).pop();
+
+                                        // Update task dengan data laporan awal
+                                        context
+                                            .read<PatrolBloc>()
+                                            .add(UpdateTask(
+                                              taskId: widget.task.taskId,
+                                              updates: {
+                                                'initialReportPhotoUrl':
+                                                    photoUrl,
+                                                'initialReportNote':
+                                                    noteController.text
+                                                            .trim()
+                                                            .isNotEmpty
+                                                        ? noteController.text
+                                                            .trim()
+                                                        : null,
+                                                'initialReportTime':
+                                                    DateTime.now()
+                                                        .toIso8601String(),
+                                              },
+                                            ));
+
+                                        // Menampilkan pesan sukses dan menutup dialog
+                                        Navigator.pop(dialogContext, true);
+                                        result = true;
+
+                                        showCustomSnackbar(
+                                          context: context,
+                                          title: 'Laporan awal berhasil',
+                                          subtitle:
+                                              'Patroli akan segera dimulai',
+                                          type: SnackbarType.success,
+                                        );
+                                      } catch (e) {
+                                        // Menutup dialog loading
+                                        Navigator.of(context).pop();
+
+                                        setState(() {
+                                          isSubmitting = false;
+                                        });
+
+                                        print(
+                                            'Error submitting initial report: $e');
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(content: Text('Error: $e')),
+                                        );
+                                      }
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: successG500,
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: isSubmitting
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : Text(
+                                      'Mulai Patroli',
+                                      style: semiBoldTextStyle(
+                                          color: Colors.white),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    return result;
   }
 
   Future<void> _addRouteMarkers(List<List<double>> coordinates) async {
@@ -589,453 +1084,494 @@ class _MapScreenState extends State<MapScreen> {
   // }
 
   Future<void> _stopPatrol(BuildContext context, PatrolLoaded state) async {
-  final endTime = DateTime.now();
-  print('Stopping patrol at $endTime');
+    final endTime = DateTime.now();
+    print('Stopping patrol at $endTime');
 
-  // Convert route path
-  List<List<double>> convertedPath = [];
-  Map<String, dynamic> finalRoutePath = {};
+    // Convert route path
+    List<List<double>> convertedPath = [];
+    Map<String, dynamic> finalRoutePath = {};
 
-  try {
-    // Proses route path seperti sebelumnya
-    if (state.task?.routePath != null && state.task!.routePath is Map) {
-      finalRoutePath = Map<String, dynamic>.from(state.task!.routePath as Map);
-      // ...kode konversi yang sudah ada...
+    try {
+      // Proses route path seperti sebelumnya
+      if (state.task?.routePath != null && state.task!.routePath is Map) {
+        finalRoutePath =
+            Map<String, dynamic>.from(state.task!.routePath as Map);
+        // ...kode konversi yang sudah ada...
+      }
+
+      // Tambahkan _routePoints ke finalRoutePath
+      if (_routePoints.isNotEmpty) {
+        // ...kode yang sudah ada...
+      }
+    } catch (e) {
+      print('Error processing route path: $e');
+      // ...kode fallback yang sudah ada...
     }
 
-    // Tambahkan _routePoints ke finalRoutePath
-    if (_routePoints.isNotEmpty) {
-      // ...kode yang sudah ada...
+    // PERUBAHAN: Jangan langsung kirim StopPatrol, tampilkan dialog laporan akhir dulu
+    if (mounted) {
+      // Tampilkan dialog laporan akhir
+      final result =
+          await _showFinalReportDialog(context, state, endTime, finalRoutePath);
+
+      // Jika hasil dialog false, berarti user membatalkan proses
+      if (result != true) {
+        print('User canceled patrol ending process');
+        return;
+      }
+
+      // Jika sampai sini, berarti laporan akhir sudah disubmit dan patroli selesai
+      // Navigation ke PatrolSummaryScreen sudah ditangani di _showFinalReportDialog
     }
-  } catch (e) {
-    print('Error processing route path: $e');
-    // ...kode fallback yang sudah ada...
   }
-
-  // PERUBAHAN: Jangan langsung kirim StopPatrol, tampilkan dialog laporan akhir dulu
-  if (mounted) {
-    // Tampilkan dialog laporan akhir
-    final result = await _showFinalReportDialog(context, state, endTime, finalRoutePath);
-    
-    // Jika hasil dialog false, berarti user membatalkan proses
-    if (result != true) {
-      print('User canceled patrol ending process');
-      return;
-    }
-    
-    // Jika sampai sini, berarti laporan akhir sudah disubmit dan patroli selesai
-    // Navigation ke PatrolSummaryScreen sudah ditangani di _showFinalReportDialog
-  }
-}
 
 // Tambahkan fungsi baru untuk dialog laporan akhir
-Future<bool> _showFinalReportDialog(
-  BuildContext context,
-  PatrolLoaded state,
-  DateTime endTime,
-  Map<String, dynamic> finalRoutePath,
-) async {
-  File? capturedImage;
-  final noteController = TextEditingController();
-  bool isSubmitting = false;
-  bool result = false;
+  Future<bool> _showFinalReportDialog(
+    BuildContext context,
+    PatrolLoaded state,
+    DateTime endTime,
+    Map<String, dynamic> finalRoutePath,
+  ) async {
+    File? capturedImage;
+    final noteController = TextEditingController();
+    bool isSubmitting = false;
+    bool result = false;
 
-  await showDialog(
-    context: context,
-    barrierDismissible: false, // User tidak bisa tap di luar untuk tutup dialog
-    builder: (dialogContext) {
-      return StatefulBuilder(
-        builder: (context, setState) {
-          return WillPopScope(
-            onWillPop: () async {
-              // Tampilkan dialog konfirmasi jika user mencoba keluar
-              bool exitConfirmed = await showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: Text(
-                    'Batalkan Akhiri Patroli?',
-                    style: boldTextStyle(size: 18),
-                  ),
-                  content: Text(
-                    'Jika Anda keluar, patroli akan terus berlanjut. Yakin ingin keluar?',
-                    style: regularTextStyle(size: 14),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: Text(
-                        'Tidak',
-                        style: mediumTextStyle(color: kbpBlue900),
-                      ),
+    await showDialog(
+      context: context,
+      barrierDismissible:
+          false, // User tidak bisa tap di luar untuk tutup dialog
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return WillPopScope(
+              onWillPop: () async {
+                // Tampilkan dialog konfirmasi jika user mencoba keluar
+                bool exitConfirmed = await showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: Text(
+                      'Batalkan Akhiri Patroli?',
+                      style: boldTextStyle(size: 18),
                     ),
-                    ElevatedButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kbpBlue900,
-                      ),
-                      child: Text(
-                        'Ya, Lanjut Patroli',
-                        style: mediumTextStyle(color: Colors.white),
-                      ),
+                    content: Text(
+                      'Jika Anda keluar, patroli akan terus berlanjut. Yakin ingin keluar?',
+                      style: regularTextStyle(size: 14),
                     ),
-                  ],
-                ),
-              );
-              
-              return exitConfirmed;
-            },
-            child: Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Container(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Dialog title
-                    Row(
-                      children: [
-                        const Icon(Icons.task_alt, color: successG500, size: 24),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Akhiri Patroli',
-                                style: boldTextStyle(size: 18, color: kbpBlue900),
-                                textAlign: TextAlign.left,
-                              ),
-                              Text(
-                                'Ambil foto sebagai bukti patroli telah selesai',
-                                style: regularTextStyle(size: 14, color: neutral700),
-                                textAlign: TextAlign.left,
-                              ),
-                            ],
-                          ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: Text(
+                          'Tidak',
+                          style: mediumTextStyle(color: kbpBlue900),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    
-                    // Foto preview container
-                    Container(
-                      width: double.infinity,
-                      height: 200,
-                      decoration: BoxDecoration(
-                        color: kbpBlue100,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: kbpBlue300),
                       ),
-                      child: capturedImage == null
-                          ? Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.camera_alt,
-                                  size: 48,
-                                  color: kbpBlue700,
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Foto wajib diambil',
-                                  style: mediumTextStyle(color: kbpBlue700),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Pastikan lokasi terlihat dengan jelas',
-                                  style: regularTextStyle(color: kbpBlue700, size: 12),
-                                ),
-                              ],
-                            )
-                          : ClipRRect(
-                              borderRadius: BorderRadius.circular(11),
-                              child: Image.file(
-                                capturedImage!,
-                                width: double.infinity,
-                                height: 200,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Tombol ambil foto
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.camera_alt),
-                        label: Text(
-                          capturedImage == null ? 'Ambil Foto' : 'Ambil Ulang',
-                          style: mediumTextStyle(color: Colors.white),
-                        ),
-                        onPressed: () async {
-                          try {
-                            final ImagePicker picker = ImagePicker();
-                            final XFile? photo = await picker.pickImage(
-                              source: ImageSource.camera,
-                              preferredCameraDevice: CameraDevice.rear,
-                              maxWidth: 1024,
-                              maxHeight: 1024,
-                              imageQuality: 80,
-                            );
-                            
-                            if (photo != null) {
-                              setState(() {
-                                capturedImage = File(photo.path);
-                              });
-                            }
-                          } catch (e) {
-                            print('Error taking photo: $e');
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e')),
-                            );
-                          }
-                        },
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(context, true),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: kbpBlue900,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
+                        ),
+                        child: Text(
+                          'Ya, Lanjut Patroli',
+                          style: mediumTextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+
+                return exitConfirmed;
+              },
+              child: Dialog(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Dialog title
+                      Row(
+                        children: [
+                          const Icon(Icons.task_alt,
+                              color: successG500, size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Akhiri Patroli',
+                                  style: boldTextStyle(
+                                      size: 18, color: kbpBlue900),
+                                  textAlign: TextAlign.left,
+                                ),
+                                Text(
+                                  'Ambil foto sebagai bukti patroli telah selesai',
+                                  style: regularTextStyle(
+                                      size: 14, color: neutral700),
+                                  textAlign: TextAlign.left,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Foto preview container
+                      Container(
+                        width: double.infinity,
+                        height: 200,
+                        decoration: BoxDecoration(
+                          color: kbpBlue100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: kbpBlue300),
+                        ),
+                        child: capturedImage == null
+                            ? Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.camera_alt,
+                                    size: 48,
+                                    color: kbpBlue700,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'Foto wajib diambil',
+                                    style: mediumTextStyle(color: kbpBlue700),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Pastikan lokasi terlihat dengan jelas',
+                                    style: regularTextStyle(
+                                        color: kbpBlue700, size: 12),
+                                  ),
+                                ],
+                              )
+                            : ClipRRect(
+                                borderRadius: BorderRadius.circular(11),
+                                child: Image.file(
+                                  capturedImage!,
+                                  width: double.infinity,
+                                  height: 200,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Tombol ambil foto
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.camera_alt),
+                          label: Text(
+                            capturedImage == null
+                                ? 'Ambil Foto'
+                                : 'Ambil Ulang',
+                            style: mediumTextStyle(color: Colors.white),
+                          ),
+                          onPressed: () async {
+                            try {
+                              final ImagePicker picker = ImagePicker();
+                              final XFile? photo = await picker.pickImage(
+                                source: ImageSource.camera,
+                                preferredCameraDevice: CameraDevice.rear,
+                                maxWidth: 1024,
+                                maxHeight: 1024,
+                                imageQuality: 80,
+                              );
+
+                              if (photo != null) {
+                                setState(() {
+                                  capturedImage = File(photo.path);
+                                });
+                              }
+                            } catch (e) {
+                              print('Error taking photo: $e');
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Error: $e')),
+                              );
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kbpBlue900,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Catatan tambahan
+                      TextField(
+                        controller: noteController,
+                        decoration: InputDecoration(
+                          labelText: 'Catatan Patroli (Opsional)',
+                          labelStyle: regularTextStyle(color: neutral600),
+                          border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Catatan tambahan
-                    TextField(
-                      controller: noteController,
-                      decoration: InputDecoration(
-                        labelText: 'Catatan Patroli (Opsional)',
-                        labelStyle: regularTextStyle(color: neutral600),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        hintText: 'Tambahkan catatan tentang patroli Anda',
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                      ),
-                      maxLines: 2,
-                    ),
-                    const SizedBox(height: 24),
-                    
-                    // Button baris
-                    Row(
-                      children: [
-                        // Tombol Batal
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: isSubmitting
-                                ? null
-                                : () async {
-                                    bool exit = await showDialog(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        title: Text(
-                                          'Batalkan Akhiri Patroli?',
-                                          style: boldTextStyle(size: 18),
-                                        ),
-                                        content: Text(
-                                          'Jika Anda keluar, patroli akan terus berlanjut. Yakin ingin keluar?',
-                                          style: regularTextStyle(size: 14),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () => Navigator.pop(context, false),
-                                            child: Text(
-                                              'Tidak',
-                                              style: mediumTextStyle(color: kbpBlue900),
-                                            ),
-                                          ),
-                                          ElevatedButton(
-                                            onPressed: () => Navigator.pop(context, true),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: kbpBlue900,
-                                            ),
-                                            child: Text(
-                                              'Ya, Lanjut Patroli',
-                                              style: mediumTextStyle(color: Colors.white),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                    
-                                    if (exit) {
-                                      Navigator.pop(dialogContext, false);
-                                    }
-                                  },
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: neutral700,
-                              side: BorderSide(color: neutral700),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: Text(
-                              'Batal',
-                              style: mediumTextStyle(color: neutral700),
-                            ),
+                          hintText: 'Tambahkan catatan tentang patroli Anda',
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        
-                        // Tombol Selesaikan Patroli
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: isSubmitting || capturedImage == null
-                                ? null // Disable jika belum ada foto atau sedang submit
-                                : () async {
-                                    setState(() {
-                                      isSubmitting = true;
-                                    });
-                                    
-                                    try {
-                                      // Upload foto ke Firebase Storage
-                                      final fileName = 'final_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                                      
-                                      // Upload foto ke Firebase Storage
-                                      final photoUrl = await _uploadPhotoToFirebase(capturedImage!, fileName);
-                                      
-                                      // Kirim event stop patrol
-                                      context.read<PatrolBloc>().add(StopPatrol(
-                                            endTime: endTime,
-                                            distance: _totalDistance,
-                                            finalRoutePath: finalRoutePath,
-                                          ));
-                                          
-                                      // Beri jeda singkat untuk memastikan StopPatrol event diproses
-                                      await Future.delayed(const Duration(milliseconds: 300));
-                                      
-                                      // Kirim event submit final report
-                                      context.read<PatrolBloc>().add(
-                                        SubmitFinalReport(
-                                          photoUrl: photoUrl,
-                                          note: noteController.text.trim().isNotEmpty
-                                              ? noteController.text.trim()
-                                              : null,
-                                          reportTime: endTime,
+                        maxLines: 2,
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Button baris
+                      Row(
+                        children: [
+                          // Tombol Batal
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: isSubmitting
+                                  ? null
+                                  : () async {
+                                      bool exit = await showDialog(
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                          title: Text(
+                                            'Batalkan Akhiri Patroli?',
+                                            style: boldTextStyle(size: 18),
+                                          ),
+                                          content: Text(
+                                            'Jika Anda keluar, patroli akan terus berlanjut. Yakin ingin keluar?',
+                                            style: regularTextStyle(size: 14),
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, false),
+                                              child: Text(
+                                                'Tidak',
+                                                style: mediumTextStyle(
+                                                    color: kbpBlue900),
+                                              ),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, true),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: kbpBlue900,
+                                              ),
+                                              child: Text(
+                                                'Ya, Lanjut Patroli',
+                                                style: mediumTextStyle(
+                                                    color: Colors.white),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       );
-                                      
-                                      // Buat daftar koordinat untuk PatrolSummaryScreen
-                                      List<List<double>> convertedPath = [];
-                                      if (state.task?.routePath != null && state.task!.routePath is Map) {
-                                        final map = state.task!.routePath as Map<String, dynamic>;
-                                        final sortedEntries = map.entries.toList()
-                                          ..sort((a, b) => (a.value['timestamp'] as String)
-                                              .compareTo(b.value['timestamp'] as String));
 
-                                        for (var entry in sortedEntries) {
-                                          if (entry.value is! Map || entry.value['coordinates'] == null) {
-                                            continue;
-                                          }
-
-                                          final coordinates = entry.value['coordinates'] as List;
-                                          if (coordinates.length >= 2) {
-                                            convertedPath.add([
-                                              (coordinates[0] as num).toDouble(),
-                                              (coordinates[1] as num).toDouble(),
-                                            ]);
-                                          }
-                                        }
+                                      if (exit) {
+                                        Navigator.pop(dialogContext, false);
                                       }
+                                    },
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: neutral700,
+                                side: BorderSide(color: neutral700),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: Text(
+                                'Batal',
+                                style: mediumTextStyle(color: neutral700),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
 
-                                      // Navigasi ke PatrolSummaryScreen
-                                      if (mounted) {
-                                        Navigator.pop(dialogContext, true); // Close dialog dengan hasil true
-                                        
-                                        Navigator.pushReplacement(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => PatrolSummaryScreen(
-                                              task: widget.task,
-                                              routePath: convertedPath,
-                                              startTime: state.task?.startTime ?? DateTime.now(),
+                          // Tombol Selesaikan Patroli
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: isSubmitting || capturedImage == null
+                                  ? null // Disable jika belum ada foto atau sedang submit
+                                  : () async {
+                                      setState(() {
+                                        isSubmitting = true;
+                                      });
+
+                                      try {
+                                        // Upload foto ke Firebase Storage
+                                        final fileName =
+                                            'final_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+                                        // Upload foto ke Firebase Storage
+                                        final photoUrl =
+                                            await _uploadPhotoToFirebase(
+                                                capturedImage!, fileName);
+
+                                        // Kirim event stop patrol
+                                        context
+                                            .read<PatrolBloc>()
+                                            .add(StopPatrol(
                                               endTime: endTime,
                                               distance: _totalDistance,
-                                              finalReportPhotoUrl: photoUrl,
+                                              finalRoutePath: finalRoutePath,
+                                            ));
+
+                                        // Beri jeda singkat untuk memastikan StopPatrol event diproses
+                                        await Future.delayed(
+                                            const Duration(milliseconds: 300));
+
+                                        // Kirim event submit final report
+                                        context.read<PatrolBloc>().add(
+                                              SubmitFinalReport(
+                                                photoUrl: photoUrl,
+                                                note: noteController.text
+                                                        .trim()
+                                                        .isNotEmpty
+                                                    ? noteController.text.trim()
+                                                    : null,
+                                                reportTime: endTime,
+                                              ),
+                                            );
+
+                                        // Buat daftar koordinat untuk PatrolSummaryScreen
+                                        List<List<double>> convertedPath = [];
+                                        if (state.task?.routePath != null &&
+                                            state.task!.routePath is Map) {
+                                          final map = state.task!.routePath
+                                              as Map<String, dynamic>;
+                                          final sortedEntries = map.entries
+                                              .toList()
+                                            ..sort((a, b) =>
+                                                (a.value['timestamp'] as String)
+                                                    .compareTo(
+                                                        b.value['timestamp']
+                                                            as String));
+
+                                          for (var entry in sortedEntries) {
+                                            if (entry.value is! Map ||
+                                                entry.value['coordinates'] ==
+                                                    null) {
+                                              continue;
+                                            }
+
+                                            final coordinates = entry
+                                                .value['coordinates'] as List;
+                                            if (coordinates.length >= 2) {
+                                              convertedPath.add([
+                                                (coordinates[0] as num)
+                                                    .toDouble(),
+                                                (coordinates[1] as num)
+                                                    .toDouble(),
+                                              ]);
+                                            }
+                                          }
+                                        }
+
+                                        // Navigasi ke PatrolSummaryScreen
+                                        if (mounted) {
+                                          Navigator.pop(dialogContext,
+                                              true); // Close dialog dengan hasil true
+
+                                          Navigator.pushReplacement(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  PatrolSummaryScreen(
+                                                task: widget.task,
+                                                routePath: convertedPath,
+                                                startTime:
+                                                    state.task?.startTime ??
+                                                        DateTime.now(),
+                                                endTime: endTime,
+                                                distance: _totalDistance,
+                                                finalReportPhotoUrl: photoUrl,
+                                              ),
                                             ),
-                                          ),
+                                          );
+                                        }
+
+                                        // Set result ke true untuk menandakan proses selesai
+                                        result = true;
+                                      } catch (e) {
+                                        setState(() {
+                                          isSubmitting = false;
+                                        });
+
+                                        print(
+                                            'Error submitting final report: $e');
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(content: Text('Error: $e')),
                                         );
                                       }
-                                      
-                                      // Set result ke true untuk menandakan proses selesai
-                                      result = true;
-                                    } catch (e) {
-                                      setState(() {
-                                        isSubmitting = false;
-                                      });
-                                      
-                                      print('Error submitting final report: $e');
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Error: $e')),
-                                      );
-                                    }
-                                  },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: successG500,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: successG500,
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                               ),
-                            ),
-                            child: isSubmitting
-                                ? const SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 2,
+                              child: isSubmitting
+                                  ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : Text(
+                                      'Selesaikan Patroli',
+                                      style: semiBoldTextStyle(
+                                          color: Colors.white),
                                     ),
-                                  )
-                                : Text(
-                                    'Selesaikan Patroli',
-                                    style: semiBoldTextStyle(color: Colors.white),
-                                  ),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          );
-        },
-      );
-    },
-  );
-  
-  return result;
-}
+            );
+          },
+        );
+      },
+    );
+
+    return result;
+  }
 
 // Metode untuk upload foto ke Firebase Storage
-Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
-  try {
-    // Reference to Firebase Storage
-    final storageRef = FirebaseStorage.instance.ref();
-    final photoRef = storageRef.child('patrol_reports/$fileName');
-    
-    // Upload foto
-    await photoRef.putFile(imageFile);
-    
-    // Dapatkan URL download
-    final downloadUrl = await photoRef.getDownloadURL();
-    return downloadUrl;
-  } catch (e) {
-    print('Error uploading photo: $e');
-    throw Exception('Failed to upload photo: $e');
+  Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
+    try {
+      // Reference to Firebase Storage
+      final storageRef = FirebaseStorage.instance.ref();
+      final photoRef = storageRef.child('patrol_reports/$fileName');
+
+      // Upload foto
+      await photoRef.putFile(imageFile);
+
+      // Dapatkan URL download
+      final downloadUrl = await photoRef.getDownloadURL();
+      return downloadUrl;
+    } catch (e) {
+      print('Error uploading photo: $e');
+      throw Exception('Failed to upload photo: $e');
+    }
   }
-}
 
   void _startPatrol(BuildContext context) {
     final startTime = DateTime.now();
@@ -1064,7 +1600,7 @@ Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
     _totalDistance = 0; // Reset distance
     _lastPosition = null;
     _startLocationTracking(); // Start location tracking
-    print('ini debug patroli udah mulai');
+    print('Patroli telah dimulai setelah laporan awal');
 
     widget.onStart();
   }
@@ -1227,272 +1763,311 @@ Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
       }
     }
 
+    // Buat dialog di dalam showDialog
     showDialog(
       context: context,
+      // PENTING: Set ini ke true untuk memungkinkan tap di luar menutup dialog
+      barrierDismissible: true,
       builder: (context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: StatefulBuilder(
-            builder: (context, setState) {
-              return Padding(
-                padding: const EdgeInsets.all(24.0),
+        return StatefulBuilder(
+          builder: (context, setState) {
+            // 1. Gunakan SingleChildScrollView untuk memungkinkan scrolling saat keyboard muncul
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              // 2. Gunakan insetPadding untuk memastikan dialog tidak terlalu besar
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              child: Container(
+                // 3. Batasi ukuran dialog
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.8,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Title
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Laporan Kejadian',
-                          style: boldTextStyle(size: 18, color: kbpBlue900),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, color: kbpBlue900),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            selectedPhotos.clear();
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Input Kejadian
-                    Text(
-                      'Kejadian',
-                      style: semiBoldTextStyle(size: 14),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: kejadianController,
-                      decoration: InputDecoration(
-                        hintText: 'Judul kejadian...',
-                        hintStyle: regularTextStyle(color: Colors.grey),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: kbpBlue300),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: kbpBlue300),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide:
-                              const BorderSide(color: kbpBlue900, width: 2),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 14),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Input Catatan
-                    Text(
-                      'Catatan',
-                      style: semiBoldTextStyle(size: 14),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: catatanController,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        hintText: 'Deskripsi kejadian...',
-                        hintStyle: regularTextStyle(color: Colors.grey),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: kbpBlue300),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: kbpBlue300),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide:
-                              const BorderSide(color: kbpBlue900, width: 2),
-                        ),
-                        contentPadding: const EdgeInsets.all(16),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Bukti Kejadian
-                    Text(
-                      'Bukti Kejadian',
-                      style: semiBoldTextStyle(size: 14),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      height: 100,
-                      decoration: BoxDecoration(
-                        border: Border.all(color: kbpBlue300),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      padding: const EdgeInsets.all(8),
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
+                    // 4. Header tetap di atas
+                    Padding(
+                      padding: const EdgeInsets.only(
+                          top: 24, left: 24, right: 24, bottom: 0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          // Tombol untuk menambah foto
-                          GestureDetector(
-                            onTap: () async {
-                              await pickImagesFromCamera();
-                              setState(() {}); // Pastikan dialog diperbarui
-                            },
-                            child: Container(
-                              width: 80,
-                              margin: const EdgeInsets.only(right: 8),
-                              decoration: BoxDecoration(
-                                border: Border.all(color: kbpBlue900),
-                                borderRadius: BorderRadius.circular(8),
-                                color: kbpBlue100,
-                              ),
-                              child: const Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.camera_alt,
-                                    size: 32,
-                                    color: kbpBlue900,
-                                  ),
-                                  SizedBox(height: 4),
-                                  Text(
-                                    'Tambah Foto',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: kbpBlue900,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ],
-                              ),
-                            ),
+                          Text(
+                            'Laporan Kejadian',
+                            style: boldTextStyle(size: 18, color: kbpBlue900),
                           ),
-
-                          // Foto yang dipilih
-                          ...selectedPhotos.map((photo) {
-                            return Container(
-                              width: 80,
-                              height: 80,
-                              margin: const EdgeInsets.only(right: 8),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: kbpBlue300),
-                              ),
-                              child: Stack(
-                                children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(7),
-                                    child: Image.file(
-                                      photo,
-                                      width: 80,
-                                      height: 80,
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
-                                  Positioned(
-                                    top: 4,
-                                    right: 4,
-                                    child: GestureDetector(
-                                      onTap: () {
-                                        setState(() {
-                                          selectedPhotos.remove(photo);
-                                        });
-                                      },
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: Colors.white.withOpacity(0.7),
-                                        ),
-                                        padding: const EdgeInsets.all(4),
-                                        child: const Icon(
-                                          Icons.close,
-                                          color: dangerR300,
-                                          size: 16,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }).toList(),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: kbpBlue900),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              selectedPhotos.clear();
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
 
-                    // Button Kirim Laporan
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          if (kejadianController.text.isNotEmpty &&
-                              catatanController.text.isNotEmpty &&
-                              selectedPhotos.isNotEmpty) {
-                            // Simpan semua foto ke Firebase Storage
-                            final report = Report(
-                              id: DateTime.now()
-                                  .millisecondsSinceEpoch
-                                  .toString(),
-                              title: kejadianController.text,
-                              description: catatanController.text,
-                              photoUrl: selectedPhotos
-                                  .map((photo) => photo.path)
-                                  .join(','), // Gabungkan path foto
-                              timestamp: DateTime.now(),
-                              latitude: userCurrentLocation?.latitude ?? 0.0,
-                              longitude: userCurrentLocation?.longitude ?? 0.0,
-                              taskId: widget.task.taskId,
-                            );
+                    // 5. Konten scrollable
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Input Kejadian
+                            Text(
+                              'Kejadian',
+                              style: semiBoldTextStyle(size: 14),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: kejadianController,
+                              decoration: InputDecoration(
+                                hintText: 'Judul kejadian...',
+                                hintStyle: regularTextStyle(color: Colors.grey),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                      const BorderSide(color: kbpBlue300),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                      const BorderSide(color: kbpBlue300),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                      color: kbpBlue900, width: 2),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 14),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
 
-                            context
-                                .read<ReportBloc>()
-                                .add(CreateReportEvent(report));
-                            showCustomSnackbar(
-                              context: context,
-                              title: 'Laporan berhasil dikirim',
-                              subtitle: 'Terima kasih atas laporan Anda',
-                              type: SnackbarType.success,
-                            );
-                            selectedPhotos.clear();
-                            kejadianController.clear();
-                            catatanController.clear();
-                            Navigator.pop(context);
-                          } else {
-                            showCustomSnackbar(
-                              context: context,
-                              title: 'Data belum lengkap',
-                              subtitle: 'Silakan isi semua data laporan',
-                              type: SnackbarType.danger,
-                            );
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kbpBlue900,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          elevation: 2,
-                        ),
-                        child: Text(
-                          'Kirim Laporan',
-                          style:
-                              semiBoldTextStyle(size: 16, color: Colors.white),
+                            // Input Catatan
+                            Text(
+                              'Catatan',
+                              style: semiBoldTextStyle(size: 14),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: catatanController,
+                              maxLines: 3,
+                              decoration: InputDecoration(
+                                hintText: 'Deskripsi kejadian...',
+                                hintStyle: regularTextStyle(color: Colors.grey),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                      const BorderSide(color: kbpBlue300),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                      const BorderSide(color: kbpBlue300),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                      color: kbpBlue900, width: 2),
+                                ),
+                                contentPadding: const EdgeInsets.all(16),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Bukti Kejadian
+                            Text(
+                              'Bukti Kejadian',
+                              style: semiBoldTextStyle(size: 14),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              height: 100,
+                              decoration: BoxDecoration(
+                                border: Border.all(color: kbpBlue300),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.all(8),
+                              child: ListView(
+                                scrollDirection: Axis.horizontal,
+                                children: [
+                                  // Tombol untuk menambah foto
+                                  GestureDetector(
+                                    onTap: () async {
+                                      await pickImagesFromCamera();
+                                      setState(
+                                          () {}); // Pastikan dialog diperbarui
+                                    },
+                                    child: Container(
+                                      width: 80,
+                                      margin: const EdgeInsets.only(right: 8),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: kbpBlue900),
+                                        borderRadius: BorderRadius.circular(8),
+                                        color: kbpBlue100,
+                                      ),
+                                      child: const Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.camera_alt,
+                                            size: 32,
+                                            color: kbpBlue900,
+                                          ),
+                                          SizedBox(height: 4),
+                                          Text(
+                                            'Tambah Foto',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: kbpBlue900,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+
+                                  // Foto yang dipilih
+                                  ...selectedPhotos.map((photo) {
+                                    return Container(
+                                      width: 80,
+                                      height: 80,
+                                      margin: const EdgeInsets.only(right: 8),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: kbpBlue300),
+                                      ),
+                                      child: Stack(
+                                        children: [
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(7),
+                                            child: Image.file(
+                                              photo,
+                                              width: 80,
+                                              height: 80,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: 4,
+                                            right: 4,
+                                            child: GestureDetector(
+                                              onTap: () {
+                                                setState(() {
+                                                  selectedPhotos.remove(photo);
+                                                });
+                                              },
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: Colors.white
+                                                      .withOpacity(0.7),
+                                                ),
+                                                padding:
+                                                    const EdgeInsets.all(4),
+                                                child: const Icon(
+                                                  Icons.close,
+                                                  color: dangerR300,
+                                                  size: 16,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+
+                            // Button Kirim Laporan
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  if (kejadianController.text.isNotEmpty &&
+                                      catatanController.text.isNotEmpty &&
+                                      selectedPhotos.isNotEmpty) {
+                                    // Simpan semua foto ke Firebase Storage
+                                    final report = Report(
+                                      id: DateTime.now()
+                                          .millisecondsSinceEpoch
+                                          .toString(),
+                                      title: kejadianController.text,
+                                      description: catatanController.text,
+                                      photoUrl: selectedPhotos
+                                          .map((photo) => photo.path)
+                                          .join(','), // Gabungkan path foto
+                                      timestamp: DateTime.now(),
+                                      latitude:
+                                          userCurrentLocation?.latitude ?? 0.0,
+                                      longitude:
+                                          userCurrentLocation?.longitude ?? 0.0,
+                                      taskId: widget.task.taskId,
+                                    );
+
+                                    context
+                                        .read<ReportBloc>()
+                                        .add(CreateReportEvent(report));
+                                    showCustomSnackbar(
+                                      context: context,
+                                      title: 'Laporan berhasil dikirim',
+                                      subtitle:
+                                          'Terima kasih atas laporan Anda',
+                                      type: SnackbarType.success,
+                                    );
+                                    selectedPhotos.clear();
+                                    kejadianController.clear();
+                                    catatanController.clear();
+                                    Navigator.pop(context);
+                                  } else {
+                                    showCustomSnackbar(
+                                      context: context,
+                                      title: 'Data belum lengkap',
+                                      subtitle:
+                                          'Silakan isi semua data laporan',
+                                      type: SnackbarType.danger,
+                                    );
+                                  }
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: kbpBlue900,
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 16),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  elevation: 2,
+                                ),
+                                child: Text(
+                                  'Kirim Laporan',
+                                  style: semiBoldTextStyle(
+                                      size: 16, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ],
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -1862,7 +2437,7 @@ Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
                               ],
                             ),
 
-                            // Tombol kanan - aksi utama
+                            // Dalam bagian build method, ganti bagian tombol dengan ini:
                             Row(
                               children: [
                                 // Tombol laporan (hanya saat patroli aktif)
@@ -1874,97 +2449,8 @@ Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
                                     tooltip: 'Lapor Kejadian',
                                   ),
                                 const SizedBox(width: 12),
-                                // Tombol mulai/stop
-                                // Perbaikan tombol longpress dengan tooltip
-
-                                // Tombol mulai/stop
-                                GestureDetector(
-                                  onTap: () {
-                                    // Tampilkan tooltip manual saat tap biasa
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          isPatrolling
-                                              ? 'Tekan 3 detik untuk selesai'
-                                              : 'Tekan 3 detik untuk mulai',
-                                          style: mediumTextStyle(
-                                              color: Colors.white),
-                                        ),
-                                        backgroundColor: isPatrolling
-                                            ? dangerR300
-                                            : kbpBlue900,
-                                        duration: const Duration(seconds: 2),
-                                        behavior: SnackBarBehavior.floating,
-                                        margin: const EdgeInsets.all(16),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  onLongPressStart: (_) {
-                                    _startLongPressAnimation(context, state);
-                                  },
-                                  onLongPressEnd: (_) {
-                                    _resetLongPressAnimation();
-                                  },
-                                  child: Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      // Progress indicator
-                                      TweenAnimationBuilder<double>(
-                                        tween: Tween<double>(
-                                          begin: 0.0,
-                                          end: _longPressProgress,
-                                        ),
-                                        duration:
-                                            const Duration(milliseconds: 50),
-                                        builder: (context, value, child) {
-                                          return SizedBox(
-                                            width: 80,
-                                            height: 80,
-                                            child: CircularProgressIndicator(
-                                              value: value,
-                                              strokeWidth: 6.0,
-                                              color: isPatrolling
-                                                  ? dangerR300
-                                                  : successG300,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                      // Tombol
-                                      Container(
-                                        width: 70,
-                                        height: 70,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: isPatrolling
-                                              ? dangerR300
-                                              : successG300,
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color:
-                                                  Colors.black.withOpacity(0.3),
-                                              blurRadius: 8,
-                                              offset: const Offset(0, 4),
-                                            ),
-                                          ],
-                                        ),
-                                        child: Center(
-                                          child: Icon(
-                                            isPatrolling
-                                                ? Icons.stop
-                                                : Icons.play_arrow,
-                                            color: Colors.white,
-                                            size: 32,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                // Tombol mulai/stop dengan UI yang lebih baik
+                                _buildPatrolButtonUI(isPatrolling),
                               ],
                             ),
                           ],

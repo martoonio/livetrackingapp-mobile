@@ -579,19 +579,38 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                             icon: const Icon(Icons.map_outlined,
                                 color: kbpBlue700),
                             onPressed: () async {
-                              final url =
-                                  'https://www.google.com/maps/search/?api=1&query=${report.latitude},${report.longitude}';
-                              if (await canLaunch(url)) {
-                                await launch(url);
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content:
-                                          Text('Tidak dapat membuka peta')),
-                                );
-                              }
+                              // Tutup dialog detail laporan dulu
+                              Navigator.pop(context);
+
+                              // Pindah ke tab peta (tab index 0)
+                              _tabController!.animateTo(0);
+
+                              // Tunggu sebentar agar UI terupdate
+                              await Future.delayed(
+                                  const Duration(milliseconds: 300));
+
+                              // Zoom ke lokasi laporan
+                              _mapController?.animateCamera(
+                                CameraUpdate.newLatLngZoom(
+                                  LatLng(report.latitude, report.longitude),
+                                  18, // Zoom level yang cukup detail
+                                ),
+                              );
+
+                              // Opsional: tampilkan snackbar sebagai feedback
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Menampilkan lokasi laporan di peta',
+                                    style: mediumTextStyle(color: Colors.white),
+                                  ),
+                                  backgroundColor: kbpBlue900,
+                                  duration: const Duration(seconds: 2),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
                             },
-                            tooltip: 'Lihat di Google Maps',
+                            tooltip: 'Lihat di Peta Patroli',
                           ),
                         ],
                       ),
@@ -1114,131 +1133,12 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
 // Final Report Photo
           if (widget.task.finalReportPhotoUrl != null &&
               widget.task.finalReportPhotoUrl!.isNotEmpty)
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.photo_camera, color: kbpBlue900),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Foto Laporan Akhir',
-                          style: semiBoldTextStyle(size: 16),
-                        ),
-                        const Spacer(),
-                        if (widget.task.finalReportTime != null)
-                          Text(
-                            timeFormatter.format(widget.task.finalReportTime!),
-                            style:
-                                regularTextStyle(size: 12, color: neutral600),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    GestureDetector(
-                      onTap: () => _showFullScreenImage(
-                          widget.task.finalReportPhotoUrl!),
-                      child: Container(
-                        width: double.infinity,
-                        height: 200,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          color: neutral200,
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Image.network(
-                                widget.task.finalReportPhotoUrl!,
-                                fit: BoxFit.cover,
-                                loadingBuilder:
-                                    (context, child, loadingProgress) {
-                                  if (loadingProgress == null) return child;
-                                  return Center(
-                                    child: CircularProgressIndicator(
-                                      value:
-                                          loadingProgress.expectedTotalBytes !=
-                                                  null
-                                              ? loadingProgress
-                                                      .cumulativeBytesLoaded /
-                                                  loadingProgress
-                                                      .expectedTotalBytes!
-                                              : null,
-                                      color: kbpBlue700,
-                                    ),
-                                  );
-                                },
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Center(
-                                    child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(
-                                          Icons.broken_image,
-                                          size: 48,
-                                          color: neutral500,
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Gagal memuat gambar',
-                                          style: mediumTextStyle(
-                                              color: neutral600),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                              // Overlay dengan ikon zoom
-                              Positioned(
-                                right: 8,
-                                bottom: 8,
-                                child: Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.6),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: const Icon(
-                                    Icons.zoom_in,
-                                    color: Colors.white,
-                                    size: 20,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (widget.task.finalReportNote != null &&
-                        widget.task.finalReportNote!.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        'Catatan:',
-                        style: mediumTextStyle(size: 14),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        widget.task.finalReportNote!,
-                        style: regularTextStyle(size: 14, color: neutral700),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+            _buildReportPhoto(widget.task.finalReportPhotoUrl!),
+          const SizedBox(height: 16),
 
+          if (widget.task.initialReportPhotoUrl != null &&
+              widget.task.initialReportPhotoUrl!.isNotEmpty)
+            _buildReportPhoto(widget.task.initialReportPhotoUrl!),
           const SizedBox(height: 16),
 
           // Progress card
@@ -1330,6 +1230,125 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildReportPhoto(String imageUrl) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.photo_camera, color: kbpBlue900),
+                const SizedBox(width: 8),
+                Text(
+                  'Foto Laporan Akhir',
+                  style: semiBoldTextStyle(size: 16),
+                ),
+                const Spacer(),
+                if (widget.task.finalReportTime != null)
+                  Text(
+                    timeFormatter.format(widget.task.finalReportTime!),
+                    style: regularTextStyle(size: 12, color: neutral600),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () =>
+                  _showFullScreenImage(widget.task.finalReportPhotoUrl!),
+              child: Container(
+                width: double.infinity,
+                height: 200,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  color: neutral200,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.network(
+                        imageUrl,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Center(
+                            child: CircularProgressIndicator(
+                              value: loadingProgress.expectedTotalBytes != null
+                                  ? loadingProgress.cumulativeBytesLoaded /
+                                      loadingProgress.expectedTotalBytes!
+                                  : null,
+                              color: kbpBlue700,
+                            ),
+                          );
+                        },
+                        errorBuilder: (context, error, stackTrace) {
+                          return Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.broken_image,
+                                  size: 48,
+                                  color: neutral500,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Gagal memuat gambar',
+                                  style: mediumTextStyle(color: neutral600),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      // Overlay dengan ikon zoom
+                      Positioned(
+                        right: 8,
+                        bottom: 8,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.6),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Icon(
+                            Icons.zoom_in,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (widget.task.finalReportNote != null &&
+                widget.task.finalReportNote!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Catatan:',
+                style: mediumTextStyle(size: 14),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                widget.task.finalReportNote!,
+                style: regularTextStyle(size: 14, color: neutral700),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

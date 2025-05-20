@@ -43,6 +43,9 @@ class PatrolTask {
   String? finalReportPhotoUrl;
   final String? finalReportNote;
   final DateTime? finalReportTime;
+  String? initialReportPhotoUrl;
+  final String? initialReportNote;
+  final DateTime? initialReportTime;
 
   PatrolTask({
     required this.taskId,
@@ -71,6 +74,9 @@ class PatrolTask {
     this.finalReportPhotoUrl,
     this.finalReportNote,
     this.finalReportTime,
+    this.initialReportPhotoUrl,
+    this.initialReportNote,
+    this.initialReportTime,
   }) {
     _officerName = officerName;
     _clusterName = clusterName;
@@ -120,6 +126,9 @@ class PatrolTask {
       finalReportPhotoUrl: json['finalReportPhotoUrl'] as String?,
       finalReportNote: json['finalReportNote'] as String?,
       finalReportTime: _parseDateTime(json['finalReportTime']),
+      initialReportPhotoUrl: json['initialReportPhotoUrl'] as String?,
+      initialReportNote: json['initialReportNote'] as String?,
+      initialReportTime: _parseDateTime(json['initialReportTime']),
     );
   }
 
@@ -146,6 +155,9 @@ class PatrolTask {
       'finalReportPhotoUrl': finalReportPhotoUrl,
       'finalReportNote': finalReportNote,
       'finalReportTime': finalReportTime?.toIso8601String(),
+      'initialReportPhotoUrl': initialReportPhotoUrl,
+      'initialReportNote': initialReportNote,
+      'initialReportTime': initialReportTime?.toIso8601String(),
     };
   }
 
@@ -467,6 +479,10 @@ class PatrolTask {
     String? finalReportPhotoUrl,
     String? finalReportNote,
     DateTime? finalReportTime,
+
+    String? initialReportPhotoUrl,
+    String? initialReportNote,
+    DateTime? initialReportTime,
   }) {
     return PatrolTask(
       taskId: taskId ?? this.taskId,
@@ -495,6 +511,10 @@ class PatrolTask {
       finalReportPhotoUrl: finalReportPhotoUrl ?? this.finalReportPhotoUrl,
       finalReportNote: finalReportNote ?? this.finalReportNote,
       finalReportTime: finalReportTime ?? this.finalReportTime,
+      initialReportPhotoUrl:
+          initialReportPhotoUrl ?? this.initialReportPhotoUrl,
+      initialReportNote: initialReportNote ?? this.initialReportNote,
+      initialReportTime: initialReportTime ?? this.initialReportTime,
     );
   }
 

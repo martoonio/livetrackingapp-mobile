@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
+import 'package:livetrackingapp/presentation/auth/login_screen.dart';
 import 'package:livetrackingapp/presentation/component/map_section.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'package:lottie/lottie.dart' as lottie;
@@ -113,6 +114,8 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
       // Menunggu sebentar untuk memastikan event diproses
       await Future.delayed(const Duration(milliseconds: 500));
 
+      // ke login screen
+
       setState(() {
         _isCreating = false;
       });
@@ -126,7 +129,13 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
         type: SnackbarType.success,
       );
 
-      Navigator.pop(context); // Kembali ke halaman sebelumnya
+      // Navigator.pop(context);
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const LoginScreen(),
+        ),
+      );
     } catch (e) {
       setState(() {
         _isCreating = false;

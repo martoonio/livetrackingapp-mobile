@@ -611,6 +611,8 @@ class RouteRepositoryImpl implements RouteRepository {
         'updated_at': now,
       });
 
+      await firebaseAuth.signOut();
+
       return;
     } catch (e) {
       print('Error creating cluster account: $e');
