@@ -423,7 +423,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
             'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(_assignedStartTime)}',
         patrolTime: DateFormat('dd/MM/yyyy - HH:mm').format(_assignedStartTime),
       );
-
+      print('Notifikasi terkirim ke petugas $_selectedOfficerId');
       setState(() {
         _isCreating = false;
       });

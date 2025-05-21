@@ -302,6 +302,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
           ? Map<String, dynamic>.from(data['route_path'] as Map)
           : null,
       clusterId: data['clusterId']?.toString() ?? '',
+      timeliness: data['timeliness']?.toString(),
       mockLocationDetected: data['mockLocationDetected'] == true,
       mockLocationCount: data['mockLocationCount'] is num
           ? (data['mockLocationCount'] as num).toInt()
@@ -401,7 +402,8 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
             markerId: MarkerId(taskId),
             position: lastPosition,
             infoWindow: InfoWindow(
-              title: task.officerName,
+              title:
+                  '${task.officerName}${task.timeliness != null ? " (${getTimelinessText(task.timeliness)})" : ""}',
               snippet:
                   'Cluster: ${_clusterNames[task.clusterId] ?? task.clusterId.substring(0, Math.min(8, task.clusterId.length))}, Jarak: ${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
             ),
@@ -569,7 +571,25 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
+              if (task.timeliness != null) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    buildTimelinessIndicator(task.timeliness),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        getTimelinessDescription(task.timeliness),
+                        style: regularTextStyle(
+                          size: 12,
+                          color: getTimelinessColor(task.timeliness),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 12),
               const Divider(),
               const SizedBox(height: 16),
               Row(
@@ -745,7 +765,6 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
       ),
       body: Stack(
         children: [
-
           GoogleMap(
             initialCameraPosition: const CameraPosition(
               target: LatLng(-6.8859, 107.6158),
@@ -762,7 +781,6 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
               _mapController.complete(controller);
             },
           ),
-
           if (_isLoading)
             Container(
               color: Colors.black.withOpacity(0.5),
@@ -774,7 +792,6 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                 ),
               ),
             ),
-
           if (_showLegend)
             Positioned(
               top: 16,
@@ -830,7 +847,6 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-
                       Flexible(
                         child: _clusterNames.isEmpty
                             ? Center(
@@ -877,9 +893,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                                 },
                               ),
                       ),
-
                       const Divider(),
-
                       Row(
                         children: [
                           Icon(Icons.people, size: 14, color: kbpBlue900),
@@ -890,9 +904,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                           ),
                         ],
                       ),
-
                       const SizedBox(height: 8),
-
                       Row(
                         children: [
                           Icon(Icons.refresh, size: 14, color: kbpBlue900),
@@ -909,11 +921,9 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                 ),
               ),
             ),
-
           if (!_isLoading && _activeTasks.isEmpty)
             Container(
-              color: Colors.black
-                  .withOpacity(0.7),
+              color: Colors.black.withOpacity(0.7),
               width: double.infinity,
               height: double.infinity,
               child: Center(

@@ -213,8 +213,8 @@
 
 //     _positionStreamSubscription = Geolocator.getPositionStream(
 //       locationSettings: const LocationSettings(
-//         accuracy: LocationAccuracy.high,
-//         distanceFilter: 10, // Update lokasi setiap 10 meter
+//         accuracy: LocationAccuracy.best,
+//         distanceFilter: 5, // Update lokasi setiap 10 meter
 //       ),
 //     ).listen(
 //       (Position position) {
@@ -321,8 +321,8 @@
 //     _positionStreamSubscription?.cancel();
 //     _positionStreamSubscription = Geolocator.getPositionStream(
 //       locationSettings: const LocationSettings(
-//         accuracy: LocationAccuracy.high,
-//         distanceFilter: 10,
+//         accuracy: LocationAccuracy.best,
+//         distanceFilter: 5,
 //       ),
 //     ).listen(
 //       (Position position) {

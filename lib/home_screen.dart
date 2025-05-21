@@ -35,10 +35,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadUserData();
   }
 
-  // Improved _loadUserData
-
-  // Perbaiki metode _loadUserData() untuk memastikan data dimuat dengan benar
-
   Future<void> _loadUserData() async {
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) return;
@@ -52,20 +48,15 @@ class _HomeScreenState extends State<HomeScreen> {
       print(
           'Loading data for user: ${_currentUser!.id}, role: ${_currentUser!.role}');
 
-      // Load patrol history
       if (_currentUser!.role == 'patrol') {
-        // Perbaikan 1: Untuk user cluster, muat tugas dengan metode yang tepat
         await _loadClusterOfficerTasks();
       } else {
-        // Perbaikan 2: Load data untuk petugas individu dengan PatrolBloc
         print('Loading patrol data for officer');
 
-        // Tambahkan event untuk memuat riwayat patroli
         context
             .read<PatrolBloc>()
             .add(LoadPatrolHistory(userId: _currentUser!.id));
 
-        // First check if there's an ongoing patrol
         final currentTask = await context
             .read<PatrolBloc>()
             .repository
@@ -74,10 +65,8 @@ class _HomeScreenState extends State<HomeScreen> {
           print(
               'Found current task: ${currentTask.taskId}, status: ${currentTask.status}');
 
-          // Add the task to the bloc
           context.read<PatrolBloc>().add(UpdateCurrentTask(task: currentTask));
 
-          // If the task is ongoing, update the state to reflect that
           if (currentTask.status == 'ongoing' ||
               currentTask.status == 'in_progress' ||
               currentTask.status == 'active') {
@@ -92,7 +81,6 @@ class _HomeScreenState extends State<HomeScreen> {
           print('No current task found');
         }
 
-        // Start task stream to listen for new tasks
         _startTaskStream();
       }
     } catch (e, stack) {
@@ -115,7 +103,6 @@ class _HomeScreenState extends State<HomeScreen> {
       final clusterId = _currentUser!.id;
       print('Loading tasks for cluster: $clusterId');
 
-      // Get all officers in this cluster
       final officerSnapshot = await FirebaseDatabase.instance
           .ref()
           .child('users/$clusterId/officers')
@@ -131,13 +118,10 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // Parse officer data
-      // PERBAIKAN: Tambahkan pengecekan tipe data sebelum casting
       Map<dynamic, dynamic> officersData;
       if (officerSnapshot.value is Map) {
         officersData = officerSnapshot.value as Map<dynamic, dynamic>;
       } else if (officerSnapshot.value is List) {
-        // Konversi List menjadi Map dengan index sebagai key
         final list = officerSnapshot.value as List;
         officersData = {};
         for (int i = 0; i < list.length; i++) {
@@ -158,9 +142,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       print('Officer data type: ${officerSnapshot.value.runtimeType}');
       print('Officers data after conversion: $officersData');
-
-      // Saat membuat Map<String, Map<String, String>> officerInfo
-      // Ubah cara pemrosesan officers data
 
       Map<String, Map<String, String>> officerInfo = {};
 
@@ -188,13 +169,10 @@ class _HomeScreenState extends State<HomeScreen> {
               }
             }
           }
-        }
-        // Fallback untuk kasus lama (map)
-        else if (officerSnapshot.value is Map) {
+        } else if (officerSnapshot.value is Map) {
           final officersData = officerSnapshot.value as Map<dynamic, dynamic>;
           officersData.forEach((offId, offData) {
             if (offData is Map) {
-              // Jika ID ada sebagai properti, gunakan itu
               final idKey = offData['id']?.toString() ?? offId.toString();
               final name = offData['name']?.toString() ?? 'Unknown';
               final photoUrl = offData['photo_url']?.toString() ?? '';
@@ -213,7 +191,6 @@ class _HomeScreenState extends State<HomeScreen> {
         print('Error processing officers data: $e');
       }
 
-      // Get all tasks for this cluster
       final taskSnapshot = await FirebaseDatabase.instance
           .ref()
           .child('tasks')
@@ -337,19 +314,16 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-// Helper method untuk parse DateTime
   DateTime? _parseDateTime(dynamic value) {
     if (value == null) return null;
 
     try {
       if (value is String) {
-        // Handle string with microseconds
         if (value.contains('.')) {
           final parts = value.split('.');
           final mainPart = parts[0];
           final microPart = parts[1];
 
-          // Limit microseconds to 6 digits
           final cleanMicroPart =
               microPart.length > 6 ? microPart.substring(0, 6) : microPart;
 
@@ -374,7 +348,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final userId = authState.user.id;
 
-    // If user is a cluster account, we don't need to watch individual tasks
     if (authState.user.role == 'patrol') {
       return;
     }
@@ -387,7 +360,6 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       },
       onError: (error) {
-        // stop the stream if there's an error
         _taskSubscription?.cancel();
         _taskSubscription = null;
       },
@@ -395,14 +367,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleNewTask(PatrolTask task) {
-    // Add debugging output
     print('=== New Task Received ===');
     print('Task ID: ${task.taskId}');
     print('Status: ${task.status}');
     print('Assigned Start Time: ${task.assignedStartTime}');
     print('Assigned End Time: ${task.assignedEndTime}');
 
-    // Only show dialog for active tasks that haven't started
     if (task.status == 'active') {
       _showTaskDialog(task);
     }
@@ -420,7 +390,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navigateToMap(PatrolTask task) {
-    Navigator.pop(context); // Close dialog first
+    Navigator.pop(context);
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -630,27 +600,6 @@ class _HomeScreenState extends State<HomeScreen> {
         elevation: 0.5,
         actions: [
           IconButton(
-            icon: const Icon(Icons.bug_report, color: Colors.white),
-            onPressed: () {
-              // Picu debug event untuk memeriksa status saat ini
-              context.read<PatrolBloc>().add(DebugOfflineData());
-
-              // Muat ulang data
-              _loadUserData();
-
-              // Print status saat ini
-              final state = context.read<PatrolBloc>().state;
-              if (state is PatrolLoaded) {
-                print(
-                    'Current task: ${state.task?.taskId}, status: ${state.task?.status}');
-                print('isPatrolling: ${state.isPatrolling}');
-                print('FinishedTasks count: ${state.finishedTasks.length}');
-              } else {
-                print('Current state: ${state.runtimeType}');
-              }
-            },
-          ),
-          IconButton(
             icon: const Icon(
               Icons.refresh,
               color: neutralWhite,
@@ -659,7 +608,6 @@ class _HomeScreenState extends State<HomeScreen> {
               _loadUserData();
               _startTaskStream();
 
-              // Show refresh feedback
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
@@ -700,40 +648,25 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // User greeting card
                     _buildUserGreetingCard(),
-
                     const SizedBox(height: 24),
-
-                    // Section title - Upcoming Patrols
                     _buildSectionHeader(
                       icon: Icons.access_time,
                       title: 'Patroli Mendatang',
                     ),
-
                     const SizedBox(height: 12),
-
-                    // Upcoming patrols content
                     _currentUser?.role == 'patrol'
                         ? _buildUpcomingPatrolsContent()
                         : _buildUpcomingPatrolsForOfficer(),
-
                     const SizedBox(height: 24),
-
-                    // Section title - History
                     _buildSectionHeader(
                       icon: Icons.history,
                       title: 'Riwayat Patroli',
                     ),
-
                     const SizedBox(height: 12),
-
-                    // History content
                     _currentUser?.role == 'patrol'
                         ? _buildHistoryContent()
                         : _buildPatrolHistoryForOfficer(),
-
-                    // Add some bottom padding
                     const SizedBox(height: 24),
                   ],
                 ),
@@ -742,7 +675,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// Consistent section header widget
   Widget _buildSectionHeader({required IconData icon, required String title}) {
     return Row(
       children: [
@@ -756,7 +688,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// User greeting card - consistent height and padding
   Widget _buildUserGreetingCard() {
     final now = DateTime.now();
     String greeting;
@@ -817,8 +748,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            // Current date with fixed width for alignment
-            Container(
+            SizedBox(
               width: 80,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -842,14 +772,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
 // Consistent empty state card with fixed height
   Widget _buildEmptyStateCard({required String icon, required String message}) {
-    return Container(
+    return SizedBox(
       width: double.infinity,
       // height: 180,
       child: Card(
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: neutral400, width: 1),
+          side: const BorderSide(color: neutral400, width: 1),
         ),
         color: Colors.white,
         child: Padding(
@@ -875,8 +805,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// Wrapper for upcoming patrols content
-  // Wrapper untuk menampilkan upcoming patrols content dikelompokkan berdasarkan officer
   Widget _buildUpcomingPatrolsContent() {
     if (_upcomingTasks.isEmpty) {
       return _buildEmptyStateCard(
@@ -885,10 +813,8 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // Kelompokkan tugas berdasarkan officerId (userId)
     final Map<String, List<PatrolTask>> tasksByOfficer = {};
 
-    // Populate map dengan task dikelompokkan berdasarkan officer
     for (final task in _upcomingTasks) {
       if (!tasksByOfficer.containsKey(task.userId)) {
         tasksByOfficer[task.userId] = [];
@@ -896,24 +822,12 @@ class _HomeScreenState extends State<HomeScreen> {
       tasksByOfficer[task.userId]!.add(task);
     }
 
-    // Sortir officers berdasarkan nama jika tersedia, atau userId jika tidak
     final sortedOfficerIds = tasksByOfficer.keys.toList()
       ..sort((a, b) {
         final taskA = tasksByOfficer[a]!.first;
         final taskB = tasksByOfficer[b]!.first;
 
-        // Jika kedua officer memiliki nama, sortir berdasarkan nama
-        if (taskA.officerName != null && taskB.officerName != null) {
-          return taskA.officerName!.compareTo(taskB.officerName!);
-        }
-        // Jika hanya salah satu yang memiliki nama
-        else if (taskA.officerName != null) {
-          return -1; // A sebelum B
-        } else if (taskB.officerName != null) {
-          return 1; // B sebelum A
-        }
-        // Jika keduanya tidak memiliki nama, sortir berdasarkan userId
-        return a.compareTo(b);
+        return taskA.officerName.compareTo(taskB.officerName);
       });
 
     return ListView.builder(
@@ -925,8 +839,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final officerTasks = tasksByOfficer[officerId]!;
 
         // Ambil nama officer dari task pertama
-        final officerName = officerTasks.first.officerName ??
-            'Petugas (ID: ${officerId.substring(0, 6)}...)';
+        final officerName = officerTasks.first.officerName;
         final officerPhotoUrl = officerTasks.first.officerPhotoUrl;
 
         // Sortir tugas untuk officer ini berdasarkan waktu mulai
@@ -958,8 +871,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(color: kbpBlue300, width: 1),
                       ),
-                      child: officerPhotoUrl != null &&
-                              officerPhotoUrl.isNotEmpty
+                      child: officerPhotoUrl.isNotEmpty
                           ? Image.network(
                               officerPhotoUrl,
                               fit: BoxFit.cover,
@@ -1005,7 +917,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     // Collapse/expand icon
                     IconButton(
-                      icon: Icon(
+                      icon: const Icon(
                         Icons.keyboard_arrow_down,
                         color: kbpBlue900,
                       ),
@@ -1088,6 +1000,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 4),
                       Row(
                         children: [
+                          // Status patroli
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 6,
@@ -1103,6 +1016,29 @@ class _HomeScreenState extends State<HomeScreen> {
                                   size: 10, color: Colors.white),
                             ),
                           ),
+
+                          // Tambahkan status timeliness disini
+                          if (task.timeliness != null)
+                            Row(
+                              children: [
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _getTimelinessColor(task.timeliness),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    _getTimelinessText(task.timeliness),
+                                    style: mediumTextStyle(
+                                        size: 10, color: Colors.white),
+                                  ),
+                                ),
+                              ],
+                            ),
                         ],
                       ),
                     ],
@@ -1214,6 +1150,32 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Color _getTimelinessColor(String? timeliness) {
+    switch (timeliness?.toLowerCase()) {
+      case 'ontime':
+        return successG500;
+      case 'late':
+        return warningY500;
+      case 'pastDue':
+        return dangerR500;
+      default:
+        return neutral500;
+    }
+  }
+
+  String _getTimelinessText(String? timeliness) {
+    switch (timeliness?.toLowerCase()) {
+      case 'ontime':
+        return 'Tepat Waktu';
+      case 'late':
+        return 'Terlambat';
+      case 'pastDue':
+        return 'Melewati Batas';
+      default:
+        return 'Tidak Diketahui';
+    }
+  }
+
 // Wrapper for history content
   Widget _buildHistoryContent() {
     if (_historyTasks.isEmpty) {
@@ -1280,7 +1242,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// Consistent task card
   Widget _buildTaskCard(PatrolTask task) {
     return Card(
       elevation: 0,
@@ -1335,7 +1296,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
-                                task.officerName ?? 'Petugas',
+                                task.officerName,
                                 style: regularTextStyle(
                                     size: 14, color: kbpBlue700),
                                 overflow: TextOverflow.ellipsis,
@@ -1357,12 +1318,59 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ],
                         ),
+
+                        // Tambahkan status badges
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            // Status patroli
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _getStatusColor(task.status),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                _getStatusText(task.status),
+                                style: mediumTextStyle(
+                                    size: 12, color: Colors.white),
+                              ),
+                            ),
+
+                            // Status ketepatan waktu
+                            if (task.timeliness != null)
+                              Row(
+                                children: [
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color:
+                                          _getTimelinessColor(task.timeliness),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      _getTimelinessText(task.timeliness),
+                                      style: mediumTextStyle(
+                                          size: 12, color: Colors.white),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
 
                   // Date and time - fixed width for alignment
-                  Container(
+                  SizedBox(
                     width: 110,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
@@ -1435,20 +1443,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildAvatarFallback(PatrolTask task) {
     return Center(
       child: Text(
-        task.officerName?.substring(0, 1).toUpperCase() ?? 'P',
+        task.officerName.substring(0, 1).toUpperCase(),
         style: semiBoldTextStyle(size: 16, color: kbpBlue900),
       ),
     );
   }
 
-// Consistent history item
   Widget _buildHistoryItem(PatrolTask task) {
     final duration = task.endTime != null && task.startTime != null
         ? task.endTime!.difference(task.startTime!)
         : Duration.zero;
 
-    return Container(
-      height: 70,
+    return SizedBox(
+      height: 84, // Tinggi sedikit ditambah untuk menampung badge
       child: InkWell(
         onTap: () => _showPatrolSummary(task),
         borderRadius: BorderRadius.circular(8),
@@ -1466,10 +1473,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: kbpBlue200, width: 1),
                 ),
-                child: task.officerPhotoUrl != null &&
-                        task.officerPhotoUrl!.isNotEmpty
+                child: task.officerPhotoUrl.isNotEmpty
                     ? Image.network(
-                        task.officerPhotoUrl!,
+                        task.officerPhotoUrl,
                         fit: BoxFit.cover,
                         errorBuilder: (context, error, stackTrace) {
                           return _buildAvatarFallback(task);
@@ -1492,10 +1498,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     // Officer & vehicle info
                     Row(
                       children: [
-                        if (task.officerName != null) ...[
+                        ...[
                           Expanded(
                             child: Text(
-                              task.officerName!,
+                              task.officerName,
                               style: semiBoldTextStyle(
                                   size: 14, color: kbpBlue900),
                               overflow: TextOverflow.ellipsis,
@@ -1532,6 +1538,27 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                     ),
+
+                    // Tambahkan badge ketepatan waktu
+                    if (task.timeliness != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _getTimelinessColor(task.timeliness),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            _getTimelinessText(task.timeliness),
+                            style:
+                                mediumTextStyle(size: 10, color: Colors.white),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -1556,8 +1583,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// Di dalam metode _buildUpcomingPatrolsForOfficer(), tambahkan log debug
-
   Widget _buildUpcomingPatrolsForOfficer() {
     return BlocBuilder<PatrolBloc, PatrolState>(
       builder: (context, state) {
@@ -1565,10 +1590,10 @@ class _HomeScreenState extends State<HomeScreen> {
         print('BlocBuilder for upcoming tasks: state = ${state.runtimeType}');
 
         if (state is PatrolLoading) {
-          return Container(
+          return const SizedBox(
             height: 180,
             width: double.infinity,
-            child: const Center(
+            child: Center(
               child: CircularProgressIndicator(color: kbpBlue900),
             ),
           );
@@ -1601,10 +1626,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return BlocBuilder<PatrolBloc, PatrolState>(
       builder: (context, state) {
         if (state is PatrolLoading) {
-          return Container(
+          return const SizedBox(
             height: 180,
             width: double.infinity,
-            child: const Center(
+            child: Center(
               child: CircularProgressIndicator(color: kbpBlue900),
             ),
           );

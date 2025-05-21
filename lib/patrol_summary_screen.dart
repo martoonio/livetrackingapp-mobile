@@ -52,6 +52,7 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
     _loadOfficerName();
     _loadPatrolReports();
     print('route path isinya apa? ${widget.routePath}');
+    print('init final foto isinya apa? ${widget.task.finalReportPhotoUrl}');
   }
 
   Future<String?> _getUserRole() async {

@@ -340,18 +340,92 @@ class _MapScreenState extends State<MapScreen> {
 
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 5,
       ),
     ).listen(
       (Position position) async {
         if (mounted) {
-          // TAMBAHKAN: Check for mock location
+          // Log lokasi untuk debugging
+          print('Position update: ${position.latitude}, ${position.longitude}');
+
+          // Check for mock location
           final isMocked = await LocationValidator.isLocationMocked(position);
+          print('Is location mocked: $isMocked');
 
           if (isMocked) {
             print(
-                'MOCK LOCATION DETECTED: ${position.latitude}, ${position.longitude}');
+                'MOCK LOCATION DETECTED in UI: ${position.latitude}, ${position.longitude}');
+
+            // TAMBAHAN: Log langsung ke Firebase tanpa melalui bloc
+            try {
+              // Ambil state untuk cek apakah sedang patroli
+              final state = context.read<PatrolBloc>().state;
+              final isPatrollingInBloc =
+                  state is PatrolLoaded && state.isPatrolling;
+              final isPatrollingInTask = widget.task.status == 'ongoing' ||
+                  widget.task.status == 'in_progress';
+              final isPatrolActive = isPatrollingInBloc || isPatrollingInTask;
+
+              if (isPatrolActive) {
+                // Ambil mockCount dari bloc atau gunakan nilai default
+                int mockCount = 1;
+                if (state is PatrolLoaded) {
+                  mockCount = state.mockLocationCount + 1;
+                }
+
+                // Siapkan data mock location
+                final mockData = {
+                  'timestamp': DateTime.now().toIso8601String(),
+                  'coordinates': [position.latitude, position.longitude],
+                  'accuracy': position.accuracy,
+                  'speed': position.speed,
+                  'altitude': position.altitude,
+                  'heading': position.heading,
+                  'count': mockCount,
+                };
+
+                print('Logging mock location directly: $mockData');
+
+                // 1. Update flag pada task
+                final taskRef = FirebaseDatabase.instance
+                    .ref()
+                    .child('tasks/${widget.task.taskId}');
+                await taskRef.update({
+                  'mockLocationDetected': true,
+                  'mockLocationCount': mockCount,
+                  'lastMockDetection': mockData['timestamp'],
+                });
+
+                print('✓ Updated task mock flags successfully');
+
+                // 2. Catat detail percobaan ke node khusus di database
+                await taskRef.child('mock_detections').push().set(mockData);
+                print('✓ Mock detection saved to task');
+
+                // 3. Simpan juga di koleksi terpisah untuk analisis
+                await FirebaseDatabase.instance
+                    .ref()
+                    .child('mock_location_logs')
+                    .push()
+                    .set({
+                  ...mockData,
+                  'taskId': widget.task.taskId,
+                  'userId': widget.task.userId,
+                  'detectionTime': ServerValue.timestamp,
+                });
+
+                print('✓ Mock detection saved to global logs');
+
+                // 4. Update mockCount dalam state bloc supaya UI terupdate
+                context
+                    .read<PatrolBloc>()
+                    .add(UpdateMockCount(mockCount: mockCount));
+              }
+            } catch (e) {
+              print('Error logging mock location directly: $e');
+              print(StackTrace.current);
+            }
 
             // Tampilkan peringatan di UI
             setState(() {
@@ -374,9 +448,6 @@ class _MapScreenState extends State<MapScreen> {
                 _snackbarShown = false;
               });
             }
-
-            // Jangan update UI map
-            return;
           } else if (_mockLocationDetected) {
             // Reset mock flag jika sudah tidak terdeteksi lagi
             setState(() {
@@ -425,9 +496,8 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-// Modifikasi fungsi _handlePatrolButtonPress untuk menampilkan dialog laporan awal
   void _handlePatrolButtonPress(BuildContext context, PatrolState state) async {
-    // Check status from both sources
+    // Check status patrol
     final isPatrollingInBloc = state is PatrolLoaded && state.isPatrolling;
     final isPatrollingInTask =
         widget.task.status == 'ongoing' || widget.task.status == 'in_progress';
@@ -437,14 +507,9 @@ class _MapScreenState extends State<MapScreen> {
         'Patrol button pressed - Bloc state: $isPatrollingInBloc, Task status: $isPatrollingInTask');
 
     if (isPatrolActive) {
-      print('Patrol active - stopping patrol');
       if (state is PatrolLoaded) {
         await _stopPatrol(context, state);
       } else {
-        // If we're in a weird state where task says ongoing but bloc disagrees
-        print(
-            'Inconsistent state - task says ongoing but bloc says not patrolling');
-        // Create a temporary loaded state to handle stop
         final tempState = PatrolLoaded(
           task: widget.task,
           isPatrolling: true,
@@ -453,12 +518,8 @@ class _MapScreenState extends State<MapScreen> {
         await _stopPatrol(context, tempState);
       }
     } else {
-      print('No active patrol - showing initial report dialog');
-      // Tampilkan dialog untuk photo dan catatan awal
-      final shouldStart = await _showInitialReportDialog(context);
-      if (shouldStart) {
-        _startPatrol(context);
-      }
+      _showInitialReportDialog(context);
+      _resetLongPressAnimation();
     }
   }
 
@@ -557,11 +618,11 @@ class _MapScreenState extends State<MapScreen> {
       barrierDismissible: false,
       builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (context, setState) {
+          builder: (statefulContext, setState) {
             return WillPopScope(
               onWillPop: () async {
                 bool exitConfirmed = await showDialog(
-                  context: context,
+                  context: statefulContext,
                   builder: (context) => AlertDialog(
                     title: Text(
                       'Batalkan Memulai Patroli?',
@@ -575,7 +636,6 @@ class _MapScreenState extends State<MapScreen> {
                       TextButton(
                         onPressed: () {
                           Navigator.pop(context, false);
-                          _resetLongPressAnimation();
                         },
                         child: Text(
                           'Tidak',
@@ -585,7 +645,6 @@ class _MapScreenState extends State<MapScreen> {
                       ElevatedButton(
                         onPressed: () {
                           Navigator.pop(context, true);
-                          _resetLongPressAnimation();
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: kbpBlue900,
@@ -761,11 +820,11 @@ class _MapScreenState extends State<MapScreen> {
                                         context: context,
                                         builder: (context) => AlertDialog(
                                           title: Text(
-                                            'Batalkan Memulai Patroli?',
+                                            'Batalkan Mulai Patroli?',
                                             style: boldTextStyle(size: 18),
                                           ),
                                           content: Text(
-                                            'Anda akan membatalkan memulai patroli. Yakin ingin keluar?',
+                                            'Jika Anda keluar, patroli tidak akan dimulai. Yakin ingin keluar?',
                                             style: regularTextStyle(size: 14),
                                           ),
                                           actions: [
@@ -779,10 +838,8 @@ class _MapScreenState extends State<MapScreen> {
                                               ),
                                             ),
                                             ElevatedButton(
-                                              onPressed: () {
-                                                Navigator.pop(context, true);
-                                                _resetLongPressAnimation();
-                                              },
+                                              onPressed: () =>
+                                                  Navigator.pop(context, true),
                                               style: ElevatedButton.styleFrom(
                                                 backgroundColor: kbpBlue900,
                                               ),
@@ -828,53 +885,25 @@ class _MapScreenState extends State<MapScreen> {
                                       });
 
                                       try {
-                                        // Tampilkan overlay loading untuk mengunci layar
-                                        showDialog(
-                                          context: context,
-                                          barrierDismissible: false,
-                                          builder: (context) => WillPopScope(
-                                            onWillPop: () async => false,
-                                            child: Center(
-                                              child: Container(
-                                                padding:
-                                                    const EdgeInsets.all(16),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.white,
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                ),
-                                                child: Column(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    const CircularProgressIndicator(),
-                                                    const SizedBox(height: 16),
-                                                    Text(
-                                                      'Mengunggah foto...',
-                                                      style: mediumTextStyle(),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-
                                         // Upload foto ke Firebase Storage
                                         final fileName =
                                             'initial_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-// Upload foto ke Firebase Storage menggunakan metode yang sudah diperbaiki
-// Dialog loading dengan progress sudah ditangani di dalam metode
+                                        // Upload foto ke Firebase Storage
                                         final photoUrl =
                                             await _uploadPhotoToFirebase(
                                                 capturedImage!, fileName);
 
-                                        setState(() {
-                                          initialReportPhotoUrl = photoUrl;
-                                        });
+                                        initialReportPhotoUrl = photoUrl;
 
-// Update task dengan data laporan awal
+                                        // Set URL dan update state
+                                        if (mounted) {
+                                          setState(() {
+                                            isSubmitting = false;
+                                          });
+                                        }
+
+                                        // Update task dengan data laporan awal
                                         context
                                             .read<PatrolBloc>()
                                             .add(SubmitInitialReport(
@@ -883,31 +912,41 @@ class _MapScreenState extends State<MapScreen> {
                                               reportTime: DateTime.now(),
                                             ));
 
-                                        // Menampilkan pesan sukses dan menutup dialog
-                                        Navigator.pop(dialogContext, true);
+                                        final localDialogContext =
+                                            dialogContext;
+                                        final localContext = context;
+
+                                        // PENTING: Simpan data hasil dialog
                                         result = true;
 
-                                        showCustomSnackbar(
-                                          context: context,
-                                          title: 'Laporan awal berhasil',
-                                          subtitle:
-                                              'Patroli akan segera dimulai',
-                                          type: SnackbarType.success,
-                                        );
-                                      } catch (e) {
-                                        // Menutup dialog loading
-                                        Navigator.of(context).pop();
+                                        if (localDialogContext != null &&
+                                            Navigator.canPop(
+                                                localDialogContext)) {
+                                          Navigator.pop(localDialogContext);
+                                        }
 
+                                        // PENTING: Tunggu sedikit sebelum memanggil _startPatrol
+                                        // untuk memastikan dialog sudah benar-benar ditutup
+                                        await Future.delayed(
+                                            Duration(milliseconds: 100));
+
+                                        if (mounted) {
+                                          _startPatrol(localContext);
+
+                                          // Tampilkan snackbar sukses
+                                          showCustomSnackbar(
+                                            context: context,
+                                            title: 'Laporan awal berhasil',
+                                            subtitle:
+                                                'Patroli akan segera dimulai',
+                                            type: SnackbarType.success,
+                                          );
+                                        }
+                                      } catch (e) {
+                                        // Tangani error
                                         setState(() {
                                           isSubmitting = false;
                                         });
-
-                                        print(
-                                            'Error submitting initial report: $e');
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          SnackBar(content: Text('Error: $e')),
-                                        );
                                       }
                                     },
                               style: ElevatedButton.styleFrom(
@@ -1029,8 +1068,8 @@ class _MapScreenState extends State<MapScreen> {
 
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // Update lokasi setiap 10 meter
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 5, // Update lokasi setiap 10 meter
       ),
     ).listen(
       (Position position) {
@@ -1132,40 +1171,26 @@ class _MapScreenState extends State<MapScreen> {
     Map<String, dynamic> finalRoutePath = {};
 
     try {
-      // Proses route path seperti sebelumnya
       if (state.task?.routePath != null && state.task!.routePath is Map) {
         finalRoutePath =
             Map<String, dynamic>.from(state.task!.routePath as Map);
-        // ...kode konversi yang sudah ada...
-      }
-
-      // Tambahkan _routePoints ke finalRoutePath
-      if (_routePoints.isNotEmpty) {
-        // ...kode yang sudah ada...
       }
     } catch (e) {
       print('Error processing route path: $e');
-      // ...kode fallback yang sudah ada...
     }
 
-    // PERUBAHAN: Jangan langsung kirim StopPatrol, tampilkan dialog laporan akhir dulu
     if (mounted) {
-      // Tampilkan dialog laporan akhir
       final result =
           await _showFinalReportDialog(context, state, endTime, finalRoutePath);
 
-      // Jika hasil dialog false, berarti user membatalkan proses
       if (result != true) {
         print('User canceled patrol ending process');
         return;
       }
-
-      // Jika sampai sini, berarti laporan akhir sudah disubmit dan patroli selesai
-      // Navigation ke PatrolSummaryScreen sudah ditangani di _showFinalReportDialog
     }
   }
 
-// Tambahkan fungsi baru untuk dialog laporan akhir
+// Tampilkan dialog laporan akhir saat patroli selesai
   Future<bool> _showFinalReportDialog(
     BuildContext context,
     PatrolLoaded state,
@@ -1336,9 +1361,6 @@ class _MapScreenState extends State<MapScreen> {
                               }
                             } catch (e) {
                               print('Error taking photo: $e');
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Error: $e')),
-                              );
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -1454,116 +1476,102 @@ class _MapScreenState extends State<MapScreen> {
                                         final fileName =
                                             'final_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-                                        // Upload foto ke Firebase Storage
+                                        // Simpan referensi context dialog untuk digunakan nanti
+                                        final currentDialogContext =
+                                            dialogContext;
+
+                                        // Upload foto ke Firebase Storage menggunakan fungsi yang sudah diperbaiki
                                         final photoUrl =
                                             await _uploadPhotoToFirebase(
                                                 capturedImage!, fileName);
 
-                                        setState(() {
-                                          finalReportPhotoUrl = photoUrl;
-                                        });
-
-                                        // Kirim event stop patrol
-                                        context
-                                            .read<PatrolBloc>()
-                                            .add(StopPatrol(
-                                              endTime: endTime,
-                                              distance: _totalDistance,
-                                              finalRoutePath: finalRoutePath,
-                                            ));
-
-                                        // Beri jeda singkat untuk memastikan StopPatrol event diproses
-                                        await Future.delayed(
-                                            const Duration(milliseconds: 300));
-
-                                        // Kirim event submit final report
-                                        context.read<PatrolBloc>().add(
-                                              SubmitFinalReport(
-                                                photoUrl: photoUrl,
-                                                note: noteController.text
-                                                        .trim()
-                                                        .isNotEmpty
-                                                    ? noteController.text.trim()
-                                                    : null,
-                                                reportTime: endTime,
-                                              ),
-                                            );
-
-                                        // Buat daftar koordinat untuk PatrolSummaryScreen
-                                        List<List<double>> convertedPath = [];
-                                        if (state.task?.routePath != null &&
-                                            state.task!.routePath is Map) {
-                                          final map = state.task!.routePath
-                                              as Map<String, dynamic>;
-                                          final sortedEntries = map.entries
-                                              .toList()
-                                            ..sort((a, b) =>
-                                                (a.value['timestamp'] as String)
-                                                    .compareTo(
-                                                        b.value['timestamp']
-                                                            as String));
-
-                                          for (var entry in sortedEntries) {
-                                            if (entry.value is! Map ||
-                                                entry.value['coordinates'] ==
-                                                    null) {
-                                              continue;
-                                            }
-
-                                            final coordinates = entry
-                                                .value['coordinates'] as List;
-                                            if (coordinates.length >= 2) {
-                                              convertedPath.add([
-                                                (coordinates[0] as num)
-                                                    .toDouble(),
-                                                (coordinates[1] as num)
-                                                    .toDouble(),
-                                              ]);
-                                            }
-                                          }
+                                        if (mounted) {
+                                          setState(() {
+                                            finalReportPhotoUrl = photoUrl;
+                                            isSubmitting = false;
+                                          });
                                         }
 
-                                        if (mounted) {
-                                          Navigator.pop(dialogContext,
-                                              true); // Close dialog dengan hasil true
+                                        // Set result ke true untuk menandakan dialog berhasil
+                                        result = true;
 
-                                          // Tampilkan loading dialog
-                                          showDialog(
-                                            context: context,
-                                            barrierDismissible: false,
-                                            builder: (context) => WillPopScope(
-                                              onWillPop: () async => false,
-                                              child: Center(
-                                                child: Container(
-                                                  padding:
-                                                      const EdgeInsets.all(16),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.white,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            8),
-                                                  ),
-                                                  child: Column(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    children: [
-                                                      const CircularProgressIndicator(),
-                                                      const SizedBox(
-                                                          height: 16),
-                                                      Text(
-                                                        'Menyiapkan ringkasan patroli...',
-                                                        style:
-                                                            mediumTextStyle(),
-                                                      ),
-                                                    ],
+                                        // Tutup dialog laporan akhir
+                                        if (Navigator.canPop(
+                                            currentDialogContext)) {
+                                          Navigator.pop(
+                                              currentDialogContext, true);
+                                        }
+
+                                        // Beri jeda singkat untuk memastikan dialog tertutup
+                                        await Future.delayed(
+                                            const Duration(milliseconds: 100));
+
+                                        if (mounted) {
+                                          // Kirim event stop patrol dan final report
+                                          context
+                                              .read<PatrolBloc>()
+                                              .add(StopPatrol(
+                                                endTime: endTime,
+                                                distance: _totalDistance,
+                                                finalRoutePath: finalRoutePath,
+                                              ));
+
+                                          // Kirim event submit final report
+                                          context.read<PatrolBloc>().add(
+                                                SubmitFinalReport(
+                                                  photoUrl: photoUrl,
+                                                  note: noteController.text
+                                                          .trim()
+                                                          .isNotEmpty
+                                                      ? noteController.text
+                                                          .trim()
+                                                      : null,
+                                                  reportTime: endTime,
+                                                ),
+                                              );
+
+                                          // Tampilkan loading dialog untuk persiapan ringkasan
+                                          if (mounted) {
+                                            showDialog(
+                                              context: context,
+                                              barrierDismissible: false,
+                                              builder: (loadingContext) =>
+                                                  WillPopScope(
+                                                onWillPop: () async => false,
+                                                child: Center(
+                                                  child: Container(
+                                                    padding:
+                                                        const EdgeInsets.all(
+                                                            16),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.white,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              8),
+                                                    ),
+                                                    child: Column(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        const CircularProgressIndicator(),
+                                                        const SizedBox(
+                                                            height: 16),
+                                                        Text(
+                                                          'Menyiapkan ringkasan patroli...',
+                                                          style:
+                                                              mediumTextStyle(),
+                                                        ),
+                                                      ],
+                                                    ),
                                                   ),
                                                 ),
                                               ),
-                                            ),
-                                          );
+                                            );
+                                          }
 
+                                          // Ambil data lengkap dari database
                                           try {
-                                            // PERBAIKAN: Ambil data lengkap dari database
+                                            // Ambil data task terbaru dari Firebase
                                             final taskSnapshot =
                                                 await FirebaseDatabase.instance
                                                     .ref()
@@ -1571,23 +1579,27 @@ class _MapScreenState extends State<MapScreen> {
                                                         'tasks/${widget.task.taskId}')
                                                     .get();
 
-                                            // Close loading dialog
-                                            if (context.mounted) {
-                                              Navigator.pop(context);
+                                            // Tutup dialog loading
+                                            if (mounted &&
+                                                Navigator.canPop(context)) {
+                                              Navigator.pop(
+                                                  context); // Close loading dialog
                                             }
 
                                             if (!taskSnapshot.exists) {
                                               print(
                                                   'Error: Task tidak ditemukan di database');
-                                              return;
+                                              throw Exception(
+                                                  'Task tidak ditemukan di database');
                                             }
 
+                                            // Konversi data rute
                                             final taskData = taskSnapshot.value
                                                 as Map<dynamic, dynamic>;
                                             List<List<double>>
                                                 completeRoutePath = [];
 
-                                            // Extract route path dari database
+                                            // Ekstrak route path dari database
                                             if (taskData['route_path'] !=
                                                     null &&
                                                 taskData['route_path'] is Map) {
@@ -1595,22 +1607,18 @@ class _MapScreenState extends State<MapScreen> {
                                                   taskData['route_path']
                                                       as Map<dynamic, dynamic>;
 
-                                              // Sort entries by timestamp
-                                              final List<
-                                                      MapEntry<dynamic, dynamic>>
-                                                  sortedEntries =
-                                                  routePathMap.entries.toList()
-                                                    ..sort((a, b) => (a.value[
-                                                                'timestamp']
+                                              // Urutkan entry berdasarkan timestamp
+                                              final sortedEntries = routePathMap
+                                                  .entries
+                                                  .toList()
+                                                ..sort((a, b) =>
+                                                    (a.value['timestamp']
                                                             as String)
                                                         .compareTo(
                                                             b.value['timestamp']
                                                                 as String));
 
-                                              print(
-                                                  'Found ${sortedEntries.length} route points in database');
-
-                                              // Convert to List<List<double>> format for summary screen
+                                              // Konversi ke format List<List<double>>
                                               for (var entry in sortedEntries) {
                                                 if (entry.value is Map &&
                                                     entry.value[
@@ -1629,12 +1637,9 @@ class _MapScreenState extends State<MapScreen> {
                                                   }
                                                 }
                                               }
-
-                                              print(
-                                                  'Berhasil mengonversi ${completeRoutePath.length} titik rute untuk ringkasan');
                                             }
 
-                                            // Navigasi ke ringkasan patroli dengan rute lengkap dari database
+                                            // Navigasi ke PatrolSummaryScreen
                                             if (mounted) {
                                               Navigator.pushReplacement(
                                                 context,
@@ -1643,9 +1648,16 @@ class _MapScreenState extends State<MapScreen> {
                                                       PatrolSummaryScreen(
                                                     task: widget.task,
                                                     routePath: completeRoutePath
-                                                            .isEmpty
-                                                        ? convertedPath
-                                                        : completeRoutePath,
+                                                            .isNotEmpty
+                                                        ? completeRoutePath
+                                                        : _routePoints
+                                                            .map((point) => [
+                                                                  point
+                                                                      .latitude,
+                                                                  point
+                                                                      .longitude
+                                                                ])
+                                                            .toList(),
                                                     startTime:
                                                         state.task?.startTime ??
                                                             DateTime.now(),
@@ -1653,6 +1665,9 @@ class _MapScreenState extends State<MapScreen> {
                                                     distance: _totalDistance,
                                                     finalReportPhotoUrl:
                                                         photoUrl,
+                                                    initialReportPhotoUrl: state
+                                                        .task
+                                                        ?.initialReportPhotoUrl,
                                                   ),
                                                 ),
                                               );
@@ -1661,13 +1676,13 @@ class _MapScreenState extends State<MapScreen> {
                                             print(
                                                 'Error saat menyiapkan ringkasan patroli: $e');
 
-                                            // Tutup dialog loading jika error
-                                            if (context.mounted &&
+                                            // Tutup dialog loading jika masih ada
+                                            if (mounted &&
                                                 Navigator.canPop(context)) {
                                               Navigator.pop(context);
                                             }
 
-                                            // Fallback ke rute yang ada di memory (tidak lengkap)
+                                            // Fallback: gunakan data yang ada di memory
                                             if (mounted) {
                                               Navigator.pushReplacement(
                                                 context,
@@ -1675,7 +1690,12 @@ class _MapScreenState extends State<MapScreen> {
                                                   builder: (_) =>
                                                       PatrolSummaryScreen(
                                                     task: widget.task,
-                                                    routePath: convertedPath,
+                                                    routePath: _routePoints
+                                                        .map((point) => [
+                                                              point.latitude,
+                                                              point.longitude
+                                                            ])
+                                                        .toList(),
                                                     startTime:
                                                         state.task?.startTime ??
                                                             DateTime.now(),
@@ -1691,7 +1711,7 @@ class _MapScreenState extends State<MapScreen> {
                                               );
                                             }
 
-                                            // Tampilkan pesan error
+                                            // Tampilkan pesan warning
                                             showCustomSnackbar(
                                               context: context,
                                               title: 'Perhatian',
@@ -1701,20 +1721,21 @@ class _MapScreenState extends State<MapScreen> {
                                             );
                                           }
                                         }
-
-                                        // Set result ke true untuk menandakan proses selesai
-                                        result = true;
                                       } catch (e) {
-                                        setState(() {
-                                          isSubmitting = false;
-                                        });
+                                        // Tangani error dan kembalikan state dialog
+                                        if (mounted) {
+                                          setState(() {
+                                            isSubmitting = false;
+                                          });
 
-                                        print(
-                                            'Error submitting final report: $e');
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          SnackBar(content: Text('Error: $e')),
-                                        );
+                                          print(
+                                              'Error submitting final report: $e');
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                                content: Text('Error: $e')),
+                                          );
+                                        }
                                       }
                                     },
                               style: ElevatedButton.styleFrom(
@@ -1757,9 +1778,10 @@ class _MapScreenState extends State<MapScreen> {
     return result;
   }
 
-// Perbaikan dialog upload foto
-  // Perbaikan dialog upload foto dengan progress bar yang berfungsi
   Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
+    // Simpan referensi context di awal method
+    final BuildContext currentContext = context;
+
     try {
       // Reference to Firebase Storage
       final storageRef = FirebaseStorage.instance.ref();
@@ -1767,52 +1789,65 @@ class _MapScreenState extends State<MapScreen> {
 
       // Buat upload task
       final uploadTask = photoRef.putFile(imageFile);
-      final completer = Completer<String>();
 
-      // Tampilkan dialog dengan progress bar
+      // Completer untuk menunggu task selesai
+      final completer = Completer<void>();
+
+      // Dialog reference holder
+      BuildContext? dialogContextRef;
+
+      // Tampilkan dialog progress yang akan menutup secara otomatis
       if (mounted) {
-        showDialog(
-          context: context,
+        await showDialog(
+          context: currentContext,
           barrierDismissible: false,
-          builder: (loadingContext) => StatefulBuilder(
-            builder: (context, setDialogState) {
-              // Variabel untuk menyimpan progress
-              ValueNotifier<double> uploadProgress = ValueNotifier<double>(0.0);
+          builder: (dialogContext) {
+            // Simpan reference ke dialog context
+            dialogContextRef = dialogContext;
 
-              // Listener yang benar-benar bekerja untuk update progress
-              void setupProgressListener() {
+            return StatefulBuilder(
+              builder: (context, setDialogState) {
+                // Gunakan ValueNotifier untuk progress
+                final uploadProgress = ValueNotifier<double>(0.0);
+
+                // Setup listener untuk progress upload
                 uploadTask.snapshotEvents.listen(
                   (TaskSnapshot snapshot) {
                     double progress =
                         snapshot.bytesTransferred / snapshot.totalBytes;
-
-                    // Update progress dengan ValueNotifier
                     uploadProgress.value = progress;
 
-                    // Jika upload selesai, tutup dialog secara otomatis setelah delay singkat
+                    // Tutup dialog otomatis saat upload berhasil
                     if (snapshot.state == TaskState.success) {
-                      Future.delayed(const Duration(milliseconds: 200), () {
-                        if (context.mounted && Navigator.canPop(context)) {
-                          Navigator.pop(context);
+                      Future.delayed(const Duration(milliseconds: 500), () {
+                        // Pastikan dialog masih ada sebelum mencoba menutupnya
+                        if (dialogContextRef != null &&
+                            Navigator.canPop(dialogContextRef!)) {
+                          Navigator.of(dialogContextRef!).pop();
+                        }
+
+                        if (!completer.isCompleted) {
+                          completer.complete();
                         }
                       });
                     }
                   },
                   onError: (e) {
                     print('Error in upload progress: $e');
-                    if (context.mounted && Navigator.canPop(context)) {
-                      Navigator.pop(context);
+
+                    // Pastikan dialog masih ada sebelum mencoba menutupnya
+                    if (dialogContextRef != null &&
+                        Navigator.canPop(dialogContextRef!)) {
+                      Navigator.of(dialogContextRef!).pop();
+                    }
+
+                    if (!completer.isCompleted) {
+                      completer.completeError(e);
                     }
                   },
                 );
-              }
 
-              // Setup listener setelah widget pertama kali dibuat
-              Future.microtask(() => setupProgressListener());
-
-              return WillPopScope(
-                onWillPop: () async => false,
-                child: ValueListenableBuilder<double>(
+                return ValueListenableBuilder<double>(
                   valueListenable: uploadProgress,
                   builder: (context, progress, _) {
                     return Dialog(
@@ -1830,21 +1865,19 @@ class _MapScreenState extends State<MapScreen> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            // Icon atau animasi
+                            // Icon dengan progress
                             SizedBox(
                               height: 80,
                               width: 80,
                               child: Stack(
                                 alignment: Alignment.center,
                                 children: [
-                                  // Progress circle
                                   CircularProgressIndicator(
                                     value: progress,
                                     strokeWidth: 6,
                                     backgroundColor: kbpBlue100,
                                     color: kbpBlue900,
                                   ),
-                                  // Icon di tengah
                                   Icon(
                                     Icons.cloud_upload,
                                     size: 36,
@@ -1855,23 +1888,18 @@ class _MapScreenState extends State<MapScreen> {
                             ),
                             const SizedBox(height: 24),
 
-                            // Judul
                             Text(
                               'Mengunggah Foto',
                               style: boldTextStyle(size: 18, color: kbpBlue900),
                               textAlign: TextAlign.center,
                             ),
-
                             const SizedBox(height: 8),
-
-                            // Deskripsi
                             Text(
                               'Mohon tunggu sementara foto sedang diunggah...',
                               style:
                                   regularTextStyle(size: 14, color: neutral700),
                               textAlign: TextAlign.center,
                             ),
-
                             const SizedBox(height: 24),
 
                             // Progress bar
@@ -1896,10 +1924,7 @@ class _MapScreenState extends State<MapScreen> {
                                 ],
                               ),
                             ),
-
                             const SizedBox(height: 12),
-
-                            // Persentase
                             Text(
                               '${(progress * 100).toInt()}%',
                               style: semiBoldTextStyle(
@@ -1911,18 +1936,19 @@ class _MapScreenState extends State<MapScreen> {
                       ),
                     );
                   },
-                ),
-              );
-            },
-          ),
+                );
+              },
+            );
+          },
         );
       }
 
       // Tunggu hingga upload selesai
-      final TaskSnapshot taskSnapshot = await uploadTask;
+      await completer.future;
 
       // Dapatkan URL download
-      final downloadUrl = await taskSnapshot.ref.getDownloadURL();
+      final TaskSnapshot taskSnapshot = await uploadTask;
+      final String downloadUrl = await taskSnapshot.ref.getDownloadURL();
       return downloadUrl;
     } catch (e) {
       print('Error uploading photo: $e');

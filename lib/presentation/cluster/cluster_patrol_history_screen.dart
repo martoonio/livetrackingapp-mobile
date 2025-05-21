@@ -435,12 +435,23 @@ class _ClusterPatrolHistoryScreenState
                           style: boldTextStyle(size: 16),
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          _getStatusText(task.status),
-                          style: TextStyle(
-                            color: _getStatusColor(task.status),
-                            fontWeight: FontWeight.w500,
-                          ),
+                        Row(
+                          children: [
+                            // Status badge
+                            Text(
+                              _getStatusText(task.status),
+                              style: TextStyle(
+                                color: _getStatusColor(task.status),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+
+                            // Tambahkan badge timeliness jika ada
+                            if (task.timeliness != null) ...[
+                              const SizedBox(width: 8),
+                              buildTimelinessIndicator(task.timeliness),
+                            ],
+                          ],
                         ),
                       ],
                     ),
@@ -544,6 +555,32 @@ class _ClusterPatrolHistoryScreenState
                   ),
                 ],
               ),
+
+              // Tambahkan informasi timeliness jika ada
+              if (task.timeliness != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(
+                      task.timeliness?.toLowerCase() == 'ontime'
+                          ? Icons.check_circle
+                          : task.timeliness?.toLowerCase() == 'late'
+                              ? Icons.access_time
+                              : Icons.error,
+                      size: 14,
+                      color: getTimelinessColor(task.timeliness),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      getTimelinessDescription(task.timeliness),
+                      style: mediumTextStyle(
+                        size: 13,
+                        color: getTimelinessColor(task.timeliness),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
 
               const SizedBox(height: 12),
 

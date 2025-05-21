@@ -13,13 +13,14 @@ class PatrolHistoryListScreen extends StatefulWidget {
   final bool isClusterView;
 
   const PatrolHistoryListScreen({
-    Key? key, 
+    Key? key,
     this.tasksList,
     this.isClusterView = false,
   }) : super(key: key);
 
   @override
-  State<PatrolHistoryListScreen> createState() => _PatrolHistoryListScreenState();
+  State<PatrolHistoryListScreen> createState() =>
+      _PatrolHistoryListScreenState();
 }
 
 class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
@@ -35,12 +36,12 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
   @override
   void initState() {
     super.initState();
-    
+
     if (widget.tasksList != null) {
       // Jika daftar tugas diberikan dalam konstruktor
       _historyTasks = List.from(widget.tasksList!);
-      _historyTasks.sort((a, b) => 
-        (b.endTime ?? DateTime.now()).compareTo(a.endTime ?? DateTime.now()));
+      _historyTasks.sort((a, b) =>
+          (b.endTime ?? DateTime.now()).compareTo(a.endTime ?? DateTime.now()));
       _isLoading = false;
     } else {
       // Jika tidak, load dari bloc
@@ -63,16 +64,21 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
       final authState = context.read<AuthBloc>().state;
       if (authState is AuthAuthenticated) {
         final user = authState.user;
-        
+
         if (widget.isClusterView) {
           // Load dari repositori untuk cluster
-          final tasks = await context.read<PatrolBloc>().repository.getClusterTasks(user.id);
+          final tasks = await context
+              .read<PatrolBloc>()
+              .repository
+              .getClusterTasks(user.id);
           setState(() {
-            _historyTasks = tasks.where((task) => 
-              task.status.toLowerCase() == 'finished' || 
-              task.status.toLowerCase() == 'completed').toList();
-            _historyTasks.sort((a, b) => 
-              (b.endTime ?? DateTime.now()).compareTo(a.endTime ?? DateTime.now()));
+            _historyTasks = tasks
+                .where((task) =>
+                    task.status.toLowerCase() == 'finished' ||
+                    task.status.toLowerCase() == 'completed')
+                .toList();
+            _historyTasks.sort((a, b) => (b.endTime ?? DateTime.now())
+                .compareTo(a.endTime ?? DateTime.now()));
           });
         } else {
           // Untuk individual officer, ambil dari PatrolBloc
@@ -98,40 +104,45 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
 
   List<PatrolTask> _getFilteredTasks() {
     List<PatrolTask> filteredTasks = List.from(_historyTasks);
-    
+
     // Filter berdasarkan pencarian
     if (_searchController.text.isNotEmpty) {
       final searchTerm = _searchController.text.toLowerCase();
       filteredTasks = filteredTasks.where((task) {
-        final officerNameMatch = task.officerName?.toLowerCase().contains(searchTerm) ?? false;
-        final vehicleIdMatch = task.vehicleId.toLowerCase().contains(searchTerm);
+        final officerNameMatch =
+            task.officerName?.toLowerCase().contains(searchTerm) ?? false;
+        final vehicleIdMatch =
+            task.vehicleId.toLowerCase().contains(searchTerm);
         return officerNameMatch || vehicleIdMatch;
       }).toList();
     }
-    
+
     // Filter berdasarkan tanggal mulai
     if (_selectedStartDate != null) {
-      filteredTasks = filteredTasks.where((task) => 
-        task.endTime != null && 
-        !task.endTime!.isBefore(_selectedStartDate!)).toList();
+      filteredTasks = filteredTasks
+          .where((task) =>
+              task.endTime != null &&
+              !task.endTime!.isBefore(_selectedStartDate!))
+          .toList();
     }
-    
+
     // Filter berdasarkan tanggal akhir
     if (_selectedEndDate != null) {
-      final endOfDay = DateTime(_selectedEndDate!.year, 
-                                _selectedEndDate!.month, 
-                                _selectedEndDate!.day, 23, 59, 59);
-      filteredTasks = filteredTasks.where((task) => 
-        task.startTime != null && 
-        !task.startTime!.isAfter(endOfDay)).toList();
+      final endOfDay = DateTime(_selectedEndDate!.year, _selectedEndDate!.month,
+          _selectedEndDate!.day, 23, 59, 59);
+      filteredTasks = filteredTasks
+          .where((task) =>
+              task.startTime != null && !task.startTime!.isAfter(endOfDay))
+          .toList();
     }
-    
+
     // Filter berdasarkan kendaraan
     if (_selectedVehicleId != null) {
-      filteredTasks = filteredTasks.where((task) => 
-        task.vehicleId == _selectedVehicleId).toList();
+      filteredTasks = filteredTasks
+          .where((task) => task.vehicleId == _selectedVehicleId)
+          .toList();
     }
-    
+
     return filteredTasks;
   }
 
@@ -178,9 +189,9 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                         ),
                       ],
                     ),
-                    
+
                     const SizedBox(height: 16),
-                    
+
                     // Tanggal Mulai
                     Text(
                       'Tanggal Mulai',
@@ -236,7 +247,7 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                                 ),
                               ),
                             ),
-                            Icon(
+                            const Icon(
                               Icons.calendar_today,
                               size: 18,
                               color: neutral500,
@@ -245,9 +256,9 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                         ),
                       ),
                     ),
-                    
+
                     const SizedBox(height: 16),
-                    
+
                     // Tanggal Akhir
                     Text(
                       'Tanggal Akhir',
@@ -303,7 +314,7 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                                 ),
                               ),
                             ),
-                            Icon(
+                            const Icon(
                               Icons.calendar_today,
                               size: 18,
                               color: neutral500,
@@ -312,11 +323,9 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                         ),
                       ),
                     ),
-                    
+
                     if (vehicleIds.isNotEmpty) ...[
                       const SizedBox(height: 16),
-                      
-                      // Filter Kendaraan
                       Text(
                         'Kendaraan',
                         style: semiBoldTextStyle(size: 14),
@@ -330,7 +339,8 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                         child: DropdownButtonFormField<String?>(
                           value: _selectedVehicleId,
                           decoration: const InputDecoration(
-                            contentPadding: EdgeInsets.symmetric(horizontal: 12),
+                            contentPadding:
+                                EdgeInsets.symmetric(horizontal: 12),
                             border: InputBorder.none,
                             hintText: 'Semua Kendaraan',
                           ),
@@ -339,10 +349,12 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                               value: null,
                               child: Text('Semua Kendaraan'),
                             ),
-                            ...vehicleIds.map((id) => DropdownMenuItem<String>(
-                              value: id,
-                              child: Text(id),
-                            )).toList(),
+                            ...vehicleIds
+                                .map((id) => DropdownMenuItem<String>(
+                                      value: id,
+                                      child: Text(id),
+                                    ))
+                                .toList(),
                           ],
                           onChanged: (value) {
                             setState(() {
@@ -352,9 +364,9 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                         ),
                       ),
                     ],
-                    
+
                     const SizedBox(height: 24),
-                    
+
                     // Tombol Terapkan dan Reset
                     Row(
                       children: [
@@ -404,7 +416,7 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                         ),
                       ],
                     ),
-                    
+
                     const SizedBox(height: 16),
                   ],
                 ),
@@ -454,6 +466,8 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
             startTime: task.startTime ?? DateTime.now(),
             endTime: task.endTime ?? DateTime.now(),
             distance: task.distance ?? 0,
+            finalReportPhotoUrl: task.finalReportPhotoUrl,
+            initialReportPhotoUrl: task.initialReportPhotoUrl,
           ),
         ),
       );
@@ -543,7 +557,7 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
   @override
   Widget build(BuildContext context) {
     final filteredTasks = _getFilteredTasks();
-    
+
     return Scaffold(
       backgroundColor: neutral200,
       appBar: AppBar(
@@ -565,366 +579,400 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
       body: RefreshIndicator(
         onRefresh: _loadHistoryTasks,
         color: kbpBlue900,
-        child: _isLoading 
-          ? const Center(child: CircularProgressIndicator(color: kbpBlue900))
-          : Column(
-              children: [
-                // Search bar
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      hintText: 'Cari nama petugas atau kendaraan',
-                      prefixIcon: const Icon(Icons.search, color: neutral500),
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                    ),
-                    onChanged: (value) {
-                      setState(() {});
-                    },
-                  ),
-                ),
-                
-                // Active filters
-                if (_selectedStartDate != null || 
-                    _selectedEndDate != null || 
-                    _selectedVehicleId != null)
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: kbpBlue900))
+            : Column(
+                children: [
+                  // Search bar
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: _buildActiveFilters(),
-                  ),
-                
-                // Results count
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Menampilkan ${filteredTasks.length} Patroli',
-                        style: mediumTextStyle(color: neutral700),
+                    padding: const EdgeInsets.all(16),
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Cari nama petugas atau kendaraan',
+                        prefixIcon: const Icon(Icons.search, color: neutral500),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
                       ),
-                      const Spacer(),
-                      if (_selectedStartDate != null || 
-                          _selectedEndDate != null || 
-                          _selectedVehicleId != null || 
-                          _searchController.text.isNotEmpty)
-                        TextButton.icon(
-                          icon: const Icon(Icons.refresh, size: 16),
-                          label: const Text('Reset'),
-                          onPressed: () {
-                            setState(() {
-                              _selectedStartDate = null;
-                              _selectedEndDate = null;
-                              _selectedVehicleId = null;
-                              _searchController.clear();
-                            });
-                          },
-                          style: TextButton.styleFrom(
-                            foregroundColor: kbpBlue900,
-                          ),
-                        ),
-                    ],
+                      onChanged: (value) {
+                        setState(() {});
+                      },
+                    ),
                   ),
-                ),
-                
-                // History list
-                Expanded(
-                  child: filteredTasks.isEmpty 
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SvgPicture.asset(
-                              'assets/nodata.svg',
-                              height: 120,
-                              width: 120,
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'Tidak ada riwayat patroli',
-                              style: mediumTextStyle(size: 16, color: neutral700),
-                            ),
-                            const SizedBox(height: 8),
-                            if (_selectedStartDate != null || 
-                                _selectedEndDate != null || 
-                                _selectedVehicleId != null || 
-                                _searchController.text.isNotEmpty)
-                              Text(
-                                'Coba ubah filter pencarian',
-                                style: regularTextStyle(size: 14, color: neutral600),
-                              ),
-                          ],
+
+                  // Active filters
+                  if (_selectedStartDate != null ||
+                      _selectedEndDate != null ||
+                      _selectedVehicleId != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: _buildActiveFilters(),
+                    ),
+
+                  // Results count
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Menampilkan ${filteredTasks.length} Patroli',
+                          style: mediumTextStyle(color: neutral700),
                         ),
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: filteredTasks.length,
-                        itemBuilder: (context, index) {
-                          final task = filteredTasks[index];
-                          
-                          return Card(
-                            elevation: 0,
-                            margin: const EdgeInsets.only(bottom: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                        const Spacer(),
+                        if (_selectedStartDate != null ||
+                            _selectedEndDate != null ||
+                            _selectedVehicleId != null ||
+                            _searchController.text.isNotEmpty)
+                          TextButton.icon(
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Reset'),
+                            onPressed: () {
+                              setState(() {
+                                _selectedStartDate = null;
+                                _selectedEndDate = null;
+                                _selectedVehicleId = null;
+                                _searchController.clear();
+                              });
+                            },
+                            style: TextButton.styleFrom(
+                              foregroundColor: kbpBlue900,
                             ),
-                            child: InkWell(
-                              onTap: () => _showPatrolSummary(task),
-                              borderRadius: BorderRadius.circular(12),
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // Header
-                                    Row(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  // History list
+                  Expanded(
+                    child: filteredTasks.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SvgPicture.asset(
+                                  'assets/nodata.svg',
+                                  height: 120,
+                                  width: 120,
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Tidak ada riwayat patroli',
+                                  style: mediumTextStyle(
+                                      size: 16, color: neutral700),
+                                ),
+                                const SizedBox(height: 8),
+                                if (_selectedStartDate != null ||
+                                    _selectedEndDate != null ||
+                                    _selectedVehicleId != null ||
+                                    _searchController.text.isNotEmpty)
+                                  Text(
+                                    'Coba ubah filter pencarian',
+                                    style: regularTextStyle(
+                                        size: 14, color: neutral600),
+                                  ),
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: filteredTasks.length,
+                            itemBuilder: (context, index) {
+                              final task = filteredTasks[index];
+
+                              return Card(
+                                elevation: 0,
+                                margin: const EdgeInsets.only(bottom: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: InkWell(
+                                  onTap: () => _showPatrolSummary(task),
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        // Avatar
-                                        Container(
-                                          width: 40,
-                                          height: 40,
-                                          clipBehavior: Clip.antiAlias,
-                                          decoration: BoxDecoration(
-                                            color: kbpBlue100,
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: kbpBlue200, width: 1),
-                                          ),
-                                          child: task.officerPhotoUrl != null &&
-                                                  task.officerPhotoUrl!.isNotEmpty
-                                              ? Image.network(
-                                                  task.officerPhotoUrl!,
-                                                  fit: BoxFit.cover,
-                                                  errorBuilder: (context, error, stackTrace) {
-                                                    return _buildAvatarFallback(task);
-                                                  },
-                                                  loadingBuilder: (context, child, loadingProgress) {
-                                                    if (loadingProgress == null) return child;
-                                                    return _buildAvatarFallback(task);
-                                                  },
-                                                )
-                                              : _buildAvatarFallback(task),
-                                        ),
-                                        const SizedBox(width: 16),
-                                        
-                                        // Officer & vehicle info
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                task.officerName ?? 'Petugas',
-                                                style: semiBoldTextStyle(size: 16),
-                                                overflow: TextOverflow.ellipsis,
+                                        // Header
+                                        Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.center,
+                                          children: [
+                                            // Avatar
+                                            Container(
+                                              width: 40,
+                                              height: 40,
+                                              clipBehavior: Clip.antiAlias,
+                                              decoration: BoxDecoration(
+                                                color: kbpBlue100,
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                                border: Border.all(
+                                                    color: kbpBlue200,
+                                                    width: 1),
                                               ),
-                                              const SizedBox(height: 4),
-                                              Row(
+                                              child: task.officerPhotoUrl !=
+                                                          null &&
+                                                      task.officerPhotoUrl!
+                                                          .isNotEmpty
+                                                  ? Image.network(
+                                                      task.officerPhotoUrl!,
+                                                      fit: BoxFit.cover,
+                                                      errorBuilder: (context,
+                                                          error, stackTrace) {
+                                                        return _buildAvatarFallback(
+                                                            task);
+                                                      },
+                                                      loadingBuilder: (context,
+                                                          child,
+                                                          loadingProgress) {
+                                                        if (loadingProgress ==
+                                                            null) return child;
+                                                        return _buildAvatarFallback(
+                                                            task);
+                                                      },
+                                                    )
+                                                  : _buildAvatarFallback(task),
+                                            ),
+                                            const SizedBox(width: 16),
+
+                                            // Officer & vehicle info
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
                                                 children: [
-                                                  Icon(Icons.directions_car, 
-                                                      size: 14, 
-                                                      color: kbpBlue700),
-                                                  const SizedBox(width: 4),
                                                   Text(
-                                                    task.vehicleId.isEmpty 
-                                                      ? 'Tanpa Kendaraan' 
-                                                      : task.vehicleId,
-                                                    style: regularTextStyle(
-                                                      size: 14, 
-                                                      color: kbpBlue700
-                                                    ),
+                                                    task.officerName ??
+                                                        'Petugas',
+                                                    style: semiBoldTextStyle(
+                                                        size: 16),
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      const Icon(
+                                                          Icons.directions_car,
+                                                          size: 14,
+                                                          color: kbpBlue700),
+                                                      const SizedBox(width: 4),
+                                                      Text(
+                                                        task.vehicleId.isEmpty
+                                                            ? 'Tanpa Kendaraan'
+                                                            : task.vehicleId,
+                                                        style: regularTextStyle(
+                                                            size: 14,
+                                                            color: kbpBlue700),
+                                                      ),
+                                                    ],
                                                   ),
                                                 ],
                                               ),
-                                            ],
-                                          ),
-                                        ),
-                                        
-                                        // Date block
-                                        Column(
-                                          crossAxisAlignment: CrossAxisAlignment.end,
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 8, 
-                                                vertical: 4
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: kbpBlue100,
-                                                borderRadius: BorderRadius.circular(4),
-                                              ),
-                                              child: Text(
-                                                task.endTime != null 
-                                                  ? dateFormatter.format(task.endTime!) 
-                                                  : 'N/A',
-                                                style: mediumTextStyle(
-                                                  size: 12, 
-                                                  color: kbpBlue900
+                                            ),
+
+                                            // Date block
+                                            Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.end,
+                                              children: [
+                                                Container(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 4),
+                                                  decoration: BoxDecoration(
+                                                    color: kbpBlue100,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            4),
+                                                  ),
+                                                  child: Text(
+                                                    task.endTime != null
+                                                        ? dateFormatter.format(
+                                                            task.endTime!)
+                                                        : 'N/A',
+                                                    style: mediumTextStyle(
+                                                        size: 12,
+                                                        color: kbpBlue900),
+                                                  ),
                                                 ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  task.endTime != null
+                                                      ? timeFormatter
+                                                          .format(task.endTime!)
+                                                      : 'N/A',
+                                                  style: semiBoldTextStyle(
+                                                      size: 14,
+                                                      color: kbpBlue900),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+
+                                        const Divider(height: 24),
+
+                                        // Details
+                                        Row(
+                                          children: [
+                                            // Duration
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Durasi',
+                                                    style: regularTextStyle(
+                                                        size: 12,
+                                                        color: neutral600),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      const Icon(Icons.timer,
+                                                          size: 16,
+                                                          color: kbpBlue800),
+                                                      const SizedBox(width: 8),
+                                                      Text(
+                                                        _formatDuration(task
+                                                                        .endTime !=
+                                                                    null &&
+                                                                task.startTime !=
+                                                                    null
+                                                            ? task.endTime!
+                                                                .difference(task
+                                                                    .startTime!)
+                                                            : Duration.zero),
+                                                        style:
+                                                            semiBoldTextStyle(
+                                                                size: 14,
+                                                                color:
+                                                                    kbpBlue900),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
                                               ),
                                             ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              task.endTime != null 
-                                                ? timeFormatter.format(task.endTime!) 
-                                                : 'N/A',
-                                              style: semiBoldTextStyle(
-                                                size: 14, 
-                                                color: kbpBlue900
+
+                                            // Distance
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Jarak',
+                                                    style: regularTextStyle(
+                                                        size: 12,
+                                                        color: neutral600),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      const Icon(
+                                                          Icons.straighten,
+                                                          size: 16,
+                                                          color: kbpBlue800),
+                                                      const SizedBox(width: 8),
+                                                      Text(
+                                                        '${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
+                                                        style:
+                                                            semiBoldTextStyle(
+                                                                size: 14,
+                                                                color:
+                                                                    kbpBlue900),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+
+                                            // Points
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Titik',
+                                                    style: regularTextStyle(
+                                                        size: 12,
+                                                        color: neutral600),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      const Icon(Icons.place,
+                                                          size: 16,
+                                                          color: kbpBlue800),
+                                                      const SizedBox(width: 8),
+                                                      Text(
+                                                        '${task.assignedRoute?.length ?? 0} titik',
+                                                        style:
+                                                            semiBoldTextStyle(
+                                                                size: 14,
+                                                                color:
+                                                                    kbpBlue900),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                           ],
                                         ),
-                                      ],
-                                    ),
-                                    
-                                    const Divider(height: 24),
-                                    
-                                    // Details
-                                    Row(
-                                      children: [
-                                        // Duration
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Durasi',
-                                                style: regularTextStyle(
-                                                  size: 12, 
-                                                  color: neutral600
-                                                ),
+
+                                        const SizedBox(height: 16),
+
+                                        // View detail button
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: OutlinedButton.icon(
+                                            icon: const Icon(Icons.map_outlined,
+                                                size: 18),
+                                            label: const Text('Lihat Detail'),
+                                            onPressed: () =>
+                                                _showPatrolSummary(task),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: kbpBlue900,
+                                              side: const BorderSide(
+                                                  color: kbpBlue900),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 12),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
                                               ),
-                                              const SizedBox(height: 4),
-                                              Row(
-                                                children: [
-                                                  Icon(Icons.timer, 
-                                                      size: 16, 
-                                                      color: kbpBlue800),
-                                                  const SizedBox(width: 8),
-                                                  Text(
-                                                    _formatDuration(
-                                                      task.endTime != null && 
-                                                      task.startTime != null
-                                                        ? task.endTime!.difference(
-                                                            task.startTime!
-                                                          )
-                                                        : Duration.zero
-                                                    ),
-                                                    style: semiBoldTextStyle(
-                                                      size: 14, 
-                                                      color: kbpBlue900
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        
-                                        // Distance
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Jarak',
-                                                style: regularTextStyle(
-                                                  size: 12, 
-                                                  color: neutral600
-                                                ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Row(
-                                                children: [
-                                                  Icon(Icons.straighten, 
-                                                      size: 16, 
-                                                      color: kbpBlue800),
-                                                  const SizedBox(width: 8),
-                                                  Text(
-                                                    '${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
-                                                    style: semiBoldTextStyle(
-                                                      size: 14, 
-                                                      color: kbpBlue900
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        
-                                        // Points
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Titik',
-                                                style: regularTextStyle(
-                                                  size: 12, 
-                                                  color: neutral600
-                                                ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Row(
-                                                children: [
-                                                  Icon(Icons.place, 
-                                                      size: 16, 
-                                                      color: kbpBlue800),
-                                                  const SizedBox(width: 8),
-                                                  Text(
-                                                    '${task.assignedRoute?.length ?? 0} titik',
-                                                    style: semiBoldTextStyle(
-                                                      size: 14, 
-                                                      color: kbpBlue900
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
+                                            ),
                                           ),
                                         ),
                                       ],
                                     ),
-                                    
-                                    const SizedBox(height: 16),
-                                    
-                                    // View detail button
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: OutlinedButton.icon(
-                                        icon: const Icon(Icons.map_outlined, size: 18),
-                                        label: const Text('Lihat Detail'),
-                                        onPressed: () => _showPatrolSummary(task),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: kbpBlue900,
-                                          side: const BorderSide(color: kbpBlue900),
-                                          padding: const EdgeInsets.symmetric(vertical: 12),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                                  ),
                                 ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                ),
-              ],
-            ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
       ),
     );
   }

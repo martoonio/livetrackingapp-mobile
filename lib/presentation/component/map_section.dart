@@ -43,7 +43,7 @@ class _MapSectionState extends State<MapSection> {
 
       print('Fetching current position...');
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        desiredAccuracy: LocationAccuracy.best,
       );
 
       setState(() {

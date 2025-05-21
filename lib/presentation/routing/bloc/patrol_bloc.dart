@@ -126,6 +126,15 @@ class SubmitInitialReport extends PatrolEvent {
   List<Object?> get props => [photoUrl, note, reportTime];
 }
 
+class UpdateMockCount extends PatrolEvent {
+  final int mockCount;
+
+  UpdateMockCount({required this.mockCount});
+
+  @override
+  List<Object> get props => [mockCount];
+}
+
 // States
 abstract class PatrolState {}
 
@@ -235,10 +244,12 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
   StreamSubscription<Position>? _locationSubscription;
   StreamSubscription<PatrolTask?>? _taskSubscription;
   StreamSubscription<List<PatrolTask>>? _historySubscription;
-  StreamSubscription<dynamic>?
-      _connectivitySubscription;
+  StreamSubscription<dynamic>? _connectivitySubscription;
   Box<dynamic>? _offlineLocationBox;
   bool _isConnected = true;
+
+  // Tambahkan periodic timer untuk memeriksa timeliness secara berkala
+  Timer? _timelinessTimer;
 
   PatrolBloc({required this.repository}) : super(PatrolInitial()) {
     on<LoadRouteData>(_onLoadRouteData);
@@ -255,9 +266,13 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     on<DebugOfflineData>(_onDebugOfflineData);
     on<SubmitFinalReport>(_onSubmitFinalReport);
     on<SubmitInitialReport>(_onSubmitInitialReport);
+    on<UpdateMockCount>(_onUpdateMockCount);
 
     _initializeStorage();
     _setupConnectivityMonitoring();
+
+    // Setup timer to check timeliness periodically
+    _startTimelinessTimer();
   }
 
   void _onDebugOfflineData(
@@ -678,8 +693,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         });
         print(
             'Using provided existingRoutePath with ${existingRoutePath.length} points');
-      }
-      else if (event.task.routePath != null) {
+      } else if (event.task.routePath != null) {
         try {
           final taskRoutePath = event.task.routePath as Map<dynamic, dynamic>;
           taskRoutePath.forEach((key, value) {
@@ -729,7 +743,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       emit(PatrolError('Failed to resume patrol: $e'));
     }
   }
-
 
   Future<void> _onLoadPatrolHistory(
     LoadPatrolHistory event,
@@ -788,7 +801,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       ));
     } catch (e, stack) {
       print('Error in _onLoadPatrolHistory: $e');
-      print('Stack trace: $stack');
       emit(PatrolError('Failed to load patrol history: $e'));
     }
   }
@@ -903,6 +915,10 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
       final routePath = <String, dynamic>{};
 
+      // Calculate initial timeliness
+      final timeliness = _calculateTimeliness(event.task.assignedStartTime,
+          event.startTime, event.task.assignedEndTime, 'ongoing');
+
       final updatedTask = PatrolTask(
         taskId: event.task.taskId,
         userId: event.task.userId,
@@ -917,6 +933,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         createdAt: event.task.createdAt,
         routePath: routePath,
         lastLocation: event.task.lastLocation,
+        timeliness: timeliness,
       );
 
       if (_isConnected) {
@@ -925,6 +942,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           {
             'status': 'ongoing',
             'startTime': event.startTime.toIso8601String(),
+            'timeliness': timeliness,
           },
         );
       } else {
@@ -1020,28 +1038,33 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           final isMocked =
               await LocationValidator.isLocationMocked(event.position);
 
+          // Fix 1: Around line 1025-1050 - in the mock location detection handling
           if (isMocked) {
             print(
                 'MOCK LOCATION DETECTED: ${event.position.latitude}, ${event.position.longitude}');
 
             final newMockCount = currentState.mockLocationCount + 1;
+            print('New mock count: $newMockCount');
 
             final mockData = {
               'timestamp': event.timestamp.toIso8601String(),
               'coordinates': [
                 event.position.latitude,
-                event.position.longitude
+                event.position.longitude,
               ],
               'accuracy': event.position.accuracy,
               'speed': event.position.speed,
               'altitude': event.position.altitude,
               'heading': event.position.heading,
               'count': newMockCount,
-              'deviceInfo': await getDeviceInfo(),
+              // 'deviceInfo': await getDeviceInfo(),
             };
 
             if (_isConnected) {
               try {
+                // Fix 2: Complete this method call
+                print(
+                    'Calling repository.logMockLocationDetection with task ID: ${currentState.task!.taskId}');
                 await repository.logMockLocationDetection(
                   taskId: currentState.task!.taskId,
                   userId: currentState.task!.userId,
@@ -1065,7 +1088,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
                   'altitude': event.position.altitude,
                   'heading': event.position.heading,
                   'mockCount': newMockCount,
-                  'deviceInfo': await getDeviceInfo(),
+                  // 'deviceInfo': await getDeviceInfo(),
                 });
                 print('Mock location data saved to offline storage');
               }
@@ -1155,10 +1178,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             try {
               await repository.updateTask(
                 currentState.task!.taskId,
-                {
-                  'distance': newDistance,
-                  'route_path': updatedRoutePath
-                },
+                {'distance': newDistance, 'route_path': updatedRoutePath},
               );
               print(
                   'Updated distance and route_path in database: $newDistance meters');
@@ -1350,8 +1370,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
     _locationSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 5,
       ),
     ).listen(
       (Position position) {
@@ -1377,8 +1397,99 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     );
   }
 
+  void _startTimelinessTimer() {
+    _timelinessTimer?.cancel();
+    _timelinessTimer = Timer.periodic(Duration(minutes: 1), (timer) {
+      if (state is PatrolLoaded) {
+        final currentState = state as PatrolLoaded;
+        if (currentState.task != null) {
+          _checkAndUpdateTimeliness(currentState.task!);
+        }
+      }
+    });
+  }
+
+  Future<void> _checkAndUpdateTimeliness(PatrolTask task) async {
+    if (!_isConnected) return;
+
+    try {
+      // Recalculate timeliness
+      final newTimeliness = _calculateTimeliness(task.assignedStartTime,
+          task.startTime, task.assignedEndTime, task.status);
+
+      // Only update if changed
+      if (task.timeliness != newTimeliness) {
+        print('Timeliness changed from ${task.timeliness} to $newTimeliness');
+        await repository.updateTask(task.taskId, {'timeliness': newTimeliness});
+
+        // Update state
+        if (state is PatrolLoaded) {
+          final currentState = state as PatrolLoaded;
+          emit(currentState.copyWith(
+            task: task.copyWith(timeliness: newTimeliness),
+          ));
+        }
+      }
+    } catch (e) {
+      print('Error checking timeliness: $e');
+    }
+  }
+
+  String _calculateTimeliness(DateTime? assignedStartTime, DateTime? startTime,
+      DateTime? assignedEndTime, String status) {
+    if (status == 'finished') {
+      // Logic for finished tasks
+      if (assignedEndTime != null) {
+        if (startTime == null) {
+          return 'pastDue'; // Never started
+        } else if (startTime
+            .isAfter(assignedStartTime!.add(Duration(minutes: 10)))) {
+          return 'late'; // Started more than 10 minutes late
+        } else {
+          return 'ontime'; // Started on time or less than 10 minutes late
+        }
+      }
+    } else if (status == 'ongoing' || status == 'active') {
+      // Logic for ongoing tasks
+      if (assignedStartTime != null && startTime != null) {
+        if (startTime.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
+          return 'late'; // Started more than 10 minutes late
+        } else {
+          return 'ontime'; // Started on time or less than 10 minutes late
+        }
+      } else if (assignedStartTime != null && startTime == null) {
+        final now = DateTime.now();
+        if (now.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
+          return 'late'; // Not started and more than 10 minutes late
+        }
+      }
+    }
+
+    // If past assignedEndTime and not finished
+    if (assignedEndTime != null && DateTime.now().isAfter(assignedEndTime)) {
+      return 'pastDue';
+    }
+
+    return 'ontime'; // Default
+  }
+
+  Future<void> _onUpdateMockCount(
+    UpdateMockCount event,
+    Emitter<PatrolState> emit,
+  ) async {
+    if (state is PatrolLoaded) {
+      final currentState = state as PatrolLoaded;
+      emit(currentState.copyWith(
+        mockLocationCount: event.mockCount,
+        mockLocationDetected: true,
+        lastMockDetection: DateTime.now(),
+      ));
+    }
+  }
+
   @override
   Future<void> close() async {
+    _timelinessTimer?.cancel();
     await _locationSubscription?.cancel();
     await _taskSubscription?.cancel();
     await _historySubscription?.cancel();
@@ -1440,9 +1551,9 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         emit(PatrolLoading());
 
         final updatedTask = currentState.task?.copyWith(
-          finalReportPhotoUrl: event.photoUrl,
-          finalReportNote: event.note,
-          finalReportTime: event.reportTime,
+          initialReportPhotoUrl: event.photoUrl,
+          initialReportNote: event.note,
+          initialReportTime: event.reportTime,
         );
 
         if (updatedTask != null) {

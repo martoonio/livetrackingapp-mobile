@@ -152,6 +152,19 @@ class RouteRepositoryImpl implements RouteRepository {
         'officerPhotoUrl': officerPhotoUrl,
       });
 
+      // Check if timeliness needs update
+      final recalculatedTimeliness = determineTimelinessStatus(
+          task.assignedStartTime,
+          task.startTime,
+          task.assignedEndTime,
+          task.status);
+
+      // Update timeliness in database if needed
+      if (task.timeliness != recalculatedTimeliness) {
+        await updateTask(task.taskId, {'timeliness': recalculatedTimeliness});
+        return task.copyWith(timeliness: recalculatedTimeliness);
+      }
+
       return task;
     } catch (e, stackTrace) {
       print('Error in getCurrentTask: $e');
@@ -162,9 +175,26 @@ class RouteRepositoryImpl implements RouteRepository {
 
   @override
   Future<void> updateTaskStatus(String taskId, String status) async {
-    await _database.child('tasks').child(taskId).update({
-      'status': status,
-    });
+    try {
+      final task = await getTaskById(taskId: taskId);
+
+      await _database.child('tasks').child(taskId).update({
+        'status': status,
+      });
+
+      if (task != null) {
+        // Update timeliness after status change
+        final timeliness = determineTimelinessStatus(task.assignedStartTime,
+            task.startTime, task.assignedEndTime, status);
+
+        await _database.child('tasks').child(taskId).update({
+          'timeliness': timeliness,
+        });
+      }
+    } catch (e) {
+      print('Error updating task status: $e');
+      throw e;
+    }
   }
 
   @override
@@ -463,6 +493,14 @@ class RouteRepositoryImpl implements RouteRepository {
   PatrolTask _convertToPatrolTask(Map<dynamic, dynamic> data) {
     print('Converting task data: $data'); // Debug print
     try {
+      final startTime = _parseDateTime(data['startTime']);
+      final assignedStartTime = _parseDateTime(data['assignedStartTime']);
+      final assignedEndTime = _parseDateTime(data['assignedEndTime']);
+      final status = data['status']?.toString() ?? 'active';
+
+      String timeliness = data['timeliness']?.toString() ??
+          determineTimelinessStatus(
+              assignedStartTime, startTime, assignedEndTime, status);
       final task = PatrolTask(
         taskId: data['taskId']?.toString() ?? '',
         userId: data['userId']?.toString() ?? '',
@@ -479,6 +517,7 @@ class RouteRepositoryImpl implements RouteRepository {
                 .toList()
             : null,
         status: data['status']?.toString() ?? 'active',
+        timeliness: timeliness,
         distance: data['distance'] != null
             ? (data['distance'] as num).toDouble()
             : null,
@@ -494,6 +533,9 @@ class RouteRepositoryImpl implements RouteRepository {
         finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
         finalReportNote: data['finalReportNote']?.toString(),
         finalReportTime: _parseDateTime(data['finalReportTime']),
+        initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
+        initialReportNote: data['initialReportNote']?.toString(),
+        initialReportTime: _parseDateTime(data['initialReportTime']),
         mockLocationDetected: data['mockLocationDetected'] == true,
         mockLocationCount: data['mockLocationCount'] is num
             ? (data['mockLocationCount'] as num).toInt()
@@ -1210,6 +1252,72 @@ class RouteRepositoryImpl implements RouteRepository {
     } catch (e) {
       print('Error getting mock location count: $e');
       return 0;
+    }
+  }
+
+  String determineTimelinessStatus(DateTime? assignedStartTime,
+      DateTime? startTime, DateTime? assignedEndTime, String status) {
+    if (status == 'finished') {
+      // Untuk tugas yang sudah selesai
+      if (assignedEndTime != null) {
+        final endTimeThreshold = assignedEndTime.add(Duration(minutes: 10));
+        if (startTime == null) {
+          return 'pastDue'; // Tidak pernah dimulai
+        } else if (startTime
+            .isAfter(assignedStartTime!.add(Duration(minutes: 10)))) {
+          return 'late'; // Dimulai terlambat > 10 menit
+        } else {
+          return 'ontime'; // Dimulai tepat waktu atau terlambat < 10 menit
+        }
+      }
+    } else if (status == 'ongoing' || status == 'active') {
+      // Untuk tugas yang sedang berlangsung
+      if (assignedStartTime != null && startTime != null) {
+        if (startTime.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
+          return 'late'; // Dimulai terlambat > 10 menit
+        } else {
+          return 'ontime'; // Dimulai tepat waktu atau terlambat < 10 menit
+        }
+      } else if (assignedStartTime != null && startTime == null) {
+        final now = DateTime.now();
+        if (now.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
+          return 'late'; // Belum dimulai dan sudah terlambat > 10 menit
+        }
+      }
+    } else if (status == 'active' && startTime == null) {
+      // Tugas belum dimulai
+      if (assignedStartTime != null) {
+        final now = DateTime.now();
+        if (now.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
+          return 'late'; // Belum dimulai dan sudah terlambat > 10 menit
+        }
+      }
+    }
+
+    // Jika sudah melewati assignedEndTime dan belum selesai
+    if (assignedEndTime != null && DateTime.now().isAfter(assignedEndTime)) {
+      return 'pastDue';
+    }
+
+    return 'ontime'; // Default
+  }
+
+  Future<void> updateTaskTimeliness(String taskId) async {
+    try {
+      final task = await getTaskById(taskId: taskId);
+      if (task == null) return;
+
+      // Recalculate timeliness
+      final timeliness = determineTimelinessStatus(task.assignedStartTime,
+          task.startTime, task.assignedEndTime, task.status);
+
+      // Only update if timeliness changed
+      if (task.timeliness != timeliness) {
+        await updateTask(taskId, {'timeliness': timeliness});
+        print('Updated task $taskId timeliness to: $timeliness');
+      }
+    } catch (e) {
+      print('Error updating timeliness: $e');
     }
   }
 }

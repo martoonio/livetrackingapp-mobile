@@ -39,6 +39,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
 
   // Di dalam _PatrolHistoryScreenState
   String? _finalReportPhotoUrl;
+  String? _initialReportPhotoUrl;
 
   @override
   void initState() {
@@ -49,10 +50,36 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
 
     // Setel finalReportPhotoUrl awal jika ada
     _finalReportPhotoUrl = widget.task.finalReportPhotoUrl;
+    _initialReportPhotoUrl = widget.task.initialReportPhotoUrl;
 
     // Jika tidak ada, coba ambil dari Firebase
     if (_finalReportPhotoUrl == null || _finalReportPhotoUrl!.isEmpty) {
       _loadFinalReportPhoto();
+    }
+
+    // Jika tidak ada, coba ambil dari Firebase
+    if (_initialReportPhotoUrl == null || _initialReportPhotoUrl!.isEmpty) {
+      _loadInitialReportPhoto();
+    }
+  }
+
+  Future<void> _loadInitialReportPhoto() async {
+    try {
+      final snapshot = await FirebaseDatabase.instance
+          .ref('tasks')
+          .child(widget.task.taskId)
+          .child('initialReportPhotoUrl')
+          .get();
+
+      if (snapshot.exists && snapshot.value != null) {
+        setState(() {
+          _initialReportPhotoUrl = snapshot.value as String;
+          // Update juga di objek task
+          widget.task.initialReportPhotoUrl = _initialReportPhotoUrl;
+        });
+      }
+    } catch (e) {
+      print('Error loading initial report photo URL: $e');
     }
   }
 
@@ -1024,7 +1051,6 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
         ? '${duration.inHours}j ${duration.inMinutes % 60}m ${duration.inSeconds % 60}d'
         : 'N/A';
 
-    // Perhitungan titik yang dikunjungi berdasarkan jarak radius 5 meter
     final visitData = _calculateVisitedPoints();
     int visitedPoints = visitData['visitedCount'];
     int totalPoints = visitData['totalCount'];
@@ -1037,7 +1063,6 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Task header card
           Card(
             elevation: 2,
             shape: RoundedRectangleBorder(
@@ -1086,11 +1111,25 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                                 ),
                               ),
                             ),
+                            if (widget.task.timeliness != null) ...[
+                              const SizedBox(width: 8),
+                              buildTimelinessIndicator(widget.task.timeliness),
+                            ],
                           ],
                         ),
                       ),
                     ],
                   ),
+                  if (widget.task.timeliness != null) ...[
+                    const SizedBox(height: 16),
+                    const Divider(height: 1),
+                    const SizedBox(height: 16),
+                    _infoRow(
+                      Icons.schedule,
+                      'Ketepatan',
+                      getTimelinessDescription(widget.task.timeliness),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   _infoRow(
                       Icons.directions_car, 'Kendaraan', widget.task.vehicleId),
@@ -1125,20 +1164,94 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
             ),
           ),
 
-          // Tambahkan di dalam _buildTaskDetailsView(), tepat pada bagian "// Final Report Photo"
-// ...
-
           const SizedBox(height: 16),
 
-// Final Report Photo
-          if (widget.task.finalReportPhotoUrl != null &&
-              widget.task.finalReportPhotoUrl!.isNotEmpty)
-            _buildReportPhoto(widget.task.finalReportPhotoUrl!),
+          if (widget.task.timeliness != null)
+            Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: getTimelinessColor(widget.task.timeliness)
+                                .withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            widget.task.timeliness?.toLowerCase() == 'ontime'
+                                ? Icons.check_circle
+                                : widget.task.timeliness?.toLowerCase() ==
+                                        'late'
+                                    ? Icons.access_time
+                                    : Icons.error,
+                            color: getTimelinessColor(widget.task.timeliness),
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Status Ketepatan Waktu',
+                                style: semiBoldTextStyle(size: 16),
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: getTimelinessColor(
+                                          widget.task.timeliness),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      getTimelinessText(widget.task.timeliness),
+                                      style: mediumTextStyle(
+                                          size: 12, color: Colors.white),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      getTimelinessDetailDescription(widget.task.timeliness,
+                          widget.task.startTime, widget.task.assignedStartTime),
+                      style: regularTextStyle(size: 14, color: neutral700),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           const SizedBox(height: 16),
 
           if (widget.task.initialReportPhotoUrl != null &&
               widget.task.initialReportPhotoUrl!.isNotEmpty)
-            _buildReportPhoto(widget.task.initialReportPhotoUrl!),
+            _buildReportPhoto('initial', widget.task.initialReportPhotoUrl!),
+          const SizedBox(height: 16),
+
+          if (widget.task.finalReportPhotoUrl != null &&
+              widget.task.finalReportPhotoUrl!.isNotEmpty)
+            _buildReportPhoto('final', widget.task.finalReportPhotoUrl!),
           const SizedBox(height: 16),
 
           // Progress card
@@ -1234,7 +1347,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
     );
   }
 
-  Widget _buildReportPhoto(String imageUrl) {
+  Widget _buildReportPhoto(String type, String imageUrl) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(
@@ -1250,11 +1363,18 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                 const Icon(Icons.photo_camera, color: kbpBlue900),
                 const SizedBox(width: 8),
                 Text(
-                  'Foto Laporan Akhir',
+                  type == 'initial'
+                      ? 'Foto Laporan Awal'
+                      : 'Foto Laporan Akhir',
                   style: semiBoldTextStyle(size: 16),
                 ),
                 const Spacer(),
-                if (widget.task.finalReportTime != null)
+                if (type == 'initial' && widget.task.initialReportTime != null)
+                  Text(
+                    timeFormatter.format(widget.task.initialReportTime!),
+                    style: regularTextStyle(size: 12, color: neutral600),
+                  )
+                else if (type == 'final' && widget.task.finalReportTime != null)
                   Text(
                     timeFormatter.format(widget.task.finalReportTime!),
                     style: regularTextStyle(size: 12, color: neutral600),

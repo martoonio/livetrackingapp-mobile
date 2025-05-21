@@ -6,11 +6,12 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 class PatrolTask {
   final String taskId;
-  final String userId; // ID petugas yang ditugaskan
-  final String officerId; // Alternatif ID petugas (untuk kompatibilitas)
+  final String userId;
+  final String officerId;
   final String vehicleId;
   final String status;
-  final String clusterId; // ID cluster untuk task ini
+  final String? timeliness;
+  final String clusterId;
   final DateTime? startTime;
   final DateTime? endTime;
   final DateTime? assignedStartTime;
@@ -18,12 +19,10 @@ class PatrolTask {
   final double? distance;
   final List<List<double>>? assignedRoute;
   final DateTime createdAt;
-  final String createdBy; // User yang membuat task
+  final String createdBy;
   final Map<String, dynamic>? routePath;
   final Map<String, dynamic>? lastLocation;
   final String? notes;
-
-  // Data officer yang akan di-lazy load
   String? _officerName;
   String? _officerPhotoUrl;
   String? _clusterName;
@@ -58,7 +57,7 @@ class PatrolTask {
     if (_officerPhotoUrl == null ||
         _officerPhotoUrl == 'P' ||
         _officerPhotoUrl!.isEmpty) {
-      return ''; // Return empty string untuk menghindari issue loading image
+      return '';
     }
     return _officerPhotoUrl!;
   }
@@ -68,7 +67,6 @@ class PatrolTask {
   set vehicleName(String value) => _vehicleName = value;
   set officerPhotoUrl(String value) => _officerPhotoUrl = value;
 
-  // Tambahkan field baru
   String? finalReportPhotoUrl;
   final String? finalReportNote;
   final DateTime? finalReportTime;
@@ -84,6 +82,7 @@ class PatrolTask {
     this.officerId = '',
     required this.vehicleId,
     required this.status,
+    this.timeliness,
     this.clusterId = '',
     this.startTime,
     this.endTime,
@@ -100,8 +99,6 @@ class PatrolTask {
     String? clusterName,
     String? vehicleName,
     String? officerPhotoUrl,
-
-    // Parameter baru
     this.finalReportPhotoUrl,
     this.finalReportNote,
     this.finalReportTime,
@@ -117,7 +114,6 @@ class PatrolTask {
     _officerPhotoUrl = officerPhotoUrl;
   }
 
-  // Konversi dari JSON ke objek PatrolTask
   factory PatrolTask.fromJson(Map<String, dynamic> json) {
     return PatrolTask(
       taskId: json['taskId'] as String? ?? '',
@@ -125,6 +121,7 @@ class PatrolTask {
       officerId: json['officerId'] as String? ?? '',
       vehicleId: json['vehicleId'] as String? ?? '',
       status: json['status'] as String? ?? 'active',
+      timeliness: json['timeliness'] as String?,
       clusterId: json['clusterId'] as String? ?? '',
       startTime: _parseDateTime(json['startTime']) ??
           _parseDateTime(json['start_time']),
@@ -154,8 +151,6 @@ class PatrolTask {
       clusterName: json['clusterName'] as String?,
       vehicleName: json['vehicleName'] as String?,
       officerPhotoUrl: json['officerPhotoUrl'] as String?,
-
-      // Field baru
       finalReportPhotoUrl: json['finalReportPhotoUrl'] as String?,
       finalReportNote: json['finalReportNote'] as String?,
       finalReportTime: _parseDateTime(json['finalReportTime']),
@@ -167,7 +162,6 @@ class PatrolTask {
     );
   }
 
-  // Konversi ke Map untuk Firebase
   Map<String, dynamic> toMap() {
     return {
       'taskId': taskId,
@@ -175,6 +169,7 @@ class PatrolTask {
       'officerId': officerId.isNotEmpty ? officerId : userId,
       'vehicleId': vehicleId,
       'status': status,
+      'timeliness': timeliness,
       'clusterId': clusterId,
       'startTime': startTime?.toIso8601String(),
       'endTime': endTime?.toIso8601String(),
@@ -185,8 +180,6 @@ class PatrolTask {
       'createdAt': createdAt.toIso8601String(),
       'createdBy': createdBy,
       'notes': notes,
-
-      // Field baru
       'finalReportPhotoUrl': finalReportPhotoUrl,
       'finalReportNote': finalReportNote,
       'finalReportTime': finalReportTime?.toIso8601String(),
@@ -198,7 +191,6 @@ class PatrolTask {
     };
   }
 
-  // Helper method untuk parsing DateTime dari berbagai format
   static DateTime? _parseDateTime(dynamic value) {
     if (value == null) return null;
 
@@ -210,14 +202,12 @@ class PatrolTask {
         return null;
       }
     } else if (value is int) {
-      // Asumsi timestamp dalam milidetik
       return DateTime.fromMillisecondsSinceEpoch(value);
     }
 
     return null;
   }
 
-  // Helper method untuk parsing route coordinates dengan lebih aman
   static List<List<double>> _parseRouteCoordinates(dynamic routeData) {
     if (routeData is! List) return [];
 
@@ -243,7 +233,6 @@ class PatrolTask {
     }
   }
 
-  // Fetch related data
   Future<void> fetchRelatedData(DatabaseReference database) async {
     try {
       await Future.wait([
@@ -256,11 +245,6 @@ class PatrolTask {
     }
   }
 
-  // Fetch officer name
-  // Perbaikan metode fetchOfficerName
-
-  // Perbaiki method fetchOfficerName untuk mendapatkan nama officer dengan lebih baik
-
   Future<void> fetchOfficerName(DatabaseReference database) async {
     try {
       if (clusterId.isEmpty || userId.isEmpty) {
@@ -270,20 +254,16 @@ class PatrolTask {
 
       print('Fetching officer name for userId: $userId in cluster: $clusterId');
 
-      // PERBAIKAN UTAMA: Cek database struktur baru dengan officers sebagai array
       final officersSnapshot =
           await database.child('users/$clusterId/officers').get();
 
       if (officersSnapshot.exists && officersSnapshot.value != null) {
         final data = officersSnapshot.value;
 
-        // Handle array of officers (sesuai dengan data sebenarnya di database)
         if (data is List) {
-          // Filter out null entries
           final officersList = List.from(data.where((item) => item != null));
           print('Officers data is a List with ${officersList.length} entries');
 
-          // Find officer by ID
           for (var officerData in officersList) {
             if (officerData is Map && officerData['id'] == userId) {
               _officerName =
@@ -293,10 +273,7 @@ class PatrolTask {
               return;
             }
           }
-        }
-        // Handle untuk kasus struktur Map (backward compatibility)
-        else if (data is Map<dynamic, dynamic>) {
-          // Case 1: Officer ID is direct key
+        } else if (data is Map<dynamic, dynamic>) {
           if (data.containsKey(userId) && data[userId] is Map) {
             final officerData = data[userId];
             _officerName = officerData['name']?.toString() ?? 'Unknown Officer';
@@ -305,7 +282,6 @@ class PatrolTask {
             return;
           }
 
-          // Case 2: Loop through map entries to find by ID property
           for (var entry in data.entries) {
             final officerData = entry.value;
             if (officerData is Map && officerData['id'] == userId) {
@@ -319,7 +295,6 @@ class PatrolTask {
         }
       }
 
-      // Direct lookup as fallback
       final userSnapshot = await database.child('users/$userId').get();
       if (userSnapshot.exists && userSnapshot.value != null) {
         final userData = userSnapshot.value;
@@ -332,7 +307,6 @@ class PatrolTask {
         }
       }
 
-      // Default fallback if all methods fail
       _officerName = userId.isNotEmpty
           ? 'Officer #${userId.substring(0, Math.min(5, userId.length))}'
           : 'Unknown Officer';
@@ -345,9 +319,6 @@ class PatrolTask {
     }
   }
 
-  // Fetch cluster name
-  // Perbaikan metode fetchClusterName
-
   Future<void> fetchClusterName(DatabaseReference database) async {
     try {
       if (clusterId.isEmpty) {
@@ -357,7 +328,6 @@ class PatrolTask {
 
       print('Fetching cluster name for ID: $clusterId');
 
-      // Coba di path users
       final userSnapshot = await database.child('users').child(clusterId).get();
 
       if (userSnapshot.exists) {
@@ -367,7 +337,6 @@ class PatrolTask {
         return;
       }
 
-      // Coba di path clusters (untuk kompatibilitas dengan struktur lama)
       final clusterSnapshot =
           await database.child('clusters').child(clusterId).get();
 
@@ -378,21 +347,18 @@ class PatrolTask {
         return;
       }
 
-      // Default jika tidak ditemukan
       _clusterName =
           'Cluster #${clusterId.substring(0, Math.min(5, clusterId.length))}';
       print('Could not find cluster name, using default: $_clusterName');
     } catch (e) {
       print('Error fetching cluster name: $e');
 
-      // Nilai default yang lebih baik jika terjadi error
       _clusterName = clusterId.isNotEmpty
           ? 'Cluster #${clusterId.substring(0, Math.min(5, clusterId.length))}'
           : 'Unknown Cluster';
     }
   }
 
-  // Fetch vehicle name/info
   Future<void> fetchVehicleName(DatabaseReference database) async {
     try {
       if (vehicleId.isEmpty) return;
@@ -418,19 +384,16 @@ class PatrolTask {
     }
   }
 
-  // Dalam class PatrolTask, tambahkan method untuk membantu mengelola routePath
   List<LatLng> getRoutePathAsLatLng() {
     if (routePath == null || routePath!.isEmpty) {
       return [];
     }
 
     try {
-      // Convert to Map format for type safety
       final Map<String, dynamic> pathMap = routePath is Map<String, dynamic>
           ? routePath as Map<String, dynamic>
           : Map<String, dynamic>.from(routePath as Map);
 
-      // Sort by timestamp for correct ordering
       final entries = pathMap.entries.toList()
         ..sort((a, b) {
           String aTime = a.value['timestamp'] as String;
@@ -438,7 +401,6 @@ class PatrolTask {
           return aTime.compareTo(bTime);
         });
 
-      // Convert to LatLng list
       return entries.map((entry) {
         final coords = entry.value['coordinates'] as List;
         return LatLng(
@@ -452,7 +414,6 @@ class PatrolTask {
     }
   }
 
-// Add helper to calculate distance from route
   double calculateTotalDistance() {
     if (routePath == null || routePath!.isEmpty) {
       return distance ?? 0.0;
@@ -478,13 +439,13 @@ class PatrolTask {
     }
   }
 
-  // copyWith method untuk membuat salinan dengan perubahan
   PatrolTask copyWith({
     String? taskId,
     String? userId,
     String? officerId,
     String? vehicleId,
     String? status,
+    String? timeliness,
     String? clusterId,
     DateTime? startTime,
     DateTime? endTime,
@@ -500,9 +461,7 @@ class PatrolTask {
     String? officerName,
     String? clusterName,
     String? vehicleName,
-    String? officerPhotoUrl, // Tambahkan parameter ini
-
-    // Parameter baru
+    String? officerPhotoUrl,
     String? finalReportPhotoUrl,
     String? finalReportNote,
     DateTime? finalReportTime,
@@ -518,6 +477,7 @@ class PatrolTask {
       officerId: officerId ?? this.officerId,
       vehicleId: vehicleId ?? this.vehicleId,
       status: status ?? this.status,
+      timeliness: timeliness ?? this.timeliness,
       clusterId: clusterId ?? this.clusterId,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
@@ -534,8 +494,6 @@ class PatrolTask {
       clusterName: clusterName ?? _clusterName,
       vehicleName: vehicleName ?? _vehicleName,
       officerPhotoUrl: officerPhotoUrl ?? _officerPhotoUrl, // Tambahkan ini
-
-      // Field baru
       finalReportPhotoUrl: finalReportPhotoUrl ?? this.finalReportPhotoUrl,
       finalReportNote: finalReportNote ?? this.finalReportNote,
       finalReportTime: finalReportTime ?? this.finalReportTime,
@@ -548,7 +506,6 @@ class PatrolTask {
     );
   }
 
-  // Untuk debugging
   @override
   String toString() {
     return 'PatrolTask(taskId: $taskId, userId: $userId, status: $status, clusterId: $clusterId)';
