@@ -35,7 +35,7 @@ abstract class RouteRepository {
   Future<List<PatrolTask>> getAllTasks();
 
   // Create new task
-  Future<void> createTask({
+  Future<String> createTask({
     required String clusterId,
     required String vehicleId,
     required List<List<double>> assignedRoute,

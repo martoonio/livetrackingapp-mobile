@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:intl/intl.dart';
 import 'package:livetrackingapp/domain/entities/report.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
@@ -166,6 +167,36 @@ class _MapScreenState extends State<MapScreen> {
     });
 
     _initializeMap();
+  }
+
+  bool _canStartPatrol() {
+    // Jika patroli sedang berlangsung, selalu return true
+    final state = context.read<PatrolBloc>().state;
+    if (state is PatrolLoaded && state.isPatrolling) return true;
+
+    // Jika tidak ada jadwal mulai, bisa langsung mulai
+    if (widget.task.assignedStartTime == null) return true;
+
+    // Hitung selisih waktu sekarang dengan jadwal mulai
+    final now = DateTime.now();
+    final timeDifference = widget.task.assignedStartTime!.difference(now);
+
+    // Bisa mulai jika kurang dari atau sama dengan 10 menit sebelum jadwal
+    return timeDifference.inMinutes <= 10;
+  }
+
+// Tambahkan method ini untuk mendapatkan waktu tunggu yang tersisa
+  String _getRemainingWaitTime() {
+    if (widget.task.assignedStartTime == null) return '';
+
+    final now = DateTime.now();
+    final timeDifference = widget.task.assignedStartTime!.difference(now);
+
+    if (timeDifference.inHours > 0) {
+      return '${timeDifference.inHours} jam ${timeDifference.inMinutes % 60} menit lagi';
+    } else {
+      return '${timeDifference.inMinutes} menit lagi';
+    }
   }
 
   void _resumeExistingPatrol(PatrolTask task) {
@@ -497,7 +528,20 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _handlePatrolButtonPress(BuildContext context, PatrolState state) async {
-    // Check status patrol
+    // Periksa apakah sudah bisa mulai patroli
+    if (!_canStartPatrol() && !(state is PatrolLoaded && state.isPatrolling)) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Belum Waktunya Patroli',
+        subtitle:
+            'Anda dapat memulai patroli 10 menit sebelum jadwal dimulai (${_getRemainingWaitTime()})',
+        type: SnackbarType.warning,
+      );
+      _resetLongPressAnimation();
+      return;
+    }
+
+    // Kode yang sudah ada untuk menghentikan atau memulai patroli
     final isPatrollingInBloc = state is PatrolLoaded && state.isPatrolling;
     final isPatrollingInTask =
         widget.task.status == 'ongoing' || widget.task.status == 'in_progress';
@@ -525,6 +569,49 @@ class _MapScreenState extends State<MapScreen> {
 
   // Tombol mulai/stop
   Widget _buildPatrolButtonUI(bool isPatrolling) {
+    final canStartNow = _canStartPatrol();
+
+    // Jika tidak bisa mulai dan tidak sedang patroli
+    if (!canStartNow && !isPatrolling) {
+      return Container(
+        width: 120, // Lebih lebar untuk menampung teks
+        height: 70,
+        decoration: BoxDecoration(
+          shape: BoxShape.rectangle,
+          borderRadius: BorderRadius.circular(12),
+          color: neutral500, // Abu-abu untuk menunjukkan inactive
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.timer,
+              color: Colors.white,
+              size: 24,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Tunggu',
+              style: semiBoldTextStyle(size: 12, color: Colors.white),
+            ),
+            Text(
+              _getRemainingWaitTime(),
+              style: regularTextStyle(size: 10, color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Kode yang sudah ada sebelumnya untuk tombol aktif
     return GestureDetector(
       onTap: () {
         // Tampilkan tooltip manual saat tap biasa
@@ -2712,6 +2799,19 @@ class _MapScreenState extends State<MapScreen> {
                                   ),
                                 ],
                               ),
+                            ),
+                          ],
+                        ),
+
+                        if (!isPatrolling) 8.height,
+                        Row(
+                          children: [
+                            const Icon(Icons.access_time,
+                                size: 16, color: kbpBlue900),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Patroli dimulai pada ${DateFormat('dd MMM - HH:mm').format(widget.task.assignedStartTime!)}',
+                              style: regularTextStyle(size: 14),
                             ),
                           ],
                         ),

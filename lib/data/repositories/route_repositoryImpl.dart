@@ -615,9 +615,8 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
-  // Add these methods after the existing ones
   @override
-  Future<void> createTask({
+  Future<String> createTask({
     required String clusterId,
     required String vehicleId,
     required List<List<double>> assignedRoute,
@@ -629,30 +628,17 @@ class RouteRepositoryImpl implements RouteRepository {
       await _checkAuth();
       final taskRef = _database.child('tasks').push();
 
+      // Simpan ID task untuk dikembalikan
+      final String taskId = taskRef.key!;
+
       final newTask = {
         'clusterId': clusterId,
-        'taskId': taskRef.key,
+        'taskId': taskId,
         'vehicleId': vehicleId,
         'userId': assignedOfficerId,
         'assigned_route': assignedRoute,
-        'assignedStartTime': assignedStartTime != null
-            ? DateTime(
-                DateTime.now().year,
-                DateTime.now().month,
-                DateTime.now().day,
-                assignedStartTime.hour,
-                assignedStartTime.minute,
-              ).toIso8601String()
-            : null,
-        'assignedEndTime': assignedEndTime != null
-            ? DateTime(
-                DateTime.now().year,
-                DateTime.now().month,
-                DateTime.now().day,
-                assignedEndTime.hour,
-                assignedEndTime.minute,
-              ).toIso8601String()
-            : null,
+        'assignedStartTime': assignedStartTime?.toIso8601String(),
+        'assignedEndTime': assignedEndTime?.toIso8601String(),
         'status': 'active',
         'createdAt': DateTime.now().toIso8601String(),
         'route_path': null,
@@ -660,7 +646,10 @@ class RouteRepositoryImpl implements RouteRepository {
       };
 
       await taskRef.set(newTask);
-      print('New task created with ID: ${taskRef.key}');
+      print('New task created with ID: $taskId');
+
+      // Kembalikan ID task
+      return taskId;
     } catch (e) {
       print('Error creating task: $e');
       throw Exception('Failed to create task: $e');
@@ -1257,49 +1246,37 @@ class RouteRepositoryImpl implements RouteRepository {
 
   String determineTimelinessStatus(DateTime? assignedStartTime,
       DateTime? startTime, DateTime? assignedEndTime, String status) {
-    if (status == 'finished') {
-      // Untuk tugas yang sudah selesai
-      if (assignedEndTime != null) {
-        final endTimeThreshold = assignedEndTime.add(Duration(minutes: 10));
-        if (startTime == null) {
-          return 'pastDue'; // Tidak pernah dimulai
-        } else if (startTime
-            .isAfter(assignedStartTime!.add(Duration(minutes: 10)))) {
-          return 'late'; // Dimulai terlambat > 10 menit
-        } else {
-          return 'ontime'; // Dimulai tepat waktu atau terlambat < 10 menit
+    // Jika belum dimulai, status 'idle'
+    if (startTime == null) {
+      return 'idle';
+    }
+
+    if (assignedStartTime != null) {
+      // Batas waktu toleransi - 10 menit dari jadwal
+      final lateThreshold = assignedStartTime.add(Duration(minutes: 10));
+      final earlyThreshold = assignedStartTime.subtract(Duration(minutes: 10));
+
+      // Jika waktu mulai lebih dari 10 menit setelah jadwal
+      if (startTime.isAfter(lateThreshold)) {
+        // Jika juga melebihi waktu akhir
+        if (assignedEndTime != null && startTime.isAfter(assignedEndTime)) {
+          return 'pastDue';
         }
+        return 'late';
       }
-    } else if (status == 'ongoing' || status == 'active') {
-      // Untuk tugas yang sedang berlangsung
-      if (assignedStartTime != null && startTime != null) {
-        if (startTime.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
-          return 'late'; // Dimulai terlambat > 10 menit
-        } else {
-          return 'ontime'; // Dimulai tepat waktu atau terlambat < 10 menit
-        }
-      } else if (assignedStartTime != null && startTime == null) {
-        final now = DateTime.now();
-        if (now.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
-          return 'late'; // Belum dimulai dan sudah terlambat > 10 menit
-        }
+      // Jika waktu mulai dalam rentang -10 hingga +10 menit dari jadwal
+      else if (startTime.isAfter(earlyThreshold) ||
+          startTime.isAtSameMomentAs(earlyThreshold)) {
+        return 'ontime';
       }
-    } else if (status == 'active' && startTime == null) {
-      // Tugas belum dimulai
-      if (assignedStartTime != null) {
-        final now = DateTime.now();
-        if (now.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
-          return 'late'; // Belum dimulai dan sudah terlambat > 10 menit
-        }
+      // Jika terlalu awal (lebih dari 10 menit sebelum jadwal)
+      else {
+        return 'early';
       }
     }
 
-    // Jika sudah melewati assignedEndTime dan belum selesai
-    if (assignedEndTime != null && DateTime.now().isAfter(assignedEndTime)) {
-      return 'pastDue';
-    }
-
-    return 'ontime'; // Default
+    // Default jika assignedStartTime null
+    return 'ontime';
   }
 
   Future<void> updateTaskTimeliness(String taskId) async {

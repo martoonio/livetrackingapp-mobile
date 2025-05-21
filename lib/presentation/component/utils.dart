@@ -104,79 +104,89 @@ String getShortShiftText(ShiftType shift) {
   }
 }
 
-// Tambahkan helper methods untuk timeliness di awal class _PatrolHistoryScreenState
+String getTimelinessText(String? timeliness) {
+  if (timeliness == null) return 'Belum Dinilai';
 
-// Helper untuk menentukan warna timeliness
+  switch (timeliness.toLowerCase()) {
+    case 'ontime':
+      return 'Tepat Waktu';
+    case 'late':
+      return 'Terlambat';
+    case 'early':
+      return 'Lebih Awal';
+    case 'pastDue':
+      return 'Melewati Batas';
+    case 'idle':
+      return 'Belum Dimulai';
+    default:
+      return 'Belum Dinilai';
+  }
+}
+
+String getTimelinessDescription(String? timeliness) {
+  if (timeliness == null) return 'Ketepatan waktu patroli belum dinilai.';
+
+  switch (timeliness.toLowerCase()) {
+    case 'ontime':
+      return 'Patroli dimulai tepat waktu sesuai jadwal (±10 menit)';
+    case 'late':
+      return 'Patroli dimulai terlambat lebih dari 10 menit dari jadwal';
+    case 'early':
+      return 'Patroli dimulai lebih dari 10 menit sebelum jadwal';
+    case 'pastDue':
+      return 'Patroli dimulai setelah batas waktu akhir yang ditentukan';
+    case 'idle':
+      return 'Patroli belum dimulai';
+    default:
+      return 'Ketepatan waktu patroli belum dinilai';
+  }
+}
+
 Color getTimelinessColor(String? timeliness) {
-  switch (timeliness?.toLowerCase()) {
+  if (timeliness == null) return neutral500;
+
+  switch (timeliness.toLowerCase()) {
     case 'ontime':
       return successG500;
     case 'late':
-      return warningY500;
+      return warningY500; // Ubah ke warna peringatan (kuning)
     case 'pastDue':
-      return dangerR500;
+      return dangerR500; // Merah untuk status paling buruk
+    case 'early':
+      return kbpBlue700; // Biru untuk lebih awal
+    case 'idle':
+      return neutral500; // Abu-abu untuk belum mulai
     default:
       return neutral500;
   }
 }
 
-// Helper untuk menerjemahkan status timeliness
-String getTimelinessText(String? timeliness) {
-  switch (timeliness?.toLowerCase()) {
-    case 'ontime':
-      return 'Tepat Waktu';
-    case 'late':
-      return 'Terlambat';
-    case 'pastDue':
-      return 'Melewati Batas';
-    default:
-      return 'Tidak Diketahui';
-  }
-}
-
-// Tambahkan widget untuk badge timeliness
 Widget buildTimelinessIndicator(String? timeliness) {
-  if (timeliness == null) return const SizedBox.shrink();
+  if (timeliness == null) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: neutral200,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        'Belum Dinilai',
+        style: mediumTextStyle(size: 12, color: neutral700),
+      ),
+    );
+  }
 
   return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
       color: getTimelinessColor(timeliness),
       borderRadius: BorderRadius.circular(12),
     ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          timeliness.toLowerCase() == 'ontime'
-              ? Icons.check_circle
-              : timeliness.toLowerCase() == 'late'
-                  ? Icons.access_time
-                  : Icons.error,
-          color: Colors.white,
-          size: 14,
-        ),
-        const SizedBox(width: 4),
-        Text(
-          getTimelinessText(timeliness),
-          style: mediumTextStyle(size: 12, color: neutralWhite),
-        ),
-      ],
+    child: Text(
+      getTimelinessText(timeliness),
+      style: mediumTextStyle(size: 12, color: Colors.white),
     ),
   );
-}
-
-String getTimelinessDescription(String? timeliness) {
-  switch (timeliness?.toLowerCase()) {
-    case 'ontime':
-      return 'Petugas memulai patroli tepat waktu';
-    case 'late':
-      return 'Petugas terlambat memulai patroli (>10 menit)';
-    case 'pastDue':
-      return 'Patroli melewati batas waktu yang ditentukan';
-    default:
-      return 'Status ketepatan tidak diketahui';
-  }
 }
 
 // Helper untuk deskripsi detail timeliness

@@ -1437,40 +1437,38 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
   String _calculateTimeliness(DateTime? assignedStartTime, DateTime? startTime,
       DateTime? assignedEndTime, String status) {
-    if (status == 'finished') {
-      // Logic for finished tasks
-      if (assignedEndTime != null) {
-        if (startTime == null) {
-          return 'pastDue'; // Never started
-        } else if (startTime
-            .isAfter(assignedStartTime!.add(Duration(minutes: 10)))) {
-          return 'late'; // Started more than 10 minutes late
-        } else {
-          return 'ontime'; // Started on time or less than 10 minutes late
+    // Case 1: Belum dimulai
+    if (startTime == null) {
+      return 'idle';
+    }
+
+    // Case 2: Sudah dimulai, cek ketepatan waktu
+    if (assignedStartTime != null) {
+      // Ambang batas terlambat - 10 menit setelah jadwal
+      final lateThreshold = assignedStartTime.add(Duration(minutes: 10));
+      // Ambang batas terlalu awal - 10 menit sebelum jadwal
+      final earlyThreshold = assignedStartTime.subtract(Duration(minutes: 10));
+
+      // Jika terlambat lebih dari 10 menit
+      if (startTime.isAfter(lateThreshold)) {
+        // Jika melewati batas waktu akhir yang dijadwalkan
+        if (assignedEndTime != null && startTime.isAfter(assignedEndTime)) {
+          return 'pastDue';
         }
+        return 'late';
       }
-    } else if (status == 'ongoing' || status == 'active') {
-      // Logic for ongoing tasks
-      if (assignedStartTime != null && startTime != null) {
-        if (startTime.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
-          return 'late'; // Started more than 10 minutes late
-        } else {
-          return 'ontime'; // Started on time or less than 10 minutes late
-        }
-      } else if (assignedStartTime != null && startTime == null) {
-        final now = DateTime.now();
-        if (now.isAfter(assignedStartTime.add(Duration(minutes: 10)))) {
-          return 'late'; // Not started and more than 10 minutes late
-        }
+      // Jika dalam rentang -10 sampai +10 menit
+      else if (startTime.isAfter(earlyThreshold) ||
+          startTime.isAtSameMomentAs(earlyThreshold)) {
+        return 'ontime';
+      }
+      // Jika terlalu awal (lebih dari 10 menit sebelum jadwal)
+      else {
+        return 'early';
       }
     }
 
-    // If past assignedEndTime and not finished
-    if (assignedEndTime != null && DateTime.now().isAfter(assignedEndTime)) {
-      return 'pastDue';
-    }
-
-    return 'ontime'; // Default
+    return 'ontime'; // Default jika tidak ada jadwal awal
   }
 
   Future<void> _onUpdateMockCount(

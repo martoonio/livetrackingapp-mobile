@@ -38,6 +38,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   Officer? _selectedOfficer;
   String? _selectedClusterName;
 
+  String? _createdTaskId;
+  String? get taskId => _createdTaskId;
+
   // Shift-based time presets
 
   DateTime _assignedStartTime = DateTime.now();
@@ -107,8 +110,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     }
   }
 
-// Perbaikan pada metode _updateEndTimeBasedOnStartTime
-
   void _updateEndTimeBasedOnStartTime() {
     if (_selectedOfficer == null) return;
 
@@ -118,23 +119,26 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     // Tentukan batas maksimum waktu selesai berdasarkan shift
     DateTime maxEndTime;
 
+    // Gunakan tanggal yang sama dengan assignedStartTime
+    final startDate = _assignedStartTime;
+
     switch (_selectedOfficer!.shift) {
       case ShiftType.pagi:
-        // Batas waktu maksimum untuk shift pagi: jam 15:00 di hari yang sama
+        // Batas waktu maksimum untuk shift pagi: jam 15:00 di hari yang sama dengan start
         maxEndTime = DateTime(
-          _assignedStartTime.year,
-          _assignedStartTime.month,
-          _assignedStartTime.day,
+          startDate.year,
+          startDate.month,
+          startDate.day,
           15,
           0,
         );
         break;
       case ShiftType.sore:
-        // Batas waktu maksimum untuk shift sore: jam 23:00 di hari yang sama
+        // Batas waktu maksimum untuk shift sore: jam 23:00 di hari yang sama dengan start
         maxEndTime = DateTime(
-          _assignedStartTime.year,
-          _assignedStartTime.month,
-          _assignedStartTime.day,
+          startDate.year,
+          startDate.month,
+          startDate.day,
           23,
           0,
         );
@@ -142,19 +146,19 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       case ShiftType.malam:
         // Batas waktu maksimum untuk shift malam: jam 7:00 di hari berikutnya
         maxEndTime = DateTime(
-          _assignedStartTime.year,
-          _assignedStartTime.month,
-          _assignedStartTime.day,
+          startDate.year,
+          startDate.month,
+          startDate.day + 1,
           7,
           0,
-        ).add(const Duration(days: 1));
+        );
         break;
       case ShiftType.siang:
-        // Batas waktu maksimum untuk shift siang outsource: jam 19:00 di hari yang sama
+        // Batas waktu maksimum untuk shift siang outsource: jam 19:00 di hari yang sama dengan start
         maxEndTime = DateTime(
-          _assignedStartTime.year,
-          _assignedStartTime.month,
-          _assignedStartTime.day,
+          startDate.year,
+          startDate.month,
+          startDate.day,
           19,
           0,
         );
@@ -162,12 +166,12 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       case ShiftType.malamPanjang:
         // Batas waktu maksimum untuk shift malam outsource: jam 7:00 di hari berikutnya
         maxEndTime = DateTime(
-          _assignedStartTime.year,
-          _assignedStartTime.month,
-          _assignedStartTime.day,
+          startDate.year,
+          startDate.month,
+          startDate.day + 1,
           7,
           0,
-        ).add(const Duration(days: 1));
+        );
         break;
     }
 
@@ -181,7 +185,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     });
 
     print(
-        'Updated end time: ${DateFormat('dd/MM/yyyy HH:mm').format(_assignedEndTime)}');
+        'Updated end time: ${DateFormat('yyyy-MM-dd HH:mm').format(_assignedEndTime)}');
   }
 
   // Perbarui fungsi _updateMarkers untuk membuat marker yang dapat diklik untuk dihapus
@@ -406,7 +410,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
               clusterId: _selectedClusterId!,
               vehicleId: _vehicleId,
               assignedRoute: coordinates,
-              assignedOfficerId: _selectedOfficerId,
+              assignedOfficerId: _selectedOfficerId!,
               assignedStartTime: _assignedStartTime,
               assignedEndTime: _assignedEndTime,
             ),
@@ -422,6 +426,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         body:
             'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(_assignedStartTime)}',
         patrolTime: DateFormat('dd/MM/yyyy - HH:mm').format(_assignedStartTime),
+        taskId: taskId,
       );
       print('Notifikasi terkirim ke petugas $_selectedOfficerId');
       setState(() {
@@ -615,8 +620,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
   void _setInitialTimeBasedOnShift(OfficerType type, ShiftType shift) {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final tomorrow = today.add(const Duration(days: 1));
+
+    // Tambahkan 1 hari untuk jadwal default - mulai besok
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
 
     DateTime startDate;
     DateTime endDate;
@@ -626,30 +632,32 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       case ShiftType.pagi:
         // Organik: 07:00-15:00
         startDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 7, 0);
-        endDate = startDate.add(const Duration(hours: 1)); // Default 1 jam
+        endDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 15, 0);
         break;
       case ShiftType.sore:
         // Organik: 15:00-23:00
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 15, 0);
-        endDate = startDate.add(const Duration(hours: 1));
+        endDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 0);
         break;
       case ShiftType.malam:
         // Organik: 23:00-07:00
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 0);
-        endDate = startDate.add(const Duration(hours: 1));
+        endDate =
+            DateTime(tomorrow.year, tomorrow.month, tomorrow.day + 1, 7, 0);
         break;
       case ShiftType.siang:
         // Outsource: 07:00-19:00
         startDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 7, 0);
-        endDate = startDate.add(const Duration(hours: 1));
+        endDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 19, 0);
         break;
       case ShiftType.malamPanjang:
         // Outsource: 19:00-07:00
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 19, 0);
-        endDate = startDate.add(const Duration(hours: 1));
+        endDate =
+            DateTime(tomorrow.year, tomorrow.month, tomorrow.day + 1, 7, 0);
         break;
     }
 
@@ -659,7 +667,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     });
 
     print(
-        'Initial times set based on type ${type.toString()} and shift ${shift.toString()}: Start=${DateFormat('dd/MM/yyyy HH:mm').format(startDate)}, End=${DateFormat('dd/MM/yyyy HH:mm').format(endDate)}');
+        'Initial times set: Start=${DateFormat('yyyy-MM-dd HH:mm').format(startDate)}, End=${DateFormat('yyyy-MM-dd HH:mm').format(endDate)}');
   }
 
   @override
@@ -788,7 +796,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       body: BlocConsumer<AdminBloc, AdminState>(
         listener: (context, state) {
           if (state is CreateTaskSuccess) {
-            // Berhasil membuat tugas, akan dihandle di _submitTask
+            _createdTaskId = state.taskId;
           } else if (state is CreateTaskError) {
             showCustomSnackbar(
               context: context,
@@ -1507,7 +1515,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     return allOfficers;
   }
 
-  // Di dalam GestureDetector untuk memilih waktu mulai
   void _showStartTimePicker() async {
     if (_selectedOfficer == null) {
       showCustomSnackbar(
@@ -1563,27 +1570,38 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           return;
         }
 
-        setState(() {
-          // Gabungkan tanggal dan waktu yang dipilih
-          _assignedStartTime = DateTime(
+        // PERBAIKAN: Gabungkan tanggal yang dipilih dengan waktu yang dipilih
+        final newStartDate = DateTime(
+          selectedDate.year,
+          selectedDate.month,
+          selectedDate.day,
+          selectedTime.hour,
+          selectedTime.minute,
+        );
+
+        // PERBAIKAN: Hanya tambahkan satu hari jika shift malam dan jam <7
+        DateTime finalStartDate = newStartDate;
+        if ((_selectedOfficer!.shift == ShiftType.malam ||
+                _selectedOfficer!.shift == ShiftType.malamPanjang) &&
+            selectedTime.hour < 7) {
+          // Untuk shift malam yang melewati tengah malam, tambahkan 1 hari jika jam < 7
+          finalStartDate = DateTime(
             selectedDate.year,
             selectedDate.month,
-            selectedDate.day,
+            selectedDate.day + 1,
             selectedTime.hour,
             selectedTime.minute,
           );
+        }
 
-          // Untuk shift malam, jika jam lebih kecil dari 7, artinya ini adalah dini hari (pagi berikutnya)
-          if ((_selectedOfficer!.shift == ShiftType.malam ||
-                  _selectedOfficer!.shift == ShiftType.malamPanjang) &&
-              selectedTime.hour < 7) {
-            _assignedStartTime =
-                _assignedStartTime.add(const Duration(days: 1));
-          }
-
+        setState(() {
+          _assignedStartTime = finalStartDate;
           // Update juga waktu selesai
           _updateEndTimeBasedOnStartTime();
         });
+
+        print(
+            'Updated start time: ${DateFormat('yyyy-MM-dd HH:mm').format(_assignedStartTime)}');
       }
     }
   }

@@ -1111,10 +1111,6 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                                 ),
                               ),
                             ),
-                            if (widget.task.timeliness != null) ...[
-                              const SizedBox(width: 8),
-                              buildTimelinessIndicator(widget.task.timeliness),
-                            ],
                           ],
                         ),
                       ),
@@ -1209,11 +1205,10 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                               const SizedBox(height: 4),
                               Row(
                                 children: [
+                                  // Contoh penggunaan di seluruh UI
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
+                                        horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
                                       color: getTimelinessColor(
                                           widget.task.timeliness),
@@ -1224,7 +1219,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                                       style: mediumTextStyle(
                                           size: 12, color: Colors.white),
                                     ),
-                                  ),
+                                  )
                                 ],
                               ),
                             ],
@@ -1586,8 +1581,9 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
       case 'assigned':
         return 'Tugas Dijadwalkan';
       case 'ongoing':
+        return 'Sedang Berpatroli';
       case 'active':
-        return 'Sedang Patroli';
+        return 'Tugas sudah dijadwalkan';
       case 'finished':
       case 'completed':
         return 'Patroli Selesai';
@@ -1600,9 +1596,8 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'assigned':
-        return warningY500;
       case 'ongoing':
+        return warningY500;
       case 'active':
         return kbpBlue700;
       case 'finished':
@@ -1663,18 +1658,21 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
   }
 
   String _getProgressDescription(String status, int progress) {
-    if (status.toLowerCase() == 'assigned') {
-      return 'Patroli belum dimulai. Petugas akan segera memulai tugasnya.';
-    } else if (status.toLowerCase() == 'ongoing' ||
-        status.toLowerCase() == 'active') {
-      return 'Patroli sedang berlangsung. Petugas telah mengunjungi $progress% dari total titik.';
-    } else if (status.toLowerCase() == 'finished' ||
-        status.toLowerCase() == 'completed') {
-      return 'Patroli telah selesai. Semua titik telah dikunjungi.';
-    } else if (status.toLowerCase() == 'canceled') {
-      return 'Patroli dibatalkan. Petugas tidak menyelesaikan kunjungan.';
+    switch (status.toLowerCase()) {
+      case 'assigned':
+        return 'Patroli belum dimulai. Petugas akan segera memulai tugasnya.';
+      case 'active':
+        return 'Petugas belum memulai patroli. Masih menunggu untuk berangkat.';
+      case 'ongoing':
+        return 'Petugas sedang berpatroli. Telah mengunjungi $progress% dari titik patroli.';
+      case 'finished':
+      case 'completed':
+        return 'Patroli telah selesai. Semua titik telah dikunjungi.';
+      case 'canceled':
+        return 'Patroli dibatalkan. Petugas tidak menyelesaikan kunjungan.';
+      default:
+        return 'Status patroli tidak diketahui.';
     }
-    return 'Status patroli tidak diketahui.';
   }
 
   // Tambahkan method ini di dalam class _PatrolHistoryScreenState

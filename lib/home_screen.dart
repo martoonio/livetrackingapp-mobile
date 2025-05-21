@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:livetrackingapp/map_screen.dart';
+import 'package:livetrackingapp/notification_utils.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'package:livetrackingapp/presentation/patrol/patrol_history_list_screen.dart';
@@ -28,11 +29,67 @@ class _HomeScreenState extends State<HomeScreen> {
   List<PatrolTask> _upcomingTasks = [];
   List<PatrolTask> _historyTasks = [];
   bool _isLoading = true;
+  final Set<String> _expandedOfficers = {};
+
+  late AppLifecycleListener _lifecycleListener;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
+    _lifecycleListener = AppLifecycleListener(
+      onStateChange: (state) {
+        if (state == AppLifecycleState.resumed) {
+          _startRefreshTimer();
+        } else if (state == AppLifecycleState.paused) {
+          _refreshTimer?.cancel();
+          _refreshTimer = null;
+        }
+      },
+    );
+    _startRefreshTimer();
     _loadUserData();
+  }
+
+  void _startRefreshTimer() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 300), (timer) {
+      if (mounted) {
+        _loadUserData();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Memperbarui data...',
+              style: mediumTextStyle(color: Colors.white),
+            ),
+            backgroundColor: kbpBlue800,
+            duration: const Duration(seconds: 1),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _lifecycleListener.dispose();
+    super.dispose();
+  }
+
+  void _toggleOfficerExpanded(String officerId) {
+    setState(() {
+      if (_expandedOfficers.contains(officerId)) {
+        _expandedOfficers.remove(officerId);
+      } else {
+        _expandedOfficers.add(officerId);
+      }
+    });
   }
 
   Future<void> _loadUserData() async {
@@ -50,6 +107,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (_currentUser!.role == 'patrol') {
         await _loadClusterOfficerTasks();
+
+        // Tambahkan pengecekan untuk task yang expired
+        await _checkForExpiredTasks();
       } else {
         print('Loading patrol data for officer');
 
@@ -61,21 +121,33 @@ class _HomeScreenState extends State<HomeScreen> {
             .read<PatrolBloc>()
             .repository
             .getCurrentTask(_currentUser!.id);
+
         if (currentTask != null) {
           print(
               'Found current task: ${currentTask.taskId}, status: ${currentTask.status}');
 
-          context.read<PatrolBloc>().add(UpdateCurrentTask(task: currentTask));
+          // Cek apakah task sudah melewati batas waktu
+          final now = DateTime.now();
+          if (currentTask.status == 'active' &&
+              currentTask.assignedEndTime != null &&
+              now.isAfter(currentTask.assignedEndTime!)) {
+            // Update status task menjadi expired
+            await _markTaskAsExpired(currentTask);
+          } else {
+            context
+                .read<PatrolBloc>()
+                .add(UpdateCurrentTask(task: currentTask));
 
-          if (currentTask.status == 'ongoing' ||
-              currentTask.status == 'in_progress' ||
-              currentTask.status == 'active') {
-            print('Task is ongoing/active - restoring patrol state');
-            context.read<PatrolBloc>().add(ResumePatrol(
-                  task: currentTask,
-                  startTime: currentTask.startTime ?? DateTime.now(),
-                  currentDistance: currentTask.distance ?? 0.0,
-                ));
+            if (currentTask.status == 'ongoing' ||
+                currentTask.status == 'in_progress' ||
+                currentTask.status == 'active') {
+              print('Task is ongoing/active - restoring patrol state');
+              context.read<PatrolBloc>().add(ResumePatrol(
+                    task: currentTask,
+                    startTime: currentTask.startTime ?? DateTime.now(),
+                    currentDistance: currentTask.distance ?? 0.0,
+                  ));
+            }
           }
         } else {
           print('No current task found');
@@ -90,6 +162,96 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+// Metode baru untuk pengecekan expired tasks (untuk command center)
+  Future<void> _checkForExpiredTasks() async {
+    if (_currentUser?.role != 'patrol') return;
+
+    final now = DateTime.now();
+    List<PatrolTask> expiredTasks = [];
+
+    // Loop semua upcoming tasks untuk mencari yang sudah expired
+    for (final task in _upcomingTasks) {
+      if (task.status == 'active' &&
+          task.assignedEndTime != null &&
+          now.isAfter(task.assignedEndTime!) &&
+          task.startTime == null) {
+        print(
+            'Found expired task: ${task.taskId} for officer: ${task.officerName}');
+
+        // Tambahkan ke list expired
+        expiredTasks.add(task);
+
+        // Update status di database
+        try {
+          await context.read<PatrolBloc>().repository.updateTask(
+            task.taskId,
+            {
+              'status': 'expired',
+              'expiredAt': now.toIso8601String(),
+            },
+          );
+
+          print('Updated task ${task.taskId} status to expired');
+
+          // Kirim notifikasi ke command center
+          await sendPushNotificationToCommandCenter(
+            title: 'Petugas Tidak Melakukan Patroli',
+            body:
+                'Petugas ${task.officerName} telah melewati batas waktu tugas',
+          );
+        } catch (e) {
+          print('Error updating expired task: $e');
+        }
+      }
+    }
+
+    // Refresh task list jika ada yang expired
+    if (expiredTasks.isNotEmpty) {
+      await _loadClusterOfficerTasks();
+    }
+  }
+
+// Metode baru untuk menandai task sebagai expired (untuk officer)
+  Future<void> _markTaskAsExpired(PatrolTask task) async {
+    final now = DateTime.now();
+
+    try {
+      print('Marking task ${task.taskId} as expired');
+
+      // Update status di database
+      await context.read<PatrolBloc>().repository.updateTask(
+        task.taskId,
+        {
+          'status': 'expired',
+          'expiredAt': now.toIso8601String(),
+        },
+      );
+
+      print('Task marked as expired');
+
+      // Update task di bloc
+      final updatedTask = task.copyWith(status: 'expired');
+      context.read<PatrolBloc>().add(UpdateCurrentTask(task: updatedTask));
+
+      // Show notification to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Tugas patroli telah melewati batas waktu dan tidak dapat dimulai',
+              style: mediumTextStyle(color: Colors.white),
+            ),
+            backgroundColor: dangerR500,
+            duration: const Duration(seconds: 5),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error marking task as expired: $e');
     }
   }
 
@@ -272,7 +434,10 @@ class _HomeScreenState extends State<HomeScreen> {
               }
 
               // Important: Check for active AND ongoing status
-              if (status.toLowerCase() == 'finished') {
+              if (status.toLowerCase() == 'finished' ||
+                  status.toLowerCase() == 'completed' ||
+                  status.toLowerCase() == 'cancelled' ||
+                  status.toLowerCase() == 'expired') {
                 allHistoryTasks.add(task);
               } else if (status.toLowerCase() == 'active' ||
                   status.toLowerCase() == 'ongoing' ||
@@ -577,12 +742,6 @@ class _HomeScreenState extends State<HomeScreen> {
     } else {
       return '${duration.inHours} Jam ${duration.inMinutes.remainder(60)} Menit';
     }
-  }
-
-  @override
-  void dispose() {
-    _taskSubscription?.cancel();
-    super.dispose();
   }
 
   @override
@@ -922,7 +1081,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: kbpBlue900,
                       ),
                       onPressed: () {
-                        // Implementasi expand/collapse jika dibutuhkan
+                        _toggleOfficerExpanded(officerId);
                       },
                     ),
                   ],
@@ -933,14 +1092,46 @@ class _HomeScreenState extends State<HomeScreen> {
               const Divider(height: 1, color: kbpBlue200),
 
               // Officer's tasks
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: officerTasks.length,
-                itemBuilder: (context, taskIndex) {
-                  return _buildOfficerTaskItem(officerTasks[taskIndex]);
-                },
-              ),
+              _expandedOfficers.contains(officerId)
+                  ? ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: officerTasks.length,
+                      itemBuilder: (context, taskIndex) {
+                        return _buildOfficerTaskItem(officerTasks[taskIndex]);
+                      },
+                    )
+                  : officerTasks.isNotEmpty
+                      ? _buildOfficerTaskItem(officerTasks.first)
+                      : const SizedBox.shrink(),
+
+              // Jika ingin menambahkan indikator "lihat X tugas lainnya" saat collapsed
+              if (!_expandedOfficers.contains(officerId) &&
+                  officerTasks.length > 1)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: TextButton(
+                    onPressed: () => _toggleOfficerExpanded(officerId),
+                    style: TextButton.styleFrom(
+                      foregroundColor: kbpBlue700,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Lihat ${officerTasks.length - 1} tugas lainnya',
+                          style: mediumTextStyle(size: 12, color: kbpBlue700),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.keyboard_arrow_down,
+                            size: 16, color: kbpBlue700),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         );
@@ -1120,7 +1311,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// Helper untuk menentukan warna status
+// Di fungsi _getStatusColor()
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case 'active':
@@ -1130,12 +1321,14 @@ class _HomeScreenState extends State<HomeScreen> {
         return successG500;
       case 'finished':
         return neutral700;
+      case 'expired':
+        return dangerR500; // Merah untuk status expired
       default:
         return kbpBlue700;
     }
   }
 
-// Helper untuk menerjemahkan status
+// Di fungsi _getStatusText()
   String _getStatusText(String status) {
     switch (status.toLowerCase()) {
       case 'active':
@@ -1145,6 +1338,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'Sedang Berjalan';
       case 'finished':
         return 'Selesai';
+      case 'expired':
+        return 'Tidak Dilaksanakan';
       default:
         return status;
     }
@@ -1168,11 +1363,11 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'ontime':
         return 'Tepat Waktu';
       case 'late':
-        return 'Terlambat';
+        return timeliness!;
       case 'pastDue':
         return 'Melewati Batas';
       default:
-        return 'Tidak Diketahui';
+        return 'Belum Dimulai';
     }
   }
 
@@ -1455,15 +1650,19 @@ class _HomeScreenState extends State<HomeScreen> {
         : Duration.zero;
 
     return SizedBox(
-      height: 84, // Tinggi sedikit ditambah untuk menampung badge
+      height: 90, // Tinggi sedikit ditambah untuk menampung badge
       child: InkWell(
-        onTap: () => _showPatrolSummary(task),
+        onTap: () => task.status.toLowerCase() == 'expired'
+            ? _showExpiredTaskDetails(
+                task) // Tambahkan fungsi khusus untuk detail task expired
+            : _showPatrolSummary(task),
         borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              // Avatar section
               Container(
                 width: 40,
                 height: 40,
@@ -1519,46 +1718,75 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    // Time & distance info
-                    Row(
-                      children: [
-                        const Icon(Icons.timer, size: 14, color: kbpBlue700),
-                        const SizedBox(width: 4),
-                        Text(
-                          _formatDuration(duration),
-                          style: regularTextStyle(size: 12),
-                        ),
-                        const SizedBox(width: 12),
-                        const Icon(Icons.straighten,
-                            size: 14, color: kbpBlue700),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
-                          style: regularTextStyle(size: 12),
-                        ),
-                      ],
-                    ),
 
-                    // Tambahkan badge ketepatan waktu
-                    if (task.timeliness != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
+                    // Time & distance info (khusus task finished)
+                    // Untuk expired, tampilkan info yang berbeda
+                    task.status.toLowerCase() == 'expired'
+                        ? Row(
+                            children: [
+                              const Icon(Icons.calendar_today,
+                                  size: 14, color: dangerR500),
+                              const SizedBox(width: 4),
+                              Text(
+                                task.assignedStartTime != null
+                                    ? formatDateFromString(
+                                        task.assignedStartTime.toString())
+                                    : 'Tanggal tidak tersedia',
+                                style: regularTextStyle(
+                                    size: 12, color: dangerR500),
+                              ),
+                              const SizedBox(width: 12),
+                              const Icon(Icons.access_time,
+                                  size: 14, color: dangerR500),
+                              const SizedBox(width: 4),
+                              Text(
+                                task.assignedStartTime != null
+                                    ? formatTimeFromString(
+                                        task.assignedStartTime.toString())
+                                    : 'Jam tidak tersedia',
+                                style: regularTextStyle(
+                                    size: 12, color: dangerR500),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              const Icon(Icons.timer,
+                                  size: 14, color: kbpBlue700),
+                              const SizedBox(width: 4),
+                              Text(
+                                _formatDuration(duration),
+                                style: regularTextStyle(size: 12),
+                              ),
+                              const SizedBox(width: 12),
+                              const Icon(Icons.straighten,
+                                  size: 14, color: kbpBlue700),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
+                                style: regularTextStyle(size: 12),
+                              ),
+                            ],
                           ),
-                          decoration: BoxDecoration(
-                            color: _getTimelinessColor(task.timeliness),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            _getTimelinessText(task.timeliness),
-                            style:
-                                mediumTextStyle(size: 10, color: Colors.white),
-                          ),
+
+                    // Status badge
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _getStatusColor(task.status),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _getStatusText(task.status),
+                          style: mediumTextStyle(size: 10, color: Colors.white),
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -1569,7 +1797,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 alignment: Alignment.centerRight,
                 child: IconButton(
                   icon: const Icon(Icons.navigate_next, color: kbpBlue900),
-                  onPressed: () => _showPatrolSummary(task),
+                  onPressed: () => task.status.toLowerCase() == 'expired'
+                      ? _showExpiredTaskDetails(task)
+                      : _showPatrolSummary(task),
                   tooltip: 'Lihat Detail',
                   constraints: const BoxConstraints(),
                   padding: const EdgeInsets.all(8),
@@ -1580,6 +1810,197 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  void _showExpiredTaskDetails(PatrolTask task) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header section
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                color: kbpBlue900,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.warning_amber, color: dangerR300, size: 24),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Patroli Tidak Dilaksanakan',
+                      style: semiBoldTextStyle(size: 18, color: neutralWhite),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Content section
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Officer info
+                  _buildInfoRow(
+                    'Petugas',
+                    task.officerName,
+                    Icons.person,
+                    iconColor: kbpBlue700,
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(height: 1, color: neutral300),
+                  const SizedBox(height: 16),
+
+                  // Vehicle info
+                  _buildInfoRow(
+                    'Kendaraan',
+                    task.vehicleId.isEmpty ? 'Tanpa Kendaraan' : task.vehicleId,
+                    Icons.directions_car,
+                    iconColor: kbpBlue700,
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(height: 1, color: neutral300),
+                  const SizedBox(height: 16),
+
+                  // Schedule info
+                  _buildInfoRow(
+                    'Jadwal Patroli',
+                    task.assignedStartTime != null
+                        ? '${formatDateFromString(task.assignedStartTime.toString())} ${formatTimeFromString(task.assignedStartTime.toString())}'
+                        : 'Tidak tersedia',
+                    Icons.event,
+                    iconColor: kbpBlue700,
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(height: 1, color: neutral300),
+                  const SizedBox(height: 16),
+
+                  // Deadline info
+                  _buildInfoRow(
+                    'Batas Waktu',
+                    task.assignedEndTime != null
+                        ? '${formatDateFromString(task.assignedEndTime.toString())} ${formatTimeFromString(task.assignedEndTime.toString())}'
+                        : 'Tidak tersedia',
+                    Icons.timer_off,
+                    iconColor: kbpBlue700,
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(height: 1, color: neutral300),
+                  const SizedBox(height: 16),
+
+                  // Status info
+                  _buildInfoRow(
+                    'Status',
+                    'Tidak Dilaksanakan',
+                    Icons.highlight_off,
+                    valueColor: dangerR500,
+                    iconColor: dangerR500,
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(height: 1, color: neutral300),
+                  const SizedBox(height: 16),
+
+                  // Expired time info
+                  _buildInfoRow(
+                    'Waktu Kedaluwarsa',
+                    task.expiredAt != null
+                        ? '${formatDateFromString(task.expiredAt.toString())} ${formatTimeFromString(task.expiredAt.toString())}'
+                        : 'Tidak tercatat',
+                    Icons.update,
+                    valueColor: dangerR500,
+                    iconColor: dangerR500,
+                  ),
+                ],
+              ),
+            ),
+
+            // Footer section with buttons
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: const BoxDecoration(
+                color: neutral200,
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(16),
+                  bottomRight: Radius.circular(16),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kbpBlue900,
+                      foregroundColor: neutralWhite,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      'Tutup',
+                      style: mediumTextStyle(color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+// Improve the info row to better match other dialogs
+  Widget _buildInfoRow(String label, String value, IconData icon,
+      {Color? valueColor, Color? iconColor}) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: (iconColor == dangerR500) ? dangerR100 : kbpBlue100,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 18, color: iconColor ?? kbpBlue700),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: regularTextStyle(size: 13, color: neutral700),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style:
+                    mediumTextStyle(size: 15, color: valueColor ?? kbpBlue900),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

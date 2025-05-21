@@ -28,9 +28,9 @@ class CreateTask extends AdminEvent {
   final String clusterId;
   final String vehicleId;
   final List<List<double>> assignedRoute;
-  final String? assignedOfficerId;
-  final DateTime? assignedStartTime;
-  final DateTime? assignedEndTime;
+  final String assignedOfficerId;
+  final DateTime assignedStartTime;
+  final DateTime assignedEndTime;
 
   const CreateTask({
     required this.clusterId,
@@ -206,7 +206,11 @@ class ClustersError extends AdminState {
 
 class CreateTaskLoading extends AdminState {}
 
-class CreateTaskSuccess extends AdminState {}
+class CreateTaskSuccess extends AdminState {
+  final String taskId;
+
+  CreateTaskSuccess({required this.taskId});
+}
 
 class CreateTaskError extends AdminState {
   final String message;
@@ -344,7 +348,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     try {
       emit(CreateTaskLoading());
 
-      await repository.createTask(
+      final taskId = await repository.createTask(
         clusterId: event.clusterId,
         vehicleId: event.vehicleId,
         assignedRoute: event.assignedRoute,
@@ -353,7 +357,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
         assignedEndTime: event.assignedEndTime,
       );
 
-      emit(CreateTaskSuccess());
+      emit(CreateTaskSuccess(taskId: taskId));
       add(const LoadAllTasks());
     } catch (e) {
       emit(CreateTaskError('Failed to create task: $e'));
