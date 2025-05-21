@@ -1111,4 +1111,105 @@ class RouteRepositoryImpl implements RouteRepository {
       throw Exception('Failed to update cluster: $e');
     }
   }
+
+  // Tambahkan metode berikut di class RouteRepositoryImpl
+
+  @override
+  Future<void> logMockLocationDetection({
+    required String taskId,
+    required String userId,
+    required Map<String, dynamic> mockData,
+  }) async {
+    try {
+      print('Logging mock location detection for task: $taskId');
+
+      // Update flag pada task
+      await updateTask(taskId, {
+        'mockLocationDetected': true,
+        'mockLocationCount': mockData['count'] ?? 1,
+        'lastMockDetection': mockData['timestamp'],
+      });
+
+      // Catat detail percobaan ke node khusus di database
+      final database = FirebaseDatabase.instance.ref();
+
+      // Simpan di task
+      await database
+          .child('tasks/$taskId/mock_detections')
+          .push()
+          .set(mockData);
+
+      // Simpan juga di koleksi terpisah untuk analisis
+      await database.child('mock_location_logs').push().set({
+        ...mockData,
+        'taskId': taskId,
+        'userId': userId,
+        'detectionTime': ServerValue.timestamp,
+      });
+
+      print('Mock location data successfully logged to database');
+      return;
+    } catch (e) {
+      print('Error logging mock location to database: $e');
+      throw Exception('Failed to log mock location: $e');
+    }
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getMockLocationDetections(
+      String taskId) async {
+    try {
+      print('Getting mock location detections for task: $taskId');
+
+      final snapshot =
+          await _database.child('tasks/$taskId/mock_detections').get();
+
+      if (!snapshot.exists) {
+        return [];
+      }
+
+      final detectionsMap = snapshot.value as Map<dynamic, dynamic>;
+      List<Map<String, dynamic>> detections = [];
+
+      detectionsMap.forEach((key, value) {
+        if (value is Map) {
+          detections.add(Map<String, dynamic>.from(value));
+        }
+      });
+
+      // Sort by timestamp
+      detections.sort((a, b) =>
+          (a['timestamp'] as String).compareTo(b['timestamp'] as String));
+
+      return detections;
+    } catch (e) {
+      print('Error getting mock location detections: $e');
+      return [];
+    }
+  }
+
+  @override
+  Future<int> getMockLocationCount(String taskId) async {
+    try {
+      final taskSnapshot = await _database.child('tasks/$taskId').get();
+
+      if (!taskSnapshot.exists) {
+        return 0;
+      }
+
+      final taskData = taskSnapshot.value as Map<dynamic, dynamic>;
+      final count = taskData['mockLocationCount'];
+
+      if (count is int) {
+        return count;
+      } else if (count is num) {
+        return count.toInt();
+      }
+
+      return 0;
+    } catch (e) {
+      print('Error getting mock location count: $e');
+      return 0;
+    }
+  }
 }
