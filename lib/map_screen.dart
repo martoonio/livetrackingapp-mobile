@@ -52,6 +52,9 @@ class _MapScreenState extends State<MapScreen> {
 
   List<File> selectedPhotos = [];
 
+  String? initialReportPhotoUrl;
+  String? finalReportPhotoUrl;
+
   final Set<Polyline> _polylines = {};
   final List<LatLng> _routePoints = [];
 
@@ -165,7 +168,6 @@ class _MapScreenState extends State<MapScreen> {
     _initializeMap();
   }
 
-// Improved _resumeExistingPatrol method
   void _resumeExistingPatrol(PatrolTask task) {
     if (task.startTime == null) {
       print('Cannot resume patrol: no start time found in task');
@@ -178,11 +180,31 @@ class _MapScreenState extends State<MapScreen> {
     final routePath = task.routePath as Map<dynamic, dynamic>?;
     print('Found route path with ${routePath?.length ?? 0} points');
 
-    // Resume patrol in bloc
+    // Simpan route path yang sudah ada dengan struktur yang benar
+    Map<String, dynamic> existingRoutePath = {};
+    if (routePath != null) {
+      // Konversi ke Map<String, dynamic> untuk konsistensi
+      routePath.forEach((key, value) {
+        if (value is Map) {
+          Map<String, dynamic> pointData = {};
+          value.forEach((k, v) {
+            pointData[k.toString()] = v;
+          });
+          existingRoutePath[key.toString()] = pointData;
+        } else {
+          existingRoutePath[key.toString()] = value;
+        }
+      });
+      print('Successfully converted ${existingRoutePath.length} route points');
+    }
+
+    // Resume patrol in bloc with existing route path
     context.read<PatrolBloc>().add(ResumePatrol(
           task: task,
           startTime: task.startTime!,
           currentDistance: task.distance ?? 0.0,
+          existingRoutePath:
+              existingRoutePath, // Passing the existing route path
         ));
 
     // Set local variables
@@ -190,12 +212,42 @@ class _MapScreenState extends State<MapScreen> {
       _elapsedTime = DateTime.now().difference(task.startTime!);
       _totalDistance = task.distance ?? 0.0;
 
-      // Update lastPosition if possible
+      // Inisialisasi _routePoints untuk polyline
+      _routePoints.clear();
       if (routePath != null && routePath.isNotEmpty) {
         try {
+          // Sort entries by timestamp to ensure correct order
+          final List<MapEntry<dynamic, dynamic>> sortedEntries =
+              routePath.entries.toList()
+                ..sort((a, b) => (a.value['timestamp'].toString())
+                    .compareTo(b.value['timestamp'].toString()));
+
+          // Add points to _routePoints for polyline display
+          for (var entry in sortedEntries) {
+            if (entry.value is Map && entry.value['coordinates'] != null) {
+              final coordinates = entry.value['coordinates'] as List;
+              if (coordinates.length >= 2) {
+                _routePoints.add(LatLng(
+                  (coordinates[0] as num).toDouble(),
+                  (coordinates[1] as num).toDouble(),
+                ));
+              }
+            }
+          }
+          print(
+              'Loaded ${_routePoints.length} points for route polyline display');
+        } catch (e) {
+          print('Error extracting route points: $e');
+        }
+      }
+
+      // Update lastPosition to the most recent point if available
+      if (routePath != null && routePath.isNotEmpty) {
+        try {
+          // Get the most recent point by timestamp
           final sortedEntries = routePath.entries.toList()
-            ..sort((a, b) => (b.value['timestamp'] as String)
-                .compareTo(a.value['timestamp'] as String));
+            ..sort((a, b) => (b.value['timestamp'].toString())
+                .compareTo(a.value['timestamp'].toString()));
 
           if (sortedEntries.isNotEmpty) {
             final coordinates =
@@ -230,8 +282,27 @@ class _MapScreenState extends State<MapScreen> {
     // Load saved route if exists
     if (routePath != null && routePath.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _displaySavedRoute(routePath as Map<String, dynamic>?);
-        print('Displayed saved route path');
+        _displaySavedRoute(routePath.cast<String, dynamic>());
+        setState(() {
+          _polylines.clear();
+          if (_routePoints.isNotEmpty) {
+            _polylines.add(
+              Polyline(
+                polylineId: const PolylineId('patrol_route'),
+                points: _routePoints,
+                color: _polylineColor,
+                width: 5,
+              ),
+            );
+          }
+        });
+
+        // Zoom to show the entire route
+        if (_routePoints.isNotEmpty && mapController != null) {
+          _zoomToPolyline();
+        }
+
+        print('Displayed saved route path with ${_routePoints.length} points');
       });
     }
 
@@ -243,7 +314,7 @@ class _MapScreenState extends State<MapScreen> {
       context: context,
       title: 'Patroli Dilanjutkan',
       subtitle: 'Melanjutkan patroli yang sedang berlangsung',
-      type: SnackbarType.warning,
+      type: SnackbarType.success,
     );
   }
 
@@ -793,33 +864,23 @@ class _MapScreenState extends State<MapScreen> {
                                         final fileName =
                                             'initial_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-                                        // Upload foto ke Firebase Storage
+// Upload foto ke Firebase Storage menggunakan metode yang sudah diperbaiki
+// Dialog loading dengan progress sudah ditangani di dalam metode
                                         final photoUrl =
                                             await _uploadPhotoToFirebase(
                                                 capturedImage!, fileName);
 
-                                        // Menutup dialog loading
-                                        Navigator.of(context).pop();
+                                        setState(() {
+                                          initialReportPhotoUrl = photoUrl;
+                                        });
 
-                                        // Update task dengan data laporan awal
+// Update task dengan data laporan awal
                                         context
                                             .read<PatrolBloc>()
-                                            .add(UpdateTask(
-                                              taskId: widget.task.taskId,
-                                              updates: {
-                                                'initialReportPhotoUrl':
-                                                    photoUrl,
-                                                'initialReportNote':
-                                                    noteController.text
-                                                            .trim()
-                                                            .isNotEmpty
-                                                        ? noteController.text
-                                                            .trim()
-                                                        : null,
-                                                'initialReportTime':
-                                                    DateTime.now()
-                                                        .toIso8601String(),
-                                              },
+                                            .add(SubmitInitialReport(
+                                              photoUrl: initialReportPhotoUrl!,
+                                              note: noteController.text,
+                                              reportTime: DateTime.now(),
                                             ));
 
                                         // Menampilkan pesan sukses dan menutup dialog
@@ -1061,68 +1122,6 @@ class _MapScreenState extends State<MapScreen> {
     print('Has Assigned Route: ${widget.task.assignedRoute != null}');
     print('===========================');
   }
-
-  // void _startLocationTracking() {
-  //   String timeNow = DateTime.now().toIso8601String();
-  //   print('ini debug Starting location tracking... jam $timeNow');
-  //   _positionStreamSubscription?.cancel();
-
-  //   // Reset polyline points when starting fresh
-  //   if (_routePoints.isEmpty) {
-  //     setState(() {
-  //       _routePoints.clear();
-  //       _polylines.clear();
-  //     });
-  //   }
-
-  //   _positionStreamSubscription = Geolocator.getPositionStream(
-  //     locationSettings: const LocationSettings(
-  //       accuracy: LocationAccuracy.high,
-  //       distanceFilter: 10,
-  //     ),
-  //   ).listen(
-  //     (Position position) {
-  //       if (mounted) {
-  //         setState(() {
-  //           userCurrentLocation = position;
-  //           if (mapController != null) {
-  //             _updateUserMarker(position);
-  //           }
-  //         });
-
-  //         final state = context.read<PatrolBloc>().state;
-  //         print('ini debug state sekarang $state jam $timeNow');
-  //         if (state is PatrolLoaded && state.isPatrolling) {
-  //           // Update location in Firebase
-  //           context.read<PatrolBloc>().add(UpdatePatrolLocation(
-  //                 position: position,
-  //                 timestamp: DateTime.now(),
-  //               ));
-  //           _updateDistance(position);
-  //           // Update polyline setiap kali posisi berubah
-  //           _updatePolyline(position);
-  //         }
-  //       }
-  //     },
-  //     onError: (error) {
-  //       print('Location tracking error: $error');
-  //     },
-  //   );
-  // }
-
-  // void _handlePatrolButtonPress(BuildContext context, PatrolState state) async {
-  //   if (state is PatrolLoaded) {
-  //     if (state.isPatrolling || state.task?.status == 'ongoing') {
-  //       await _stopPatrol(context, state);
-  //     } else {
-  //       print('Dispatching StartPatrol event...');
-  //       _startPatrol(context);
-  //     }
-  //   } else {
-  //     print('Dispatching LoadRouteData event...');
-  //     context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
-  //   }
-  // }
 
   Future<void> _stopPatrol(BuildContext context, PatrolLoaded state) async {
     final endTime = DateTime.now();
@@ -1460,6 +1459,10 @@ class _MapScreenState extends State<MapScreen> {
                                             await _uploadPhotoToFirebase(
                                                 capturedImage!, fileName);
 
+                                        setState(() {
+                                          finalReportPhotoUrl = photoUrl;
+                                        });
+
                                         // Kirim event stop patrol
                                         context
                                             .read<PatrolBloc>()
@@ -1520,27 +1523,183 @@ class _MapScreenState extends State<MapScreen> {
                                           }
                                         }
 
-                                        // Navigasi ke PatrolSummaryScreen
                                         if (mounted) {
                                           Navigator.pop(dialogContext,
                                               true); // Close dialog dengan hasil true
 
-                                          Navigator.pushReplacement(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  PatrolSummaryScreen(
-                                                task: widget.task,
-                                                routePath: convertedPath,
-                                                startTime:
-                                                    state.task?.startTime ??
-                                                        DateTime.now(),
-                                                endTime: endTime,
-                                                distance: _totalDistance,
-                                                finalReportPhotoUrl: photoUrl,
+                                          // Tampilkan loading dialog
+                                          showDialog(
+                                            context: context,
+                                            barrierDismissible: false,
+                                            builder: (context) => WillPopScope(
+                                              onWillPop: () async => false,
+                                              child: Center(
+                                                child: Container(
+                                                  padding:
+                                                      const EdgeInsets.all(16),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.white,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            8),
+                                                  ),
+                                                  child: Column(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      const CircularProgressIndicator(),
+                                                      const SizedBox(
+                                                          height: 16),
+                                                      Text(
+                                                        'Menyiapkan ringkasan patroli...',
+                                                        style:
+                                                            mediumTextStyle(),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           );
+
+                                          try {
+                                            // PERBAIKAN: Ambil data lengkap dari database
+                                            final taskSnapshot =
+                                                await FirebaseDatabase.instance
+                                                    .ref()
+                                                    .child(
+                                                        'tasks/${widget.task.taskId}')
+                                                    .get();
+
+                                            // Close loading dialog
+                                            if (context.mounted) {
+                                              Navigator.pop(context);
+                                            }
+
+                                            if (!taskSnapshot.exists) {
+                                              print(
+                                                  'Error: Task tidak ditemukan di database');
+                                              return;
+                                            }
+
+                                            final taskData = taskSnapshot.value
+                                                as Map<dynamic, dynamic>;
+                                            List<List<double>>
+                                                completeRoutePath = [];
+
+                                            // Extract route path dari database
+                                            if (taskData['route_path'] !=
+                                                    null &&
+                                                taskData['route_path'] is Map) {
+                                              final routePathMap =
+                                                  taskData['route_path']
+                                                      as Map<dynamic, dynamic>;
+
+                                              // Sort entries by timestamp
+                                              final List<
+                                                      MapEntry<dynamic, dynamic>>
+                                                  sortedEntries =
+                                                  routePathMap.entries.toList()
+                                                    ..sort((a, b) => (a.value[
+                                                                'timestamp']
+                                                            as String)
+                                                        .compareTo(
+                                                            b.value['timestamp']
+                                                                as String));
+
+                                              print(
+                                                  'Found ${sortedEntries.length} route points in database');
+
+                                              // Convert to List<List<double>> format for summary screen
+                                              for (var entry in sortedEntries) {
+                                                if (entry.value is Map &&
+                                                    entry.value[
+                                                            'coordinates'] !=
+                                                        null) {
+                                                  final coordinates =
+                                                      entry.value['coordinates']
+                                                          as List;
+                                                  if (coordinates.length >= 2) {
+                                                    completeRoutePath.add([
+                                                      (coordinates[0] as num)
+                                                          .toDouble(),
+                                                      (coordinates[1] as num)
+                                                          .toDouble(),
+                                                    ]);
+                                                  }
+                                                }
+                                              }
+
+                                              print(
+                                                  'Berhasil mengonversi ${completeRoutePath.length} titik rute untuk ringkasan');
+                                            }
+
+                                            // Navigasi ke ringkasan patroli dengan rute lengkap dari database
+                                            if (mounted) {
+                                              Navigator.pushReplacement(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      PatrolSummaryScreen(
+                                                    task: widget.task,
+                                                    routePath: completeRoutePath
+                                                            .isEmpty
+                                                        ? convertedPath
+                                                        : completeRoutePath,
+                                                    startTime:
+                                                        state.task?.startTime ??
+                                                            DateTime.now(),
+                                                    endTime: endTime,
+                                                    distance: _totalDistance,
+                                                    finalReportPhotoUrl:
+                                                        photoUrl,
+                                                  ),
+                                                ),
+                                              );
+                                            }
+                                          } catch (e) {
+                                            print(
+                                                'Error saat menyiapkan ringkasan patroli: $e');
+
+                                            // Tutup dialog loading jika error
+                                            if (context.mounted &&
+                                                Navigator.canPop(context)) {
+                                              Navigator.pop(context);
+                                            }
+
+                                            // Fallback ke rute yang ada di memory (tidak lengkap)
+                                            if (mounted) {
+                                              Navigator.pushReplacement(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      PatrolSummaryScreen(
+                                                    task: widget.task,
+                                                    routePath: convertedPath,
+                                                    startTime:
+                                                        state.task?.startTime ??
+                                                            DateTime.now(),
+                                                    endTime: endTime,
+                                                    distance: _totalDistance,
+                                                    finalReportPhotoUrl:
+                                                        photoUrl,
+                                                    initialReportPhotoUrl: state
+                                                        .task
+                                                        ?.initialReportPhotoUrl,
+                                                  ),
+                                                ),
+                                              );
+                                            }
+
+                                            // Tampilkan pesan error
+                                            showCustomSnackbar(
+                                              context: context,
+                                              title: 'Perhatian',
+                                              subtitle:
+                                                  'Data rute mungkin tidak lengkap karena error',
+                                              type: SnackbarType.warning,
+                                            );
+                                          }
                                         }
 
                                         // Set result ke true untuk menandakan proses selesai
@@ -1577,7 +1736,7 @@ class _MapScreenState extends State<MapScreen> {
                                       ),
                                     )
                                   : Text(
-                                      'Selesaikan Patroli',
+                                      'Selesai',
                                       style: semiBoldTextStyle(
                                           color: Colors.white),
                                     ),
@@ -1598,18 +1757,172 @@ class _MapScreenState extends State<MapScreen> {
     return result;
   }
 
-// Metode untuk upload foto ke Firebase Storage
+// Perbaikan dialog upload foto
+  // Perbaikan dialog upload foto dengan progress bar yang berfungsi
   Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
     try {
       // Reference to Firebase Storage
       final storageRef = FirebaseStorage.instance.ref();
       final photoRef = storageRef.child('patrol_reports/$fileName');
 
-      // Upload foto
-      await photoRef.putFile(imageFile);
+      // Buat upload task
+      final uploadTask = photoRef.putFile(imageFile);
+      final completer = Completer<String>();
+
+      // Tampilkan dialog dengan progress bar
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (loadingContext) => StatefulBuilder(
+            builder: (context, setDialogState) {
+              // Variabel untuk menyimpan progress
+              ValueNotifier<double> uploadProgress = ValueNotifier<double>(0.0);
+
+              // Listener yang benar-benar bekerja untuk update progress
+              void setupProgressListener() {
+                uploadTask.snapshotEvents.listen(
+                  (TaskSnapshot snapshot) {
+                    double progress =
+                        snapshot.bytesTransferred / snapshot.totalBytes;
+
+                    // Update progress dengan ValueNotifier
+                    uploadProgress.value = progress;
+
+                    // Jika upload selesai, tutup dialog secara otomatis setelah delay singkat
+                    if (snapshot.state == TaskState.success) {
+                      Future.delayed(const Duration(milliseconds: 200), () {
+                        if (context.mounted && Navigator.canPop(context)) {
+                          Navigator.pop(context);
+                        }
+                      });
+                    }
+                  },
+                  onError: (e) {
+                    print('Error in upload progress: $e');
+                    if (context.mounted && Navigator.canPop(context)) {
+                      Navigator.pop(context);
+                    }
+                  },
+                );
+              }
+
+              // Setup listener setelah widget pertama kali dibuat
+              Future.microtask(() => setupProgressListener());
+
+              return WillPopScope(
+                onWillPop: () async => false,
+                child: ValueListenableBuilder<double>(
+                  valueListenable: uploadProgress,
+                  builder: (context, progress, _) {
+                    return Dialog(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.all(24),
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // Icon atau animasi
+                            SizedBox(
+                              height: 80,
+                              width: 80,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  // Progress circle
+                                  CircularProgressIndicator(
+                                    value: progress,
+                                    strokeWidth: 6,
+                                    backgroundColor: kbpBlue100,
+                                    color: kbpBlue900,
+                                  ),
+                                  // Icon di tengah
+                                  Icon(
+                                    Icons.cloud_upload,
+                                    size: 36,
+                                    color: kbpBlue900,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+
+                            // Judul
+                            Text(
+                              'Mengunggah Foto',
+                              style: boldTextStyle(size: 18, color: kbpBlue900),
+                              textAlign: TextAlign.center,
+                            ),
+
+                            const SizedBox(height: 8),
+
+                            // Deskripsi
+                            Text(
+                              'Mohon tunggu sementara foto sedang diunggah...',
+                              style:
+                                  regularTextStyle(size: 14, color: neutral700),
+                              textAlign: TextAlign.center,
+                            ),
+
+                            const SizedBox(height: 24),
+
+                            // Progress bar
+                            Container(
+                              height: 8,
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: kbpBlue100,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Stack(
+                                children: [
+                                  FractionallySizedBox(
+                                    widthFactor: progress,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: kbpBlue900,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            const SizedBox(height: 12),
+
+                            // Persentase
+                            Text(
+                              '${(progress * 100).toInt()}%',
+                              style: semiBoldTextStyle(
+                                  size: 14, color: kbpBlue900),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        );
+      }
+
+      // Tunggu hingga upload selesai
+      final TaskSnapshot taskSnapshot = await uploadTask;
 
       // Dapatkan URL download
-      final downloadUrl = await photoRef.getDownloadURL();
+      final downloadUrl = await taskSnapshot.ref.getDownloadURL();
       return downloadUrl;
     } catch (e) {
       print('Error uploading photo: $e');
@@ -2300,7 +2613,7 @@ class _MapScreenState extends State<MapScreen> {
 
               // Panel informasi tugas - lebih rapi dengan kartu
               Positioned(
-                top: 16,
+                top: 24,
                 left: 16,
                 right: 16,
                 child: Card(
@@ -2479,7 +2792,7 @@ class _MapScreenState extends State<MapScreen> {
 
               if (isMockDetected)
                 Positioned(
-                  top: (state is PatrolLoaded && state.isOffline) ? 30 : 0,
+                  top: (state is PatrolLoaded && state.isOffline) ? 24 : 0,
                   left: 0,
                   right: 0,
                   child: Container(

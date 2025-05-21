@@ -496,6 +496,8 @@ class _HomeScreenState extends State<HomeScreen> {
               distance: updatedTask?.distance ?? task.distance ?? 0,
               finalReportPhotoUrl:
                   updatedTask?.finalReportPhotoUrl ?? task.finalReportPhotoUrl,
+              initialReportPhotoUrl: updatedTask?.initialReportPhotoUrl ??
+                  task.initialReportPhotoUrl,
             ),
           ),
         );
@@ -560,6 +562,9 @@ class _HomeScreenState extends State<HomeScreen> {
           finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
           finalReportNote: data['finalReportNote']?.toString(),
           finalReportTime: _parseDateTime(data['finalReportTime']),
+          initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
+          initialReportNote: data['initialReportNote']?.toString(),
+          initialReportTime: _parseDateTime(data['initialReportTime']),
         );
 
         // Set properti tambahan

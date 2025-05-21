@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:livetrackingapp/admin_map_screen.dart';
 import 'package:livetrackingapp/presentation/component/customNavBar.dart';
 
 import 'home_screen.dart';
@@ -33,16 +34,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
     super.initState();
 
     // Inisialisasi pages dengan GlobalKey unik
-    _pages = [
-      HomeScreen(key: _getKeyForIndex(0)),
-    ];
-
     if (widget.userRole == 'commandCenter') {
-      _pages.add(AdminDashboardScreen(key: _getKeyForIndex(1)));
-      _pages.add(ManageClustersScreen(key: _getKeyForIndex(2)));
+      // Admin user gets AdminMapScreen as the home page
+      _pages = [
+        AdminMapScreen(key: _getKeyForIndex(0)),
+        AdminDashboardScreen(key: _getKeyForIndex(1)),
+        ManageClustersScreen(key: _getKeyForIndex(2)),
+        ProfileScreen(key: _getKeyForIndex(3)),
+      ];
+    } else {
+      // Normal users get HomeScreen
+      _pages = [
+        HomeScreen(key: _getKeyForIndex(0)),
+        ProfileScreen(key: _getKeyForIndex(1)),
+      ];
     }
-
-    _pages.add(ProfileScreen(key: _getKeyForIndex(_pages.length)));
 
     // Inisialisasi PageController
     _pageController = PageController(initialPage: _selectedIndex);
@@ -122,18 +128,27 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       _pageKeys[index] = GlobalKey();
 
       // Rebuild halaman dengan key baru
-      if (index == 0) {
-        _pages[0] = HomeScreen(key: _pageKeys[index]);
-      } else if (widget.userRole == 'commandCenter') {
-        if (index == 1) {
-          _pages[1] = AdminDashboardScreen(key: _pageKeys[index]);
-        } else if (index == 2) {
-          _pages[2] = ManageClustersScreen(key: _pageKeys[index]);
-        } else {
-          _pages[_pages.length - 1] = ProfileScreen(key: _pageKeys[index]);
+      if (widget.userRole == 'commandCenter') {
+        switch (index) {
+          case 0:
+            _pages[0] = AdminMapScreen(key: _pageKeys[index]);
+            break;
+          case 1:
+            _pages[1] = AdminDashboardScreen(key: _pageKeys[index]);
+            break;
+          case 2:
+            _pages[2] = ManageClustersScreen(key: _pageKeys[index]);
+            break;
+          case 3:
+            _pages[3] = ProfileScreen(key: _pageKeys[index]);
+            break;
         }
       } else {
-        _pages[_pages.length - 1] = ProfileScreen(key: _pageKeys[index]);
+        if (index == 0) {
+          _pages[0] = HomeScreen(key: _pageKeys[index]);
+        } else {
+          _pages[1] = ProfileScreen(key: _pageKeys[index]);
+        }
       }
     });
   }

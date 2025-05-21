@@ -16,6 +16,7 @@ class PatrolSummaryScreen extends StatefulWidget {
   final DateTime endTime;
   final double distance;
   String? finalReportPhotoUrl;
+  String? initialReportPhotoUrl;
 
   PatrolSummaryScreen({
     super.key,
@@ -25,6 +26,7 @@ class PatrolSummaryScreen extends StatefulWidget {
     required this.endTime,
     required this.distance,
     this.finalReportPhotoUrl,
+    this.initialReportPhotoUrl,
   });
 
   @override
@@ -1187,109 +1189,155 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
     );
   }
 
-  // Tambahkan widget untuk menampilkan laporan awal
+  // Perbaikan tampilan untuk laporan awal patroli
   Widget _buildInitialReportSection() {
     if (widget.task.initialReportPhotoUrl == null) {
       return SizedBox.shrink();
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Laporan Awal Patroli',
-          style: boldTextStyle(size: 16, color: kbpBlue900),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: kbpBlue300),
-            borderRadius: BorderRadius.circular(8),
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Waktu laporan awal
-              if (widget.task.initialReportTime != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    children: [
-                      Icon(Icons.access_time, size: 16, color: kbpBlue700),
-                      SizedBox(width: 8),
-                      Text(
-                        formatDateFromString(
-                            widget.task.initialReportTime.toString()),
-                        style: regularTextStyle(size: 14),
-                      ),
-                    ],
-                  ),
-                ),
-
-              // Foto laporan awal
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.network(
-                  widget.task.initialReportPhotoUrl!,
-                  width: double.infinity,
-                  height: 180,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) return child;
-                    return Container(
-                      height: 180,
-                      width: double.infinity,
-                      color: kbpBlue100,
-                      child: Center(
-                        child: CircularProgressIndicator(
-                          value: loadingProgress.expectedTotalBytes != null
-                              ? loadingProgress.cumulativeBytesLoaded /
-                                  loadingProgress.expectedTotalBytes!
-                              : null,
-                        ),
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      height: 180,
-                      width: double.infinity,
-                      color: kbpBlue100,
-                      child: Center(
-                        child: Icon(Icons.error, color: dangerR300),
-                      ),
-                    );
-                  },
-                ),
-              ),
-
-              // Catatan laporan awal
-              if (widget.task.initialReportNote != null &&
-                  widget.task.initialReportNote!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(Icons.photo_camera, color: kbpBlue900, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Catatan Awal:',
-                        style: mediumTextStyle(size: 14),
+                        'Foto Awal Patroli',
+                        style: semiBoldTextStyle(size: 16, color: kbpBlue900),
                       ),
-                      SizedBox(height: 4),
-                      Text(
-                        widget.task.initialReportNote!,
-                        style: regularTextStyle(size: 14),
-                      ),
+                      if (widget.task.initialReportTime != null)
+                        Text(
+                          'Diambil pada ${_formatDateTime(widget.task.initialReportTime!)}',
+                          style: regularTextStyle(size: 12, color: neutral600),
+                        ),
                     ],
                   ),
                 ),
-            ],
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
-      ],
+
+          // Foto
+          ClipRRect(
+            borderRadius: const BorderRadius.only(
+              bottomLeft: Radius.circular(12),
+              bottomRight: Radius.circular(12),
+            ),
+            child: _buildInitialReportImage(),
+          ),
+
+          // Tampilkan catatan jika ada
+          if (widget.task.initialReportNote != null &&
+              widget.task.initialReportNote!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Catatan Awal:',
+                    style: mediumTextStyle(size: 14, color: neutral700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.task.initialReportNote!,
+                    style: regularTextStyle(size: 14, color: neutral800),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
+  }
+
+// Helper untuk menampilkan gambar laporan awal
+  Widget _buildInitialReportImage() {
+    if (widget.task.initialReportPhotoUrl == null) {
+      return Container(
+        height: 200,
+        color: neutral200,
+        child: const Center(
+          child: Icon(Icons.image_not_supported, color: neutral500, size: 40),
+        ),
+      );
+    }
+
+    // Cek apakah URL atau path file lokal
+    if (widget.task.initialReportPhotoUrl!.startsWith('http')) {
+      // URL gambar
+      return Image.network(
+        widget.task.initialReportPhotoUrl!,
+        height: 300,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          print('Error loading image: $error');
+          return Container(
+            height: 200,
+            color: neutral200,
+            child: const Center(
+              child: Icon(Icons.broken_image, color: dangerR300, size: 40),
+            ),
+          );
+        },
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(
+            height: 200,
+            color: neutral200,
+            child: Center(
+              child: CircularProgressIndicator(
+                value: loadingProgress.expectedTotalBytes != null
+                    ? loadingProgress.cumulativeBytesLoaded /
+                        loadingProgress.expectedTotalBytes!
+                    : null,
+                color: kbpBlue700,
+              ),
+            ),
+          );
+        },
+      );
+    } else {
+      // Path file lokal
+      return Image.file(
+        File(widget.task.initialReportPhotoUrl!),
+        height: 300,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          print('Error loading local image: $error');
+          return Container(
+            height: 200,
+            color: neutral200,
+            child: const Center(
+              child: Icon(Icons.broken_image, color: dangerR300, size: 40),
+            ),
+          );
+        },
+      );
+    }
   }
 
   Widget _buildTimeInfoCard() {

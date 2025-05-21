@@ -81,11 +81,13 @@ class ResumePatrol extends PatrolEvent {
   final PatrolTask task;
   final DateTime startTime;
   final double currentDistance;
+  final Map<String, dynamic>? existingRoutePath;
 
   ResumePatrol({
     required this.task,
     required this.startTime,
     required this.currentDistance,
+    this.existingRoutePath,
   });
 }
 
@@ -100,6 +102,21 @@ class SubmitFinalReport extends PatrolEvent {
   final DateTime reportTime;
 
   SubmitFinalReport({
+    required this.photoUrl,
+    this.note,
+    required this.reportTime,
+  });
+
+  @override
+  List<Object?> get props => [photoUrl, note, reportTime];
+}
+
+class SubmitInitialReport extends PatrolEvent {
+  final String photoUrl;
+  final String? note;
+  final DateTime reportTime;
+
+  SubmitInitialReport({
     required this.photoUrl,
     this.note,
     required this.reportTime,
@@ -622,13 +639,57 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     try {
       print('Resuming patrol for task: ${event.task.taskId}');
 
-      // Emit loaded state with resumed patrol
+      // PERBAIKAN: Perlu parameter baru di ResumePatrol untuk menyimpan route path yang ada
+      Map<String, dynamic> existingRoutePath = {};
+
+      // Gunakan route path dari parameter jika tersedia
+      if (event.existingRoutePath != null &&
+          event.existingRoutePath!.isNotEmpty) {
+        event.existingRoutePath!.forEach((key, value) {
+          existingRoutePath[key.toString()] = value;
+        });
+        print(
+            'Using provided existingRoutePath with ${existingRoutePath.length} points');
+      }
+      // Jika tidak, coba ambil dari task
+      else if (event.task.routePath != null) {
+        try {
+          final taskRoutePath = event.task.routePath as Map<dynamic, dynamic>;
+          taskRoutePath.forEach((key, value) {
+            existingRoutePath[key.toString()] = value;
+          });
+          print(
+              'Using route path from task with ${existingRoutePath.length} points');
+        } catch (e) {
+          print('Error converting task route path: $e');
+        }
+      }
+
+      // PERBAIKAN: Jika masih kosong, coba ambil langsung dari database
+      if (existingRoutePath.isEmpty && _isConnected) {
+        try {
+          final taskSnapshot =
+              await repository.getTaskById(taskId: event.task.taskId);
+          if (taskSnapshot != null && taskSnapshot.routePath != null) {
+            final dbRoutePath = taskSnapshot.routePath as Map<dynamic, dynamic>;
+            dbRoutePath.forEach((key, value) {
+              existingRoutePath[key.toString()] = value;
+            });
+            print(
+                'Fetched route path from database with ${existingRoutePath.length} points');
+          }
+        } catch (e) {
+          print('Failed to fetch route path from database: $e');
+        }
+      }
+
+      // Emit loaded state with resumed patrol dan route path yang benar
       emit(PatrolLoaded(
         task: event.task,
         isPatrolling: true,
         startTime: event.startTime,
         distance: event.currentDistance,
-        routePath: event.task.routePath as Map<String, dynamic>?,
+        routePath: existingRoutePath, // Gunakan route path yang sudah digabung
         finishedTasks:
             state is PatrolLoaded ? (state as PatrolLoaded).finishedTasks : [],
         isOffline: !_isConnected,
@@ -637,7 +698,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       // Restart location tracking
       _startLocationTracking();
 
-      print('Resumed patrol tracking');
+      print(
+          'Resumed patrol tracking with ${existingRoutePath.length} route points');
     } catch (e) {
       print('Error resuming patrol: $e');
       emit(PatrolError('Failed to resume patrol: $e'));
@@ -725,8 +787,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       ));
     }
   }
-
-  // Perbaiki metode _onUpdateCurrentTask untuk menangani perubahan task dengan benar
 
   void _onUpdateCurrentTask(
     UpdateCurrentTask event,
@@ -1151,20 +1211,63 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         print('=== Stopping Patrol ===');
         print('Task ID: ${currentState.task?.taskId}');
         print('Connection status: ${_isConnected ? "Online" : "Offline"}');
-        print('Route path points: ${currentState.routePath?.length ?? 0}');
-        print('Final route path points: ${event.finalRoutePath?.length ?? 0}');
+        print(
+            'Current state route path points: ${currentState.routePath?.length ?? 0}');
+        print(
+            'Final route path points from event: ${event.finalRoutePath?.length ?? 0}');
 
-        // Pick the larger of the two route paths
-        Map<String, dynamic>? routePathToSave = currentState.routePath;
-        if (event.finalRoutePath != null) {
-          if (routePathToSave == null ||
-              (event.finalRoutePath!.length > routePathToSave.length)) {
-            routePathToSave = event.finalRoutePath;
+        // PERBAIKAN: Ambil route_path yang ada di database
+        Map<String, dynamic>? existingRoutePathFromDb;
+        if (_isConnected && currentState.task != null) {
+          try {
+            final taskSnapshot =
+                await repository.getTaskById(taskId: currentState.task!.taskId);
+            if (taskSnapshot != null && taskSnapshot.routePath != null) {
+              existingRoutePathFromDb =
+                  Map<String, dynamic>.from(taskSnapshot.routePath as Map);
+              print(
+                  'Found existing route_path in database with ${existingRoutePathFromDb.length} points');
+            }
+          } catch (e) {
+            print('Error fetching existing route_path from database: $e');
           }
         }
 
-        print(
-            'Selected route path with ${routePathToSave?.length ?? 0} points');
+        // PERBAIKAN: Gabungkan route paths dari semua sumber
+        Map<String, dynamic> routePathToSave = {};
+
+        // 1. Tambahkan route path dari database jika ada
+        if (existingRoutePathFromDb != null &&
+            existingRoutePathFromDb.isNotEmpty) {
+          routePathToSave.addAll(existingRoutePathFromDb);
+          print('Added ${existingRoutePathFromDb.length} points from database');
+        }
+
+        // 2. Tambahkan route path dari state saat ini
+        if (currentState.routePath != null &&
+            currentState.routePath!.isNotEmpty) {
+          routePathToSave.addAll(currentState.routePath!);
+          print(
+              'Added ${currentState.routePath!.length} points from current state');
+        }
+
+        // 3. Tambahkan route path dari event (jika ada dan berbeda dari yang lain)
+        if (event.finalRoutePath != null && event.finalRoutePath!.isNotEmpty) {
+          // Hitung berapa banyak key unik yang akan ditambahkan
+          final newKeys = event.finalRoutePath!.keys
+              .where((key) => !routePathToSave.containsKey(key))
+              .toList();
+
+          if (newKeys.isNotEmpty) {
+            for (var key in newKeys) {
+              routePathToSave[key] = event.finalRoutePath![key];
+            }
+            print(
+                'Added ${newKeys.length} unique points from final route path');
+          }
+        }
+
+        print('Final merged route_path has ${routePathToSave.length} points');
 
         // Try to sync any offline data first if we're online
         if (_isConnected) {
@@ -1187,8 +1290,9 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           );
 
           // Save route path for summary
-          if (routePathToSave != null && routePathToSave.isNotEmpty) {
-            print('Saving route path with ${routePathToSave.length} entries');
+          if (routePathToSave.isNotEmpty) {
+            print(
+                'Saving merged route path with ${routePathToSave.length} entries');
 
             // Update task with final path
             await repository.updateTask(
@@ -1208,8 +1312,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               'endTime': event.endTime.toIso8601String(),
               'distance': event.distance,
               'status': 'finished',
-              'route_path_length':
-                  routePathToSave?.length ?? 0, // Track for debug
+              'route_path_length': routePathToSave.length, // Track for debug
+              'route_path': routePathToSave, // Save the full route path
             });
 
             print('Saved patrol completion data to offline storage');
@@ -1255,7 +1359,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           isOffline: !_isConnected,
         ));
 
-        print('Patrol stopped successfully');
+        print(
+            'Patrol stopped successfully with ${routePathToSave.length} route points');
       } catch (e, stackTrace) {
         print('Error stopping patrol: $e');
         print('Stack trace: $stackTrace');
@@ -1339,6 +1444,52 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               'finalReportPhotoUrl': event.photoUrl,
               'finalReportNote': event.note,
               'finalReportTime': event.reportTime.toIso8601String(),
+            },
+          );
+
+          emit(PatrolLoaded(
+            task: updatedTask,
+            isPatrolling: currentState.isPatrolling,
+            distance: currentState.distance,
+            finishedTasks: currentState.finishedTasks,
+            routePath: currentState.routePath,
+            isOffline: currentState.isOffline,
+          ));
+        }
+      } catch (e) {
+        emit(PatrolError('Failed to submit final report: $e'));
+        // Emit kembali state sebelumnya
+        emit(currentState);
+      }
+    }
+  }
+
+  Future<void> _onSubmitInitialReport(
+    SubmitInitialReport event,
+    Emitter<PatrolState> emit,
+  ) async {
+    if (state is PatrolLoaded) {
+      final currentState = state as PatrolLoaded;
+
+      try {
+        emit(PatrolLoading());
+
+        // Perbarui task dengan final report
+        final updatedTask = currentState.task?.copyWith(
+          finalReportPhotoUrl: event.photoUrl,
+          finalReportNote: event.note,
+          finalReportTime: event.reportTime,
+        );
+
+        if (updatedTask != null) {
+          // Update task di database - PERBAIKAN DISINI
+          // Ganti updatePatrolTask dengan updateTask
+          await repository.updateTask(
+            updatedTask.taskId,
+            {
+              'initialReportPhotoUrl': event.photoUrl,
+              'initialReportNote': event.note,
+              'initialReportTime': event.reportTime.toIso8601String(),
             },
           );
 
