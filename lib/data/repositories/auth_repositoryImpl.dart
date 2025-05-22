@@ -66,7 +66,8 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<bool> checkUserProfile(String userId) async {
     try {
       final snapshot = await _database.child('users').child(userId).get();
-      return snapshot.exists;
+      final isNameExist = snapshot.child('name').exists;
+      return isNameExist;
     } catch (e) {
       print('Error checking user profile: $e');
       return false;
