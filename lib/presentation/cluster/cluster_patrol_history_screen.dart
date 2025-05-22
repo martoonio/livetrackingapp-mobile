@@ -1043,7 +1043,7 @@ class _ClusterPatrolHistoryScreenState
 
   // Tambahkan metode baru untuk menghitung titik yang dikunjungi
   Map<String, dynamic> _calculateVisitedPoints(PatrolTask task,
-      {double radiusInMeters = 5.0}) {
+      {double radiusInMeters = 10.0}) {
     try {
       final Set<int> visitedCheckpoints = <int>{};
       final List<Map<String, double>> routePositions = [];

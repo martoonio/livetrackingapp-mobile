@@ -166,7 +166,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
           final distance = Geolocator.distanceBetween(position.latitude,
               position.longitude, checkpointLat, checkpointLng);
 
-          if (distance <= 5) {
+          if (distance <= 10) {
             // 5 meters tolerance
             visitedCheckpoints.add(i);
             break;
@@ -2407,7 +2407,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
   }
 
   // Tambahkan metode ini di dalam _PatrolHistoryScreenState
-  Map<String, dynamic> _calculateVisitedPoints({double radiusInMeters = 5.0}) {
+  Map<String, dynamic> _calculateVisitedPoints({double radiusInMeters = 10.0}) {
     final Set<int> visitedCheckpoints = <int>{};
     final List<LatLng> routePositions = [];
 

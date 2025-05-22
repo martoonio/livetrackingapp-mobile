@@ -175,8 +175,8 @@ class _FullScreenMapPageState extends State<FullScreenMapPage> {
                     (coordinates[0] as double),
                     (coordinates[1] as double));
 
-                if (distance <= 5) {
-                  // 50 meter threshold
+                if (distance <= 10) {
+                  // 5 meter threshold
                   assignedPoints[i]['isVisited'] = true;
                   assignedPoints[i]['visitInfo'] = {
                     'timestamp': timestamp,

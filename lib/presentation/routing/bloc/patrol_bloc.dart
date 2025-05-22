@@ -1669,7 +1669,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           task.getRoutePathAsLatLng(); // Use the new method
 
       // Validasi jika semua titik telah dikunjungi (dalam radius 5m)
-      final double requiredRadius = 5.0; // 5 meter
+      const double requiredRadius = 10.0; // 5 meter
       final List<List<double>> missedCheckpoints = task.getMissedCheckpoints(
           actualRoutePath, requiredRadius); // Use the new method
 
