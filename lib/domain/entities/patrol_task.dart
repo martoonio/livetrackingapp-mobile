@@ -24,6 +24,7 @@ class PatrolTask {
   final Map<String, dynamic>? lastLocation;
   final String? notes;
   final DateTime? expiredAt;
+  final DateTime? cancelledAt;
   String? _officerName;
   String? _officerPhotoUrl;
   String? _clusterName;
@@ -97,6 +98,7 @@ class PatrolTask {
     this.lastLocation,
     this.notes,
     this.expiredAt,
+    this.cancelledAt,
     String? officerName,
     String? clusterName,
     String? vehicleName,
@@ -151,6 +153,11 @@ class PatrolTask {
           : json['expired_at'] != null
               ? _parseDateTime(json['expired_at'])
               : null,
+      cancelledAt: json['cancelledAt'] != null
+          ? _parseDateTime(json['cancelledAt'])
+          : json['cancelled_at'] != null
+              ? _parseDateTime(json['cancelled_at'])
+              : null,
       routePath: json['route_path'] as Map<String, dynamic>?,
       lastLocation: json['lastLocation'] as Map<String, dynamic>?,
       notes: json['notes'] as String?,
@@ -187,6 +194,7 @@ class PatrolTask {
       'createdAt': createdAt.toIso8601String(),
       'createdBy': createdBy,
       'expiredAt': expiredAt?.toIso8601String(),
+      'cancelledAt': cancelledAt?.toIso8601String(),
       'notes': notes,
       'finalReportPhotoUrl': finalReportPhotoUrl,
       'finalReportNote': finalReportNote,
@@ -464,6 +472,7 @@ class PatrolTask {
     DateTime? createdAt,
     String? createdBy,
     DateTime? expiredAt,
+    DateTime? cancelledAt,
     Map<String, dynamic>? routePath,
     Map<String, dynamic>? lastLocation,
     String? notes,
@@ -497,6 +506,7 @@ class PatrolTask {
       createdAt: createdAt ?? this.createdAt,
       createdBy: createdBy ?? this.createdBy,
       expiredAt: expiredAt ?? this.expiredAt,
+      cancelledAt: cancelledAt ?? this.cancelledAt,
       routePath: routePath ?? this.routePath,
       lastLocation: lastLocation ?? this.lastLocation,
       notes: notes ?? this.notes,

@@ -436,6 +436,7 @@ class _ClusterPatrolHistoryScreenState
                         ),
                         const SizedBox(height: 2),
                         Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             // Status badge
                             Text(
@@ -447,8 +448,9 @@ class _ClusterPatrolHistoryScreenState
                             ),
 
                             // Tambahkan badge timeliness jika ada
-                            if (task.timeliness != null) ...[
-                              const SizedBox(width: 8),
+                            if (task.timeliness != null &&
+                                task.status != 'cancelled') ...[
+                              // const SizedBox(width: 16),
                               buildTimelinessIndicator(task.timeliness),
                             ],
                           ],
@@ -456,8 +458,8 @@ class _ClusterPatrolHistoryScreenState
                       ],
                     ),
                   ),
-                  const Icon(Icons.arrow_forward_ios,
-                      size: 16, color: neutral500),
+                  // const Icon(Icons.arrow_forward_ios,
+                  //     size: 16, color: neutral500),
                 ],
               ),
 
@@ -826,8 +828,8 @@ class _ClusterPatrolHistoryScreenState
                                   child: Text(_getStatusText('completed')),
                                 ),
                                 DropdownMenuItem<String>(
-                                  value: 'canceled',
-                                  child: Text(_getStatusText('canceled')),
+                                  value: 'cancelled',
+                                  child: Text(_getStatusText('cancelled')),
                                 ),
                               ],
                               onChanged: (value) {
@@ -999,7 +1001,7 @@ class _ClusterPatrolHistoryScreenState
       case 'finished':
       case 'completed':
         return 'Patroli Selesai';
-      case 'canceled':
+      case 'cancelled':
         return 'Patroli Dibatalkan';
       default:
         return 'Status Tidak Diketahui';
@@ -1016,7 +1018,7 @@ class _ClusterPatrolHistoryScreenState
       case 'finished':
       case 'completed':
         return successG500;
-      case 'canceled':
+      case 'cancelled':
         return dangerR500;
       default:
         return neutral500;

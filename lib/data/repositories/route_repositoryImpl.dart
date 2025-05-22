@@ -525,6 +525,8 @@ class RouteRepositoryImpl implements RouteRepository {
             ? Map<String, dynamic>.from(data['route_path'] as Map)
             : null,
         createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
+        expiredAt: _parseDateTime(data['expiredAt']),
+        cancelledAt: _parseDateTime(data['cancelledAt']),
         startTime: _parseDateTime(data['startTime']),
         endTime: _parseDateTime(data['endTime']),
         assignedStartTime: _parseDateTime(data['assignedStartTime']),

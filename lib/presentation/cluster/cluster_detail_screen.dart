@@ -42,6 +42,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
   int _invalidPatrols = 0;
   int _ontimePatrols = 0;
   int _activePatrols = 0;
+  int _cancelledPatrols = 0;
   bool _isHistoryLoading = true;
   String? _errorMessage;
 
@@ -94,6 +95,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
         int invalidPatrols = 0;
         int ontimePatrols = 0;
         int activePatrols = 0;
+        int cancelledPatrols = 0;
 
         // Proses data dari snapshot
         final tasks = tasksSnapshot.value as Map<dynamic, dynamic>;
@@ -110,6 +112,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
             expiredPatrols++;
           } else if (status == 'ongoing') {
             ongoingPatrols++;
+          } else if (status == 'cancelled') {
+            cancelledPatrols++;
           }
 
           final mockLocationDetected = data['mockLocationDetected'] as bool?;
@@ -133,6 +137,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
           _invalidPatrols = invalidPatrols;
           _ontimePatrols = ontimePatrols;
           _activePatrols = activePatrols;
+          _cancelledPatrols = cancelledPatrols;
           _isHistoryLoading = false;
         });
       } else {
@@ -145,6 +150,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
           _invalidPatrols = 0;
           _ontimePatrols = 0;
           _activePatrols = 0;
+          _cancelledPatrols = 0;
           _isHistoryLoading = false;
         });
       }
@@ -309,175 +315,181 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     }
 
     // Tampilkan data statistik
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: kbpBlue50,
-                  borderRadius: const BorderRadius.only(
-                    bottomLeft: Radius.circular(16),
-                    bottomRight: Radius.circular(16),
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: kbpBlue50,
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(16),
+                      bottomRight: Radius.circular(16),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Riwayat Patroli',
+                        style: semiBoldTextStyle(size: 18),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: kbpBlue700,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.list_alt,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '$_totalPatrols Patroli',
+                              style:
+                                  boldTextStyle(color: Colors.white, size: 14),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Riwayat Patroli',
-                      style: semiBoldTextStyle(size: 18),
-                    ),
-                    Container(
+                12.height,
+                // Tombol aksi untuk riwayat lengkap
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ClusterPatrolHistoryScreen(
+                            clusterId: widget.clusterId,
+                            clusterName: _cluster?.name ?? '',
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.history),
+                    label: const Text('Tampilkan Riwayat Lengkap'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kbpBlue900,
+                      foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: kbpBlue700,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
+                        horizontal: 24,
+                        vertical: 12,
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.list_alt,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '$_totalPatrols Patroli',
-                            style: boldTextStyle(color: Colors.white, size: 14),
-                          ),
-                        ],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Baris pertama statistik
+                Row(
+                  children: [
+                    _buildStatCard(
+                      icon: Icons.calendar_today,
+                      title: 'Sedang Berlangsung',
+                      value: _ongoingPatrols.toString(),
+                      iconColor: kbpBlue900,
+                      bgColor: kbpBlue50,
+                    ),
+                    const SizedBox(width: 12),
+                    _buildStatCard(
+                      icon: Icons.verified,
+                      title: 'Tepat Waktu',
+                      value: _ontimePatrols.toString(),
+                      iconColor: successG500,
+                      bgColor: successG50,
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 12),
 
-              // Baris pertama statistik
-              Row(
-                children: [
-                  _buildStatCard(
-                    icon: Icons.calendar_today,
-                    title: 'Sedang Berlangsung',
-                    value: _ongoingPatrols.toString(),
-                    iconColor: kbpBlue900,
-                    bgColor: kbpBlue50,
-                  ),
-                  const SizedBox(width: 12),
-                  _buildStatCard(
-                    icon: Icons.verified,
-                    title: 'Tepat Waktu',
-                    value: _ontimePatrols.toString(),
-                    iconColor: successG500,
-                    bgColor: successG50,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              // Baris kedua statistik
-              Row(
-                children: [
-                  _buildStatCard(
-                    icon: Icons.timer,
-                    title: 'Terlambat',
-                    value: _latePatrols.toString(),
-                    iconColor: warningY500,
-                    bgColor: warningY50,
-                  ),
-                  const SizedBox(width: 12),
-                  _buildStatCard(
-                    icon: Icons.access_time_filled,
-                    title: 'Lewat Tenggat',
-                    value: _expiredPatrols.toString(),
-                    iconColor: dangerR500,
-                    bgColor: dangerR50,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              // Baris ketiga statistik
-              Row(
-                children: [
-                  _buildStatCard(
-                    icon: Icons.gps_off,
-                    title: 'Fake GPS',
-                    value: _invalidPatrols.toString(),
-                    iconColor: Colors.purple,
-                    bgColor: Color(0xFFF3E5F5), // light purple
-                  ),
-                  const SizedBox(width: 12),
-                  _buildStatCard(
-                    icon: Icons.pending_actions,
-                    title: 'Belum Dimulai',
-                    value: _activePatrols.toString(),
-                    iconColor: kbpBlue700,
-                    bgColor: kbpBlue50,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-
-        // Tombol aksi untuk riwayat lengkap
-        Expanded(
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  'Kelola dan analisis riwayat patroli petugas\ndalam cluster ini',
-                  textAlign: TextAlign.center,
-                  style: regularTextStyle(color: neutral600),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ClusterPatrolHistoryScreen(
-                          clusterId: widget.clusterId,
-                          clusterName: _cluster?.name ?? '',
-                        ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.history),
-                  label: const Text('Tampilkan Riwayat Lengkap'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kbpBlue900,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
+                // Baris kedua statistik
+                Row(
+                  children: [
+                    _buildStatCard(
+                      icon: Icons.timer,
+                      title: 'Terlambat',
+                      value: _latePatrols.toString(),
+                      iconColor: warningY500,
+                      bgColor: warningY50,
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                    const SizedBox(width: 12),
+                    _buildStatCard(
+                      icon: Icons.access_time_filled,
+                      title: 'Lewat Tenggat',
+                      value: _expiredPatrols.toString(),
+                      iconColor: dangerR500,
+                      bgColor: dangerR50,
                     ),
-                  ),
+                  ],
                 ),
+                const SizedBox(height: 12),
+
+                // Baris ketiga statistik
+                Row(
+                  children: [
+                    _buildStatCard(
+                      icon: Icons.gps_off,
+                      title: 'Fake GPS',
+                      value: _invalidPatrols.toString(),
+                      iconColor: Colors.purple,
+                      bgColor: Color(0xFFF3E5F5), // light purple
+                    ),
+                    const SizedBox(width: 12),
+                    _buildStatCard(
+                      icon: Icons.pending_actions,
+                      title: 'Belum Dimulai',
+                      value: _activePatrols.toString(),
+                      iconColor: kbpBlue700,
+                      bgColor: kbpBlue50,
+                    ),
+                  ],
+                ),
+
+                12.height,
+
+                Row(
+                  children: [
+                    _buildStatCard(
+                      icon: Icons.cancel,
+                      title: 'Dibatalkan',
+                      value: _cancelledPatrols.toString(),
+                      iconColor: Colors.red,
+                      bgColor: Colors.red.withOpacity(0.1),
+                    ),
+                    const SizedBox(width: 0),
+                  ],
+                )
               ],
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

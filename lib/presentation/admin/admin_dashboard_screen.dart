@@ -5,6 +5,7 @@ import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/admin/patrol_history_screen.dart';
 import 'package:livetrackingapp/presentation/cluster/cluster_detail_screen.dart';
+import '../routing/bloc/patrol_bloc.dart';
 import 'create_task_screen.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'package:lottie/lottie.dart';
@@ -659,22 +660,82 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                         ),
 
                                         // View action
-                                        IconButton(
+                                        // Ganti bagian IconButton arrow_forward_ios dengan menu PopupMenuButton
+
+// Menu aksi (3 titik)
+                                        PopupMenuButton<String>(
                                           icon: const Icon(
-                                            Icons.arrow_forward_ios,
-                                            size: 16,
+                                            Icons.more_vert,
+                                            size: 20,
+                                            color: kbpBlue900,
                                           ),
-                                          onPressed: () {
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (_) =>
-                                                    PatrolHistoryScreen(
-                                                  task: task,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
+                                          elevation: 3,
+                                          position: PopupMenuPosition.under,
+                                          tooltip: 'Opsi Tugas',
+                                          color: Colors.white,
+                                          onSelected: (value) {
+                                            if (value == 'view') {
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) =>
+                                                      PatrolHistoryScreen(
+                                                    task: task,
+                                                  ),
+                                                ),
+                                              );
+                                            } else if (value == 'cancel') {
+                                              _showCancelConfirmationDialog(
+                                                  context, task, cluster);
+                                            }
+                                          },
+                                          itemBuilder: (BuildContext context) =>
+                                              [
+                                            // Lihat Detail Option
+                                            PopupMenuItem<String>(
+                                              value: 'view',
+                                              child: Row(
+                                                children: [
+                                                  const Icon(
+                                                    Icons.visibility_outlined,
+                                                    color: kbpBlue900,
+                                                    size: 18,
+                                                  ),
+                                                  const SizedBox(width: 12),
+                                                  Text(
+                                                    'Lihat Detail',
+                                                    style: mediumTextStyle(
+                                                        color: neutral800),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+
+                                            // Cancel Option - hanya tampilkan jika memenuhi syarat
+                                            if (_canCancelTask(task))
+                                              PopupMenuItem<String>(
+                                                value: 'cancel',
+                                                child: Row(
+                                                  children: [
+                                                    const Icon(
+                                                      Icons.cancel_outlined,
+                                                      color: dangerR500,
+                                                      size: 18,
+                                                    ),
+                                                    const SizedBox(width: 12),
+                                                    Text(
+                                                      'Batalkan Tugas',
+                                                      style: mediumTextStyle(
+                                                          color: dangerR500),
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
-                                            );
-                                          },
+                                          ],
                                         ),
                                       ],
                                     ),
@@ -810,6 +871,233 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
     );
+  }
+
+  // Tambahkan method _showCancelConfirmationDialog
+
+  void _showCancelConfirmationDialog(
+      BuildContext context, PatrolTask task, User cluster) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.rectangle,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 10.0,
+                offset: Offset(0.0, 10.0),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon warning
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  color: dangerR50,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 40,
+                  color: dangerR500,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Title
+              Text(
+                'Batalkan Tugas',
+                style: boldTextStyle(size: 18),
+              ),
+              const SizedBox(height: 8),
+
+              // Message
+              Text(
+                'Apakah Anda yakin ingin membatalkan tugas ini? Tindakan ini tidak dapat dipulihkan.',
+                textAlign: TextAlign.center,
+                style: regularTextStyle(color: neutral700),
+              ),
+              const SizedBox(height: 24),
+
+              // Action buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: neutral700,
+                        side: const BorderSide(color: neutral400),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('Tidak'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        // Tutup dialog konfirmasi
+                        Navigator.of(context).pop();
+
+                        // Tampilkan dialog loading
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (context) => Dialog(
+                            backgroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Loading indicator
+                                  const SizedBox(
+                                    width: 60,
+                                    height: 60,
+                                    child: CircularProgressIndicator(
+                                      color: kbpBlue900,
+                                      strokeWidth: 4,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 24),
+
+                                  // Text
+                                  Text(
+                                    'Membatalkan tugas...',
+                                    style: mediumTextStyle(size: 16),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Mohon tunggu sebentar',
+                                    style: regularTextStyle(
+                                        color: neutral600, size: 14),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+
+                        // Proses pembatalan task
+                        try {
+                          await _cancelTask(task);
+
+                          // Tutup dialog loading
+                          if (context.mounted) Navigator.of(context).pop();
+
+                          // Refresh data
+                          _loadData();
+
+                          // Tampilkan feedback sukses
+                          if (context.mounted) {
+                            showCustomSnackbar(
+                              context: context,
+                              title: 'Berhasil',
+                              subtitle: 'Patroli berhasil dibatalkan',
+                              type: SnackbarType.success,
+                            );
+                          }
+                        } catch (error) {
+                          // Tutup dialog loading
+                          if (context.mounted) Navigator.of(context).pop();
+
+                          // Tampilkan feedback error
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Row(
+                                  children: [
+                                    const Icon(Icons.error,
+                                        color: Colors.white),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                          'Gagal membatalkan tugas: $error'),
+                                    ),
+                                  ],
+                                ),
+                                backgroundColor: dangerR500,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                margin: const EdgeInsets.all(8),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: dangerR500,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('Ya, Batalkan'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cancelTask(PatrolTask task) async {
+    try {
+      await context.read<PatrolBloc>().repository.updateTask(
+        task.taskId,
+        {
+          'status': 'cancelled',
+          'cancelledAt': DateTime.now().toIso8601String(),
+        },
+      );
+    } catch (e) {
+      print('Error cancelling task: $e');
+      throw Exception('Gagal membatalkan tugas: $e');
+    }
+  }
+
+  bool _canCancelTask(PatrolTask task) {
+    // Task harus dalam status active (belum dimulai)
+
+    final now = DateTime.now();
+    final cutoffTime =
+        task.assignedStartTime!.subtract(const Duration(minutes: 10));
+
+    final result = (now.isBefore(cutoffTime) && task.status == 'active');
+
+    // Return true jika waktu sekarang masih sebelum cutoffTime
+    return result;
   }
 
   Officer? _findOfficerByUserId(List<Officer> officers, String? userId) {

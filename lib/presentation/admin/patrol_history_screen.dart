@@ -1779,7 +1779,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                     backgroundColor: neutral200,
                     valueColor: AlwaysStoppedAnimation<Color>(
                       widget.task.status.toLowerCase() == 'finished' ||
-                              widget.task.status.toLowerCase() == 'completed'
+                              widget.task.status.toLowerCase() == 'finished'
                           ? successG500
                           : widget.task.status.toLowerCase() == 'ongoing' ||
                                   widget.task.status.toLowerCase() == 'active'
@@ -2106,7 +2106,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
     events.add({
       'title': 'Tugas diberikan',
       'time': widget.task.createdAt ?? DateTime.now(),
-      'status': 'assigned',
+      'status': 'active',
     });
 
     // Start patrol event
@@ -2114,7 +2114,15 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
       events.add({
         'title': 'Patroli dimulai',
         'time': widget.task.startTime!,
-        'status': 'started',
+        'status': 'ongoing',
+      });
+    }
+
+    if (widget.task.cancelledAt != null) {
+      events.add({
+        'title': 'Patroli dibatalkan',
+        'time': widget.task.cancelledAt!,
+        'status': 'cancelled',
       });
     }
 
@@ -2123,7 +2131,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
       events.add({
         'title': 'Patroli selesai',
         'time': widget.task.endTime!,
-        'status': 'completed',
+        'status': 'finished',
       });
     }
 
@@ -2186,16 +2194,16 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
 
   String _getStatusText(String status) {
     switch (status.toLowerCase()) {
-      case 'assigned':
+      case 'active':
         return 'Tugas Dijadwalkan';
       case 'ongoing':
         return 'Sedang Berpatroli';
       case 'active':
         return 'Tugas sudah dijadwalkan';
       case 'finished':
-      case 'completed':
+      case 'finished':
         return 'Patroli Selesai';
-      case 'canceled':
+      case 'cancelled':
         return 'Patroli Dibatalkan';
       default:
         return 'Status Tidak Diketahui';
@@ -2209,9 +2217,9 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
       case 'active':
         return kbpBlue700;
       case 'finished':
-      case 'completed':
+      case 'finished':
         return successG500;
-      case 'canceled':
+      case 'cancelled':
         return dangerR500;
       default:
         return neutral500;
@@ -2220,15 +2228,15 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
 
   Color _getStatusBgColor(String status) {
     switch (status.toLowerCase()) {
-      case 'assigned':
+      case 'active':
         return warningY50;
       case 'ongoing':
       case 'active':
         return kbpBlue50;
       case 'finished':
-      case 'completed':
+      case 'finished':
         return successG50;
-      case 'canceled':
+      case 'cancelled':
         return dangerR50;
       default:
         return neutral200;
@@ -2237,15 +2245,15 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
 
   IconData _getStatusIcon(String status) {
     switch (status.toLowerCase()) {
-      case 'assigned':
+      case 'active':
         return Icons.assignment;
       case 'ongoing':
       case 'active':
         return Icons.directions_run;
       case 'finished':
-      case 'completed':
+      case 'finished':
         return Icons.check_circle;
-      case 'canceled':
+      case 'cancelled':
         return Icons.cancel;
       default:
         return Icons.help;
@@ -2254,12 +2262,14 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
 
   Color _getTimelineColor(String status) {
     switch (status.toLowerCase()) {
-      case 'assigned':
+      case 'ongoing':
         return warningY500;
-      case 'started':
+      case 'active':
         return kbpBlue700;
-      case 'completed':
+      case 'finished':
         return successG500;
+      case 'cancelled':
+        return dangerR300;
       default:
         return neutral500;
     }
@@ -2267,16 +2277,16 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
 
   String _getProgressDescription(String status, int progress) {
     switch (status.toLowerCase()) {
-      case 'assigned':
+      case 'active':
         return 'Patroli belum dimulai. Petugas akan segera memulai tugasnya.';
       case 'active':
         return 'Petugas belum memulai patroli. Masih menunggu untuk berangkat.';
       case 'ongoing':
         return 'Petugas sedang berpatroli. Telah mengunjungi $progress% dari titik patroli.';
       case 'finished':
-      case 'completed':
+      case 'finished':
         return 'Patroli telah selesai. Semua titik telah dikunjungi.';
-      case 'canceled':
+      case 'cancelled':
         return 'Patroli dibatalkan. Petugas tidak menyelesaikan kunjungan.';
       default:
         return 'Status patroli tidak diketahui.';
