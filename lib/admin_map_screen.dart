@@ -13,13 +13,24 @@ import 'package:flutter/services.dart';
 import 'dart:math' as Math;
 
 class AdminMapScreen extends StatefulWidget {
-  const AdminMapScreen({super.key});
+  // --- FITUR BARU: PARAMETER UNTUK HIGHLIGHT LOKASI DARI NOTIFIKASI ---
+  final String? highlightedTaskId;
+  final double? highlightedLat;
+  final double? highlightedLng;
+
+  const AdminMapScreen({
+    super.key,
+    this.highlightedTaskId,
+    this.highlightedLat,
+    this.highlightedLng,
+  });
+  // --- AKHIR FITUR BARU ---
 
   @override
-  State<AdminMapScreen> createState() => _AdminMapScreenState();
+  State<AdminMapScreen> createState() => AdminMapScreenState();
 }
 
-class _AdminMapScreenState extends State<AdminMapScreen> {
+class AdminMapScreenState extends State<AdminMapScreen> {
   final Completer<GoogleMapController> _mapController = Completer();
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
@@ -55,12 +66,34 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       _loadActiveTasks();
     });
+
+    // --- FITUR BARU: TANGANI HIGHLIGHT LOKASI DARI NOTIFIKASI SAAT INIT ---
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (widget.highlightedTaskId != null &&
+          widget.highlightedLat != null &&
+          widget.highlightedLng != null) {
+        _selectedTaskId = widget.highlightedTaskId; // Set selected task
+        _centerMapOnSpecificLocation(
+            LatLng(widget.highlightedLat!, widget.highlightedLng!));
+      }
+    });
+    // --- AKHIR FITUR BARU ---
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _centerMapOnSpecificLocation(LatLng location) async {
+    if (_mapController.isCompleted) {
+      final GoogleMapController controller = await _mapController.future;
+      controller.animateCamera(
+        CameraUpdate.newLatLngZoom(
+            location, 18.0), // Zoom ke lokasi dengan zoom level 18
+      );
+    }
   }
 
   // Tambahkan di _AdminMapScreenState
@@ -398,6 +431,16 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
             return;
           }
 
+          // --- FITUR BARU: MARKER MOCK LOCATION ---
+          BitmapDescriptor markerIcon;
+          if (task.mockLocationDetected == true) {
+            markerIcon = BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueViolet); // Warna ungu untuk mock location
+          } else {
+            markerIcon = _getMarkerIconForCluster(task.clusterId);
+          }
+          // --- AKHIR FITUR BARU ---
+
           final marker = Marker(
             markerId: MarkerId(taskId),
             position: lastPosition,
@@ -407,7 +450,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
               snippet:
                   'Tatar: ${_clusterNames[task.clusterId] ?? task.clusterId.substring(0, Math.min(8, task.clusterId.length))}, Jarak: ${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
             ),
-            icon: _getMarkerIconForCluster(task.clusterId),
+            icon: markerIcon, // Gunakan markerIcon yang sudah ditentukan
             onTap: () {
               setState(() {
                 _selectedTaskId = taskId;
@@ -484,6 +527,28 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
     final CameraUpdate update = CameraUpdate.newLatLngBounds(bounds, 50.0);
     controller.animateCamera(update);
   }
+
+  // --- FITUR BARU: METODE PUBLIK UNTUK HIGHLIGHT LOKASI ---
+  Future<void> highlightLocation(String taskId, double lat, double lng) async {
+    setState(() {
+      _selectedTaskId = taskId; // Highlight the task
+    });
+    _updateMapMarkers(); // Rebuild markers to apply highlight
+
+    if (_mapController.isCompleted) {
+      final GoogleMapController controller = await _mapController.future;
+      controller.animateCamera(
+        CameraUpdate.newLatLngZoom(LatLng(lat, lng), 18.0), // Zoom ke lokasi
+      );
+      // Tampilkan info window untuk marker yang bersangkutan jika ada
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (_markers.any((marker) => marker.markerId.value == taskId)) {
+          controller.showMarkerInfoWindow(MarkerId(taskId));
+        }
+      });
+    }
+  }
+  // --- AKHIR FITUR BARU ---
 
   void _showTaskDetailsBottomSheet(PatrolTask task) {
     showModalBottomSheet(

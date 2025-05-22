@@ -9,17 +9,27 @@ import 'presentation/cluster/manage_screen_cluster.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   final String userRole;
+  // --- FITUR BARU: PARAMETER UNTUK HIGHLIGHT DARI NOTIFIKASI ---
+  final int initialTabIndex;
+  final String? highlightedTaskId;
+  final double? highlightedLat;
+  final double? highlightedLng;
 
   const MainNavigationScreen({
     Key? key,
     required this.userRole,
+    this.initialTabIndex = 0,
+    this.highlightedTaskId,
+    this.highlightedLat,
+    this.highlightedLng,
   }) : super(key: key);
+  // --- AKHIR FITUR BARU ---
 
   @override
-  State<MainNavigationScreen> createState() => _MainNavigationScreenState();
+  State<MainNavigationScreen> createState() => MainNavigationScreenState();
 }
 
-class _MainNavigationScreenState extends State<MainNavigationScreen>
+class MainNavigationScreenState extends State<MainNavigationScreen>
     with SingleTickerProviderStateMixin {
   int _selectedIndex = 0;
   int _previousIndex = 0;
@@ -29,15 +39,31 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
   // Key untuk memaksa rebuild screens saat perlu
   final Map<int, GlobalKey> _pageKeys = {};
 
+  // --- FITUR BARU: GLOBAL KEY UNTUK ADMIN MAP SCREEN ---
+  // Gunakan GlobalKey untuk mengakses state AdminMapScreen
+  final GlobalKey<AdminMapScreenState> _adminMapScreenKey = GlobalKey<AdminMapScreenState>();
+  // --- AKHIR FITUR BARU ---
+
   @override
   void initState() {
     super.initState();
+
+    // --- FITUR BARU: SET INITIAL INDEX DARI PARAMETER ---
+    _selectedIndex = widget.initialTabIndex;
+    // --- AKHIR FITUR BARU ---
 
     // Inisialisasi pages dengan GlobalKey unik
     if (widget.userRole == 'commandCenter') {
       // Admin user gets AdminMapScreen as the home page
       _pages = [
-        AdminMapScreen(key: _getKeyForIndex(0)),
+        // --- FITUR BARU: GUNAKAN GLOBAL KEY DAN PASS HIGHLIGHTED DATA ---
+        AdminMapScreen(
+          key: _adminMapScreenKey, // Gunakan global key di sini
+          highlightedTaskId: widget.highlightedTaskId,
+          highlightedLat: widget.highlightedLat,
+          highlightedLng: widget.highlightedLng,
+        ),
+        // --- AKHIR FITUR BARU ---
         AdminDashboardScreen(key: _getKeyForIndex(1)),
         ManageClustersScreen(key: _getKeyForIndex(2)),
         ProfileScreen(key: _getKeyForIndex(3)),
@@ -67,6 +93,22 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
     _pageController.dispose();
     super.dispose();
   }
+
+  // --- FITUR BARU: METODE PUBLIK UNTUK NAVIGASI DAN HIGHLIGHT ---
+  void goToAdminMapAndHighlight(String taskId, double lat, double lng) {
+    // Pastikan kita berada di mode commandCenter dan tab AdminMapScreen
+    if (widget.userRole == 'commandCenter') {
+      // Pindah ke tab AdminMapScreen (indeks 0)
+      _pageController.jumpToPage(0);
+      setState(() {
+        _selectedIndex = 0;
+      });
+
+      // Panggil metode highlight di AdminMapScreenState
+      _adminMapScreenKey.currentState?.highlightLocation(taskId, lat, lng);
+    }
+  }
+  // --- AKHIR FITUR BARU ---
 
   @override
   Widget build(BuildContext context) {
@@ -131,7 +173,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
       if (widget.userRole == 'commandCenter') {
         switch (index) {
           case 0:
-            _pages[0] = AdminMapScreen(key: _pageKeys[index]);
+            // --- FITUR BARU: PASTIKAN ADMINMAPSCREEN MENGGUNAKAN GLOBAL KEY ---
+            _pages[0] = AdminMapScreen(key: _adminMapScreenKey);
+            // --- AKHIR FITUR BARU ---
             break;
           case 1:
             _pages[1] = AdminDashboardScreen(key: _pageKeys[index]);

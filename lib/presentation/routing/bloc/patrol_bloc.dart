@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../domain/entities/patrol_task.dart';
 import '../../../domain/repositories/route_repository.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -10,6 +11,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../../services/det_device_info.dart';
 import '../../../services/location_validator.dart';
+import 'package:livetrackingapp/notification_utils.dart';
 
 // Events
 abstract class PatrolEvent {}
@@ -90,6 +92,11 @@ class ResumePatrol extends PatrolEvent {
     required this.currentDistance,
     this.existingRoutePath,
   });
+}
+
+class CheckMissedCheckpoints extends PatrolEvent {
+  final PatrolTask task;
+  CheckMissedCheckpoints({required this.task});
 }
 
 class SyncOfflineData extends PatrolEvent {}
@@ -277,6 +284,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     on<SubmitInitialReport>(_onSubmitInitialReport);
     on<UpdateMockCount>(_onUpdateMockCount);
     on<UpdateConnectivityStatus>(_onUpdateConnectivityStatus);
+    on<CheckMissedCheckpoints>(_onCheckMissedCheckpoints);
 
     _initializeStorage();
     _setupConnectivityMonitoring();
@@ -707,42 +715,47 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     try {
       print('Resuming patrol for task: ${event.task.taskId}');
 
-      Map<String, dynamic> existingRoutePath = {};
+      Map<String, dynamic> initialRoutePath = {};
 
-      if (event.existingRoutePath != null &&
-          event.existingRoutePath!.isNotEmpty) {
-        event.existingRoutePath!.forEach((key, value) {
-          existingRoutePath[key.toString()] = value;
-        });
-        print(
-            'Using provided existingRoutePath with ${existingRoutePath.length} points');
-      } else if (event.task.routePath != null) {
-        try {
-          final taskRoutePath = event.task.routePath as Map<dynamic, dynamic>;
-          taskRoutePath.forEach((key, value) {
-            existingRoutePath[key.toString()] = value;
-          });
-          print(
-              'Using route path from task with ${existingRoutePath.length} points');
-        } catch (e) {
-          print('Error converting task route path: $e');
-        }
-      }
-
-      if (existingRoutePath.isEmpty && _isConnected) {
+      if (_isConnected) {
         try {
           final taskSnapshot =
               await repository.getTaskById(taskId: event.task.taskId);
           if (taskSnapshot != null && taskSnapshot.routePath != null) {
-            final dbRoutePath = taskSnapshot.routePath as Map<dynamic, dynamic>;
+            final dbRoutePath =
+                Map<String, dynamic>.from(taskSnapshot.routePath as Map);
             dbRoutePath.forEach((key, value) {
-              existingRoutePath[key.toString()] = value;
+              initialRoutePath[key.toString()] = value;
             });
             print(
-                'Fetched route path from database with ${existingRoutePath.length} points');
+                'Fetched route path from database with ${initialRoutePath.length} points');
           }
         } catch (e) {
-          print('Failed to fetch route path from database: $e');
+          print('Failed to fetch route path from database on resume: $e');
+        }
+      }
+
+      // Jika dari database kosong atau tidak ada koneksi, coba dari event/task object
+      if (initialRoutePath.isEmpty) {
+        if (event.existingRoutePath != null &&
+            event.existingRoutePath!.isNotEmpty) {
+          event.existingRoutePath!.forEach((key, value) {
+            initialRoutePath[key.toString()] = value;
+          });
+          print(
+              'Using provided existingRoutePath from event with ${initialRoutePath.length} points');
+        } else if (event.task.routePath != null) {
+          try {
+            final taskRoutePath =
+                Map<String, dynamic>.from(event.task.routePath as Map);
+            taskRoutePath.forEach((key, value) {
+              initialRoutePath[key.toString()] = value;
+            });
+            print(
+                'Using route path from task object with ${initialRoutePath.length} points');
+          } catch (e) {
+            print('Error converting task route path on resume: $e');
+          }
         }
       }
 
@@ -751,7 +764,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         isPatrolling: true,
         startTime: event.startTime,
         distance: event.currentDistance,
-        routePath: existingRoutePath,
+        routePath:
+            initialRoutePath, // Menggunakan initialRoutePath yang sudah digabungkan
         finishedTasks:
             state is PatrolLoaded ? (state as PatrolLoaded).finishedTasks : [],
         isOffline: !_isConnected,
@@ -760,7 +774,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       _startLocationTracking();
 
       print(
-          'Resumed patrol tracking with ${existingRoutePath.length} route points');
+          'Resumed patrol tracking with ${initialRoutePath.length} route points');
     } catch (e) {
       print('Error resuming patrol: $e');
       emit(PatrolError('Failed to resume patrol: $e'));
@@ -1061,7 +1075,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           final isMocked =
               await LocationValidator.isLocationMocked(event.position);
 
-          // Fix 1: Around line 1025-1050 - in the mock location detection handling
           if (isMocked) {
             print(
                 'MOCK LOCATION DETECTED: ${event.position.latitude}, ${event.position.longitude}');
@@ -1080,21 +1093,34 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               'altitude': event.position.altitude,
               'heading': event.position.heading,
               'count': newMockCount,
-              // 'deviceInfo': await getDeviceInfo(),
+              'deviceInfo': await getDeviceInfo(), // Ambil info perangkat
             };
 
             if (_isConnected) {
               try {
-                // Fix 2: Complete this method call
-                print(
-                    'Calling repository.logMockLocationDetection with task ID: ${currentState.task!.taskId}');
                 await repository.logMockLocationDetection(
                   taskId: currentState.task!.taskId,
                   userId: currentState.task!.userId,
                   mockData: mockData,
                 );
+
+                // // --- DIHAPUS: KIRIM NOTIFIKASI MOCK LOCATION KE COMMAND CENTER ---
+                // // Logika ini dipindahkan ke MapScreen
+                // if (currentState.task != null && currentState.task!.officerName != null && currentState.task!.clusterName != null) {
+                //   await sendMockLocationNotificationToCommandCenter(
+                //     patrolTaskId: currentState.task!.taskId,
+                //     officerId: currentState.task!.userId,
+                //     officerName: currentState.task!.officerName,
+                //     clusterName: currentState.task!.clusterName,
+                //     latitude: event.position.latitude,
+                //     longitude: event.position.longitude,
+                //   );
+                //   print('Notifikasi mock location dikirim ke Command Center dari PatrolBloc.');
+                // }
+                // // --- AKHIR DIHAPUS ---
               } catch (e) {
-                print('Error logging mock location to database: $e');
+                print(
+                    'Error logging mock location to database or sending notification: $e');
               }
             } else {
               if (_offlineLocationBox != null) {
@@ -1111,7 +1137,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
                   'altitude': event.position.altitude,
                   'heading': event.position.heading,
                   'mockCount': newMockCount,
-                  // 'deviceInfo': await getDeviceInfo(),
+                  'deviceInfo': await getDeviceInfo(),
                 });
                 print('Mock location data saved to offline storage');
               }
@@ -1139,13 +1165,39 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             'timestamp': event.timestamp.toIso8601String(),
           };
 
+          Map<String, dynamic> currentDbRoutePath = {};
+          if (_isConnected) {
+            try {
+              final taskSnapshot = await repository.getTaskById(
+                  taskId: currentState.task!.taskId);
+              if (taskSnapshot != null && taskSnapshot.routePath != null) {
+                currentDbRoutePath =
+                    Map<String, dynamic>.from(taskSnapshot.routePath as Map);
+                print(
+                    'Fetched existing route_path from database with ${currentDbRoutePath.length} points');
+              }
+            } catch (e) {
+              print('Error fetching existing route_path from database: $e');
+            }
+          }
+
+          Map<String, dynamic> mergedRoutePath = {
+            ...currentDbRoutePath, // Data dari database
+            ...?currentState
+                .routePath, // Data dari state BLoC (mungkin ada yang belum disinkronkan)
+            timestampKey: locationData, // Titik lokasi terbaru
+          };
+
           bool databaseUpdateSuccess = false;
           if (_isConnected) {
             try {
-              await repository.updatePatrolLocation(
+              // Update ke database, sekarang mengirimkan mergedRoutePath
+              await repository.updateTask(
                 currentState.task!.taskId,
-                coordinates,
-                event.timestamp,
+                {
+                  'route_path': mergedRoutePath,
+                  'lastLocation': locationData
+                }, // Update lastLocation juga
               );
               databaseUpdateSuccess = true;
               print('Database location update successful');
@@ -1155,11 +1207,14 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           }
           if (!_isConnected || !databaseUpdateSuccess) {
             if (_offlineLocationBox != null) {
+              // Simpan ke offline dengan timestampKey yang unik
               await _offlineLocationBox!.put(timestampKey, {
                 'latitude': event.position.latitude,
                 'longitude': event.position.longitude,
                 'timestamp': event.timestamp.toIso8601String(),
                 'taskId': currentState.task!.taskId,
+                'lastLocation':
+                    locationData, // Simpan lastLocation untuk offline juga
               });
 
               print('Saved location to offline storage. Key: $timestampKey');
@@ -1188,31 +1243,10 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             }
           }
 
-          Map<String, dynamic> updatedRoutePath = {};
-
-          if (currentState.routePath != null) {
-            updatedRoutePath =
-                Map<String, dynamic>.from(currentState.routePath!);
-          }
-
-          updatedRoutePath[timestampKey] = locationData;
-
-          if (_isConnected && updatedRoutePath.length % 5 == 0) {
-            try {
-              await repository.updateTask(
-                currentState.task!.taskId,
-                {'distance': newDistance, 'route_path': updatedRoutePath},
-              );
-              print(
-                  'Updated distance and route_path in database: $newDistance meters');
-            } catch (e) {
-              print('Error updating distance and route_path: $e');
-            }
-          }
-
           final updatedTask = currentState.task!.copyWith(
-            routePath: updatedRoutePath,
+            routePath: mergedRoutePath, // Pastikan menggunakan mergedRoutePath
             distance: newDistance,
+            lastLocation: locationData,
           );
 
           emit(currentState.copyWith(
@@ -1220,14 +1254,15 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               ...?currentState.currentPatrolPath,
               event.position
             ],
-            routePath: updatedRoutePath,
+            routePath: mergedRoutePath, // Pastikan menggunakan mergedRoutePath
             distance: newDistance,
             task: updatedTask,
             isOffline: !_isConnected,
             mockLocationDetected: false,
           ));
 
-          print('State updated with ${updatedRoutePath.length} route points');
+          print(
+              'State updated with ${mergedRoutePath.length} route points'); // Gunakan mergedRoutePath
           print('Total distance: $newDistance meters');
         } catch (e, stackTrace) {
           print('Error in location update flow: $e');
@@ -1268,39 +1303,57 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           }
         }
 
-        Map<String, dynamic> routePathToSave = {};
+        Map<String, dynamic> routePathToSave = {
+          ...existingRoutePathFromDb ?? {}, // Data dari database
+          ...?currentState.routePath, // Data dari state BLoC
+          ...?event.finalRoutePath, // Data dari event (jika ada yang berbeda)
+        };
+        // Baris-baris ini sekarang redundan karena sudah digabungkan di atas dengan spread operator
+        // if (existingRoutePathFromDb != null &&
+        //     existingRoutePathFromDb.isNotEmpty) {
+        //   routePathToSave.addAll(existingRoutePathFromDb);
+        //   print('Added ${existingRoutePathFromDb.length} points from database');
+        // }
 
-        if (existingRoutePathFromDb != null &&
-            existingRoutePathFromDb.isNotEmpty) {
-          routePathToSave.addAll(existingRoutePathFromDb);
-          print('Added ${existingRoutePathFromDb.length} points from database');
-        }
+        // if (currentState.routePath != null &&
+        //     currentState.routePath!.isNotEmpty) {
+        //   routePathToSave.addAll(currentState.routePath!);
+        //   print(
+        //       'Added ${currentState.routePath!.length} points from current state');
+        // }
 
-        if (currentState.routePath != null &&
-            currentState.routePath!.isNotEmpty) {
-          routePathToSave.addAll(currentState.routePath!);
-          print(
-              'Added ${currentState.routePath!.length} points from current state');
-        }
+        // if (event.finalRoutePath != null && event.finalRoutePath!.isNotEmpty) {
+        //   final newKeys = event.finalRoutePath!.keys
+        //       .where((key) => !routePathToSave.containsKey(key))
+        //       .toList();
 
-        if (event.finalRoutePath != null && event.finalRoutePath!.isNotEmpty) {
-          final newKeys = event.finalRoutePath!.keys
-              .where((key) => !routePathToSave.containsKey(key))
-              .toList();
-
-          if (newKeys.isNotEmpty) {
-            for (var key in newKeys) {
-              routePathToSave[key] = event.finalRoutePath![key];
-            }
-            print(
-                'Added ${newKeys.length} unique points from final route path');
-          }
-        }
+        //   if (newKeys.isNotEmpty) {
+        //     for (var key in newKeys) {
+        //       routePathToSave[key] = event.finalRoutePath![key];
+        //     }
+        //     print(
+        //         'Added ${newKeys.length} unique points from final route path');
+        //   }
+        // }
 
         print('Final merged route_path has ${routePathToSave.length} points');
 
         if (_isConnected) {
           await _onSyncOfflineData(SyncOfflineData(), emit);
+          // Setelah sync, ambil lagi data task terbaru dari DB untuk memastikan routePath yang paling lengkap
+          final updatedTaskFromDb =
+              await repository.getTaskById(taskId: currentState.task!.taskId);
+          if (updatedTaskFromDb != null &&
+              updatedTaskFromDb.routePath != null) {
+            routePathToSave =
+                Map<String, dynamic>.from(updatedTaskFromDb.routePath as Map);
+            print(
+                'Refreshed route_pathToSave from DB after sync: ${routePathToSave.length} points');
+          }
+        }
+
+        if (currentState.task != null && _isConnected) {
+          add(CheckMissedCheckpoints(task: currentState.task!));
         }
 
         if (_isConnected) {
@@ -1312,22 +1365,14 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             {
               'endTime': event.endTime.toIso8601String(),
               'distance': event.distance,
+              'route_path':
+                  routePathToSave, // Simpan route_path yang sudah digabungkan
+              'status': 'finished', // Pastikan status final juga terkirim
             },
           );
-
-          if (routePathToSave.isNotEmpty) {
-            print(
-                'Saving merged route path with ${routePathToSave.length} entries');
-
-            await repository.updateTask(
-              currentState.task!.taskId,
-              {
-                'route_path': routePathToSave,
-                'status': 'finished',
-              },
-            );
-          }
+          print('Updated task with endTime, distance, and final route_path');
         } else {
+          // Logika offline untuk stop patroli
           if (_offlineLocationBox != null) {
             await _offlineLocationBox!
                 .put('patrol_stop_${currentState.task!.taskId}', {
@@ -1335,26 +1380,32 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               'endTime': event.endTime.toIso8601String(),
               'distance': event.distance,
               'status': 'finished',
-              'route_path_length': routePathToSave.length,
-              'route_path': routePathToSave,
+              // Perhatikan: saat offline, route_path yang lengkap mungkin belum tersedia.
+              // Logika sync_offline_data harus memastikan ini digabungkan nanti.
+              'route_path_length':
+                  routePathToSave.length, // Simpan jumlah untuk debug
+              'route_path':
+                  routePathToSave, // Simpan state route_path saat ini juga untuk offline
             });
 
             print('Saved patrol completion data to offline storage');
 
             debugPrintOfflineData();
 
+            // Emit error atau info ke user bahwa data akan disinkronkan nanti
             emit(PatrolError(
                 'Patroli berhasil dihentikan dalam mode offline. Data akan disinkronkan saat koneksi tersedia.'));
 
-            Future.delayed(const Duration(seconds: 2), () {
-              emit(currentState.copyWith(
-                isPatrolling: false,
-                endTime: event.endTime,
-                isOffline: true,
-              ));
-            });
-            return;
+            // Beri jeda singkat sebelum emit state PatrolLoaded (non-patrolling)
+            await Future.delayed(const Duration(seconds: 2));
+            emit(currentState.copyWith(
+              isPatrolling: false,
+              endTime: event.endTime,
+              isOffline: true,
+              routePath: routePathToSave, // Pertahankan routePath di state
+            ));
           }
+          return; // Penting: keluar dari fungsi jika offline
         }
 
         _locationSubscription?.cancel();
@@ -1600,6 +1651,56 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         emit(PatrolError('Failed to submit final report: $e'));
         emit(currentState);
       }
+    }
+  }
+
+  Future<void> _onCheckMissedCheckpoints(
+    CheckMissedCheckpoints event,
+    Emitter<PatrolState> emit,
+  ) async {
+    // Hanya jalankan jika online dan patroli sudah selesai (untuk validasi akhir)
+    if (!_isConnected) return;
+
+    try {
+      final task = event.task;
+
+      // Dapatkan semua titik yang dilalui petugas
+      final List<LatLng> actualRoutePath =
+          task.getRoutePathAsLatLng(); // Use the new method
+
+      // Validasi jika semua titik telah dikunjungi (dalam radius 5m)
+      final double requiredRadius = 5.0; // 5 meter
+      final List<List<double>> missedCheckpoints = task.getMissedCheckpoints(
+          actualRoutePath, requiredRadius); // Use the new method
+
+      if (missedCheckpoints.isNotEmpty) {
+        print('Patroli melewatkan ${missedCheckpoints.length} titik!');
+
+        // Kirim notifikasi ke command center
+        await sendMissedCheckpointsNotification(
+          patrolTaskId: task.taskId,
+          officerName: task.officerName,
+          clusterName: task.clusterName,
+          officerId: task.userId,
+          missedCheckpoints: missedCheckpoints,
+        );
+
+        // Update task dengan flag missedCheckpoints = true
+        // await repository.updateTask(
+        //   task.taskId,
+        //   {
+        //     'missedCheckpoints': true,
+        //     'missedCheckpointsCount': missedCheckpoints.length,
+        //     'missedCheckpointsList': missedCheckpoints,
+        //   },
+        // );
+
+        print('Notifikasi titik yang terlewat telah dikirim.');
+      } else {
+        print('Semua titik patroli telah dikunjungi.');
+      }
+    } catch (e) {
+      print('Error checking missed checkpoints: $e');
     }
   }
 }

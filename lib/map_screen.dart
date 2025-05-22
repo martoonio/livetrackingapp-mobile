@@ -13,6 +13,7 @@ import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
 import 'package:livetrackingapp/services/location_validator.dart';
+import 'package:livetrackingapp/notification_utils.dart'; // Import notification_utils
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
@@ -145,6 +146,8 @@ class _MapScreenState extends State<MapScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
+      // Untuk memastikan clusterName juga terisi jika belum
+      await widget.task.fetchClusterName(FirebaseDatabase.instance.ref());
       if (mounted) {
         setState(() {}); // Refresh UI after name is loaded
       }
@@ -362,6 +365,184 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
+    // Simpan referensi context di awal method
+    final BuildContext currentContext = context;
+
+    try {
+      // Reference to Firebase Storage
+      final storageRef = FirebaseStorage.instance.ref();
+      final photoRef = storageRef.child('patrol_reports/$fileName');
+
+      // Buat upload task
+      final uploadTask = photoRef.putFile(imageFile);
+
+      // Completer untuk menunggu task selesai
+      final completer = Completer<void>();
+
+      // Dialog reference holder
+      BuildContext? dialogContextRef;
+
+      // Tampilkan dialog progress yang akan menutup secara otomatis
+      if (mounted) {
+        await showDialog(
+          context: currentContext,
+          barrierDismissible: false,
+          builder: (dialogContext) {
+            // Simpan reference ke dialog context
+            dialogContextRef = dialogContext;
+
+            return StatefulBuilder(
+              builder: (context, setDialogState) {
+                // Gunakan ValueNotifier untuk progress
+                final uploadProgress = ValueNotifier<double>(0.0);
+
+                // Setup listener untuk progress upload
+                uploadTask.snapshotEvents.listen(
+                  (TaskSnapshot snapshot) {
+                    double progress =
+                        snapshot.bytesTransferred / snapshot.totalBytes;
+                    uploadProgress.value = progress;
+
+                    // Tutup dialog otomatis saat upload berhasil
+                    if (snapshot.state == TaskState.success) {
+                      Future.delayed(const Duration(milliseconds: 500), () {
+                        // Pastikan dialog masih ada sebelum mencoba menutupnya
+                        if (dialogContextRef != null &&
+                            Navigator.canPop(dialogContextRef!)) {
+                          Navigator.of(dialogContextRef!).pop();
+                        }
+
+                        if (!completer.isCompleted) {
+                          completer.complete();
+                        }
+                      });
+                    }
+                  },
+                  onError: (e) {
+                    print('Error in upload progress: $e');
+
+                    // Pastikan dialog masih ada sebelum mencoba menutupnya
+                    if (dialogContextRef != null &&
+                        Navigator.canPop(dialogContextRef!)) {
+                      Navigator.of(dialogContextRef!).pop();
+                    }
+
+                    if (!completer.isCompleted) {
+                      completer.completeError(e);
+                    }
+                  },
+                );
+
+                return ValueListenableBuilder<double>(
+                  valueListenable: uploadProgress,
+                  builder: (context, progress, _) {
+                    return Dialog(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.all(24),
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // Icon dengan progress
+                            SizedBox(
+                              height: 80,
+                              width: 80,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  CircularProgressIndicator(
+                                    value: progress,
+                                    strokeWidth: 6,
+                                    backgroundColor: kbpBlue100,
+                                    color: kbpBlue900,
+                                  ),
+                                  Icon(
+                                    Icons.cloud_upload,
+                                    size: 36,
+                                    color: kbpBlue900,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+
+                            Text(
+                              'Mengunggah Foto',
+                              style: boldTextStyle(size: 18, color: kbpBlue900),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Mohon tunggu sementara foto sedang diunggah...',
+                              style:
+                                  regularTextStyle(size: 14, color: neutral700),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 24),
+
+                            // Progress bar
+                            Container(
+                              height: 8,
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: kbpBlue100,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Stack(
+                                children: [
+                                  FractionallySizedBox(
+                                    widthFactor: progress,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: kbpBlue900,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              '${(progress * 100).toInt()}%',
+                              style: semiBoldTextStyle(
+                                  size: 14, color: kbpBlue900),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      }
+
+      // Tunggu hingga upload selesai
+      await completer.future;
+
+      // Dapatkan URL download
+      final TaskSnapshot taskSnapshot = await uploadTask;
+      final String downloadUrl = await taskSnapshot.ref.getDownloadURL();
+      return downloadUrl;
+    } catch (e) {
+      print('Error uploading photo: $e');
+      throw Exception('Failed to upload photo: $e');
+    }
+  }
+
   void _startLocationTracking() {
     String timeNow = DateTime.now().toIso8601String();
     print('Starting location tracking... time: $timeNow');
@@ -427,6 +608,7 @@ class _MapScreenState extends State<MapScreen> {
                   'altitude': position.altitude,
                   'heading': position.heading,
                   'count': mockCount,
+                  // 'deviceInfo': await getDeviceInfo(), // Dihapus karena tidak ada di file ini
                 };
 
                 print('Logging mock location directly: $mockData');
@@ -465,6 +647,22 @@ class _MapScreenState extends State<MapScreen> {
                 context
                     .read<PatrolBloc>()
                     .add(UpdateMockCount(mockCount: mockCount));
+
+                // --- FITUR BARU: KIRIM NOTIFIKASI MOCK LOCATION KE COMMAND CENTER ---
+                if (widget.task.officerName.isNotEmpty &&
+                    widget.task.clusterName.isNotEmpty) {
+                  await sendMockLocationNotificationToCommandCenter(
+                    patrolTaskId: widget.task.taskId,
+                    officerId: widget.task.userId,
+                    officerName: widget.task.officerName,
+                    clusterName: widget.task.clusterName,
+                    latitude: position.latitude,
+                    longitude: position.longitude,
+                  );
+                  print(
+                      'Notifikasi mock location dikirim ke Command Center dari MapScreen.');
+                }
+                // --- AKHIR FITUR BARU ---
               }
             } catch (e) {
               print('Error logging mock location directly: $e');
@@ -538,6 +736,38 @@ class _MapScreenState extends State<MapScreen> {
         print('Location tracking error: $error');
       },
     );
+  }
+
+  void _startPatrol(BuildContext context) {
+    final startTime = DateTime.now();
+
+    print('Starting patrol at $startTime');
+
+    // Update task status
+    context.read<PatrolBloc>().add(UpdateTask(
+          taskId: widget.task.taskId,
+          updates: {
+            'status': 'ongoing',
+            'startTime': startTime.toIso8601String(),
+          },
+        ));
+
+    // Start patrol
+    context.read<PatrolBloc>().add(
+          StartPatrol(
+            task: widget.task,
+            startTime: startTime,
+          ),
+        );
+
+    _startPatrolTimer(); // Start timer
+    _elapsedTime = Duration.zero; // Reset timer
+    _totalDistance = 0; // Reset distance
+    _lastPosition = null;
+    _startLocationTracking(); // Start location tracking
+    print('Patroli telah dimulai setelah laporan awal');
+
+    widget.onStart();
   }
 
   void _handlePatrolButtonPress(BuildContext context, PatrolState state) async {
@@ -1062,49 +1292,49 @@ class _MapScreenState extends State<MapScreen> {
                                         final fileName =
                                             'initial_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-                                        // Upload foto ke Firebase Storage
+                                        // Simpan referensi context dialog untuk digunakan nanti
+                                        final currentDialogContext =
+                                            dialogContext;
+
+                                        // Upload foto ke Firebase Storage menggunakan fungsi yang sudah diperbaiki
                                         final photoUrl =
                                             await _uploadPhotoToFirebase(
                                                 capturedImage!, fileName);
 
-                                        initialReportPhotoUrl = photoUrl;
-
-                                        // Set URL dan update state
                                         if (mounted) {
                                           setState(() {
+                                            initialReportPhotoUrl = photoUrl;
                                             isSubmitting = false;
                                           });
                                         }
 
-                                        // Update task dengan data laporan awal
-                                        context
-                                            .read<PatrolBloc>()
-                                            .add(SubmitInitialReport(
-                                              photoUrl: initialReportPhotoUrl!,
-                                              note: noteController.text,
-                                              reportTime: DateTime.now(),
-                                            ));
-
-                                        final localDialogContext =
-                                            dialogContext;
-                                        final localContext = context;
-
-                                        // PENTING: Simpan data hasil dialog
+                                        // Set result ke true untuk menandakan dialog berhasil
                                         result = true;
 
-                                        if (localDialogContext != null &&
-                                            Navigator.canPop(
-                                                localDialogContext)) {
-                                          Navigator.pop(localDialogContext);
+                                        // Tutup dialog laporan akhir
+                                        if (Navigator.canPop(
+                                            currentDialogContext)) {
+                                          Navigator.pop(
+                                              currentDialogContext, true);
                                         }
 
-                                        // PENTING: Tunggu sedikit sebelum memanggil _startPatrol
-                                        // untuk memastikan dialog sudah benar-benar ditutup
+                                        // Beri jeda singkat untuk memastikan dialog tertutup
                                         await Future.delayed(
-                                            Duration(milliseconds: 100));
+                                            const Duration(milliseconds: 100));
 
                                         if (mounted) {
-                                          _startPatrol(localContext);
+                                          // Update task dengan data laporan awal
+                                          context
+                                              .read<PatrolBloc>()
+                                              .add(SubmitInitialReport(
+                                                photoUrl:
+                                                    initialReportPhotoUrl!,
+                                                note: noteController.text,
+                                                reportTime: DateTime.now(),
+                                              ));
+
+                                          _startPatrol(
+                                              context); // Panggil _startPatrol setelah laporan awal
 
                                           // Tampilkan snackbar sukses
                                           showCustomSnackbar(
@@ -1160,6 +1390,338 @@ class _MapScreenState extends State<MapScreen> {
     );
 
     return result;
+  }
+
+  void _showReportDialog(BuildContext context) {
+    final TextEditingController kejadianController = TextEditingController();
+    final TextEditingController catatanController = TextEditingController();
+
+    Future<void> pickImagesFromCamera() async {
+      try {
+        final pickedFile = await ImagePicker().pickImage(
+          source: ImageSource.camera,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          imageQuality: 85,
+        );
+        if (pickedFile != null) {
+          setState(() {
+            selectedPhotos.add(File(pickedFile.path));
+          });
+        }
+      } catch (e) {
+        print('Error picking image: $e');
+      }
+    }
+
+    // Buat dialog di dalam showDialog
+    showDialog(
+      context: context,
+      // PENTING: Set ini ke true untuk memungkinkan tap di luar menutup dialog
+      barrierDismissible: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            // 1. Gunakan SingleChildScrollView untuk memungkinkan scrolling saat keyboard muncul
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              // 2. Gunakan insetPadding untuk memastikan dialog tidak terlalu besar
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              child: Container(
+                // 3. Batasi ukuran dialog
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.8,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 4. Header tetap di atas
+                    Padding(
+                      padding: const EdgeInsets.only(
+                          top: 24, left: 24, right: 24, bottom: 0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Laporan Kejadian',
+                            style: boldTextStyle(size: 18, color: kbpBlue900),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: kbpBlue900),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              selectedPhotos.clear();
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // 5. Konten scrollable
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Input Kejadian
+                            Text(
+                              'Kejadian',
+                              style: semiBoldTextStyle(size: 14),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: kejadianController,
+                              decoration: InputDecoration(
+                                hintText: 'Judul kejadian...',
+                                hintStyle: regularTextStyle(color: Colors.grey),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                      const BorderSide(color: kbpBlue300),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                      const BorderSide(color: kbpBlue300),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                      color: kbpBlue900, width: 2),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 14),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Input Catatan
+                            Text(
+                              'Catatan',
+                              style: semiBoldTextStyle(size: 14),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: catatanController,
+                              maxLines: 3,
+                              decoration: InputDecoration(
+                                hintText: 'Deskripsi kejadian...',
+                                hintStyle: regularTextStyle(color: Colors.grey),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                      const BorderSide(color: kbpBlue300),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide:
+                                      const BorderSide(color: kbpBlue300),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: const BorderSide(
+                                      color: kbpBlue900, width: 2),
+                                ),
+                                contentPadding: const EdgeInsets.all(16),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Bukti Kejadian
+                            Text(
+                              'Bukti Kejadian',
+                              style: semiBoldTextStyle(size: 14),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              height: 100,
+                              decoration: BoxDecoration(
+                                border: Border.all(color: kbpBlue300),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              padding: const EdgeInsets.all(8),
+                              child: ListView(
+                                scrollDirection: Axis.horizontal,
+                                children: [
+                                  // Tombol untuk menambah foto
+                                  GestureDetector(
+                                    onTap: () async {
+                                      await pickImagesFromCamera();
+                                      setState(
+                                          () {}); // Pastikan dialog diperbarui
+                                    },
+                                    child: Container(
+                                      width: 80,
+                                      margin: const EdgeInsets.only(right: 8),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: kbpBlue900),
+                                        borderRadius: BorderRadius.circular(8),
+                                        color: kbpBlue100,
+                                      ),
+                                      child: const Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.camera_alt,
+                                            size: 32,
+                                            color: kbpBlue900,
+                                          ),
+                                          SizedBox(height: 4),
+                                          Text(
+                                            'Tambah Foto',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: kbpBlue900,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+
+                                  // Foto yang dipilih
+                                  ...selectedPhotos.map((photo) {
+                                    return Container(
+                                      width: 80,
+                                      height: 80,
+                                      margin: const EdgeInsets.only(right: 8),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: kbpBlue300),
+                                      ),
+                                      child: Stack(
+                                        children: [
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(7),
+                                            child: Image.file(
+                                              photo,
+                                              width: 80,
+                                              height: 80,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          ),
+                                          Positioned(
+                                            top: 4,
+                                            right: 4,
+                                            child: GestureDetector(
+                                              onTap: () {
+                                                setState(() {
+                                                  selectedPhotos.remove(photo);
+                                                });
+                                              },
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: Colors.white
+                                                      .withOpacity(0.7),
+                                                ),
+                                                padding:
+                                                    const EdgeInsets.all(4),
+                                                child: const Icon(
+                                                  Icons.close,
+                                                  color: dangerR300,
+                                                  size: 16,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+
+                            // Button Kirim Laporan
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  if (kejadianController.text.isNotEmpty &&
+                                      catatanController.text.isNotEmpty &&
+                                      selectedPhotos.isNotEmpty) {
+                                    // Simpan semua foto ke Firebase Storage
+                                    final report = Report(
+                                      id: DateTime.now()
+                                          .millisecondsSinceEpoch
+                                          .toString(),
+                                      title: kejadianController.text,
+                                      description: catatanController.text,
+                                      photoUrl: selectedPhotos
+                                          .map((photo) => photo.path)
+                                          .join(','), // Gabungkan path foto
+                                      timestamp: DateTime.now(),
+                                      latitude:
+                                          userCurrentLocation?.latitude ?? 0.0,
+                                      longitude:
+                                          userCurrentLocation?.longitude ?? 0.0,
+                                      taskId: widget.task.taskId,
+                                    );
+
+                                    context
+                                        .read<ReportBloc>()
+                                        .add(CreateReportEvent(report));
+                                    showCustomSnackbar(
+                                      context: context,
+                                      title: 'Laporan berhasil dikirim',
+                                      subtitle:
+                                          'Terima kasih atas laporan Anda',
+                                      type: SnackbarType.success,
+                                    );
+                                    selectedPhotos.clear();
+                                    kejadianController.clear();
+                                    catatanController.clear();
+                                    Navigator.pop(context);
+                                  } else {
+                                    showCustomSnackbar(
+                                      context: context,
+                                      title: 'Data belum lengkap',
+                                      subtitle:
+                                          'Silakan isi semua data laporan',
+                                      type: SnackbarType.danger,
+                                    );
+                                  }
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: kbpBlue900,
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 16),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  elevation: 2,
+                                ),
+                                child: Text(
+                                  'Kirim Laporan',
+                                  style: semiBoldTextStyle(
+                                      size: 16, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _addRouteMarkers(List<List<double>> coordinates) async {
@@ -1297,6 +1859,139 @@ class _MapScreenState extends State<MapScreen> {
         ),
       );
     }
+  }
+
+  void _updatePolyline(Position position) {
+    if (!_isMapReady || mapController == null) return;
+
+    final LatLng newPoint = LatLng(position.latitude, position.longitude);
+
+    // Debug info
+    print(
+        'Adding point to polyline: ${position.latitude}, ${position.longitude}');
+
+    // Cek jika titik berubah signifikan
+    if (_routePoints.isNotEmpty) {
+      final lastPoint = _routePoints.last;
+      final distance = Geolocator.distanceBetween(lastPoint.latitude,
+          lastPoint.longitude, newPoint.latitude, newPoint.longitude);
+
+      // Hanya tambahkan titik jika jarak cukup signifikan
+      if (distance < 5) {
+        print('Point too close, skipping');
+        return; // Skip jika kurang dari 5 meter
+      }
+    }
+
+    try {
+      setState(() {
+        // Tambahkan titik baru ke array titik
+        _routePoints.add(newPoint);
+
+        // Update polyline yang sudah ada
+        _polylines.removeWhere((polyline) =>
+            polyline.polylineId == const PolylineId('patrol_route'));
+
+        _polylines.add(
+          Polyline(
+            polylineId: const PolylineId('patrol_route'),
+            points: _routePoints,
+            color: _polylineColor,
+            width: 5,
+          ),
+        );
+      });
+
+      // Save route count to db
+      final state = context.read<PatrolBloc>().state;
+      if (state is PatrolLoaded &&
+          state.task != null &&
+          _routePoints.length % 10 == 0) {
+        print('Saving route with ${_routePoints.length} points');
+      }
+    } catch (e) {
+      print('Error updating polyline: $e');
+    }
+  }
+
+// Metode untuk menampilkan rute yang tersimpan dari database
+  void _displaySavedRoute(Map<String, dynamic>? routePath) {
+    if (routePath == null || !_isMapReady) return;
+
+    try {
+      // Konversi route_path menjadi list koordinat yang diurutkan berdasarkan timestamp
+      final entries = routePath.entries.toList()
+        ..sort((a, b) => (a.value['timestamp'] as String)
+            .compareTo(b.value['timestamp'] as String));
+
+      // Reset _routePoints
+      _routePoints.clear();
+
+      // Tambahkan semua titik dari routePath
+      for (var entry in entries) {
+        final coordinates = entry.value['coordinates'] as List;
+        _routePoints.add(LatLng(
+          (coordinates[0] as num).toDouble(),
+          (coordinates[1] as num).toDouble(),
+        ));
+      }
+
+      // Perbarui polyline
+      setState(() {
+        _polylines.clear();
+        if (_routePoints.isNotEmpty) {
+          _polylines.add(
+            Polyline(
+              polylineId: const PolylineId('patrol_route'),
+              points: _routePoints,
+              color: _polylineColor,
+              width: 5,
+            ),
+          );
+        }
+      });
+
+      print('Loaded saved route with ${_routePoints.length} points');
+
+      // Jika ada titik, zoom ke area yang mencakup semua titik
+      if (_routePoints.isNotEmpty) {
+        _zoomToPolyline();
+      }
+    } catch (e) {
+      print('Error loading saved route: $e');
+    }
+  }
+
+  void _zoomToPolyline() {
+    if (_routePoints.isEmpty || mapController == null) return;
+
+    // Cari bounds untuk semua titik
+    double minLat = 90.0, maxLat = -90.0;
+    double minLng = 180.0, maxLng = -180.0;
+
+    for (var point in _routePoints) {
+      minLat = minLat < point.latitude ? minLat : point.latitude;
+      maxLat = maxLat > point.latitude ? maxLat : point.latitude;
+      minLng = minLng < point.longitude ? minLng : point.longitude;
+      maxLng = maxLng > point.longitude ? maxLng : point.longitude;
+    }
+
+    // Pastikan bounds cukup besar
+    final padding = 0.01; // sekitar 1km pada kebanyakan latitude
+    minLat -= padding;
+    maxLat += padding;
+    minLng -= padding;
+    maxLng += padding;
+
+    final bounds = LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+
+    // Animasi kamera ke bounds
+    mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(bounds, 50),
+    );
   }
 
   void _onMapCreated(GoogleMapController controller) {
@@ -1767,8 +2462,9 @@ class _MapScreenState extends State<MapScreen> {
                                             }
 
                                             // Konversi data rute
-                                            final taskData = taskSnapshot.value
-                                                as Map<dynamic, dynamic>;
+                                            final taskData =
+                                                Map<String, dynamic>.from(
+                                                    taskSnapshot.value as Map);
                                             List<List<double>>
                                                 completeRoutePath = [];
 
@@ -1777,8 +2473,9 @@ class _MapScreenState extends State<MapScreen> {
                                                     null &&
                                                 taskData['route_path'] is Map) {
                                               final routePathMap =
-                                                  taskData['route_path']
-                                                      as Map<dynamic, dynamic>;
+                                                  Map<String, dynamic>.from(
+                                                      taskData['route_path']
+                                                          as Map);
 
                                               // Urutkan entry berdasarkan timestamp
                                               final sortedEntries = routePathMap
@@ -1951,731 +2648,222 @@ class _MapScreenState extends State<MapScreen> {
     return result;
   }
 
-  Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
-    // Simpan referensi context di awal method
-    final BuildContext currentContext = context;
-
-    try {
-      // Reference to Firebase Storage
-      final storageRef = FirebaseStorage.instance.ref();
-      final photoRef = storageRef.child('patrol_reports/$fileName');
-
-      // Buat upload task
-      final uploadTask = photoRef.putFile(imageFile);
-
-      // Completer untuk menunggu task selesai
-      final completer = Completer<void>();
-
-      // Dialog reference holder
-      BuildContext? dialogContextRef;
-
-      // Tampilkan dialog progress yang akan menutup secara otomatis
-      if (mounted) {
-        await showDialog(
-          context: currentContext,
-          barrierDismissible: false,
-          builder: (dialogContext) {
-            // Simpan reference ke dialog context
-            dialogContextRef = dialogContext;
-
-            return StatefulBuilder(
-              builder: (context, setDialogState) {
-                // Gunakan ValueNotifier untuk progress
-                final uploadProgress = ValueNotifier<double>(0.0);
-
-                // Setup listener untuk progress upload
-                uploadTask.snapshotEvents.listen(
-                  (TaskSnapshot snapshot) {
-                    double progress =
-                        snapshot.bytesTransferred / snapshot.totalBytes;
-                    uploadProgress.value = progress;
-
-                    // Tutup dialog otomatis saat upload berhasil
-                    if (snapshot.state == TaskState.success) {
-                      Future.delayed(const Duration(milliseconds: 500), () {
-                        // Pastikan dialog masih ada sebelum mencoba menutupnya
-                        if (dialogContextRef != null &&
-                            Navigator.canPop(dialogContextRef!)) {
-                          Navigator.of(dialogContextRef!).pop();
-                        }
-
-                        if (!completer.isCompleted) {
-                          completer.complete();
-                        }
-                      });
-                    }
-                  },
-                  onError: (e) {
-                    print('Error in upload progress: $e');
-
-                    // Pastikan dialog masih ada sebelum mencoba menutupnya
-                    if (dialogContextRef != null &&
-                        Navigator.canPop(dialogContextRef!)) {
-                      Navigator.of(dialogContextRef!).pop();
-                    }
-
-                    if (!completer.isCompleted) {
-                      completer.completeError(e);
-                    }
-                  },
-                );
-
-                return ValueListenableBuilder<double>(
-                  valueListenable: uploadProgress,
-                  builder: (context, progress, _) {
-                    return Dialog(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Container(
-                        padding: const EdgeInsets.all(24),
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
+  void _showMockLocationInfoDialog(BuildContext context, int detectionCount) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header dengan icon warning
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              decoration: const BoxDecoration(
+                color: dangerR500,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.warning_amber_rounded,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Fake GPS Terdeteksi',
+                          style: boldTextStyle(size: 18, color: Colors.white),
                         ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.center,
+                        const SizedBox(height: 2),
+                        Text(
+                          'Peringatan Keamanan',
+                          style:
+                              regularTextStyle(size: 12, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Body content
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Aplikasi mendeteksi penggunaan Fake GPS atau Mock Location. Hal ini tidak diperbolehkan dan akan dicatat untuk keperluan pelaporan.',
+                    style: regularTextStyle(size: 14, color: neutral700),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Langkah-langkah perbaikan dalam card
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: kbpBlue50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: kbpBlue300, width: 1),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Langkah Perbaikan:',
+                          style: semiBoldTextStyle(size: 14, color: kbpBlue900),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Langkah-langkah dengan icon
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Icon dengan progress
-                            SizedBox(
-                              height: 80,
-                              width: 80,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  CircularProgressIndicator(
-                                    value: progress,
-                                    strokeWidth: 6,
-                                    backgroundColor: kbpBlue100,
-                                    color: kbpBlue900,
-                                  ),
-                                  Icon(
-                                    Icons.cloud_upload,
-                                    size: 36,
-                                    color: kbpBlue900,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-
-                            Text(
-                              'Mengunggah Foto',
-                              style: boldTextStyle(size: 18, color: kbpBlue900),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Mohon tunggu sementara foto sedang diunggah...',
-                              style:
-                                  regularTextStyle(size: 14, color: neutral700),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 24),
-
-                            // Progress bar
                             Container(
-                              height: 8,
-                              width: double.infinity,
+                              padding: const EdgeInsets.all(6),
                               decoration: BoxDecoration(
-                                color: kbpBlue100,
-                                borderRadius: BorderRadius.circular(4),
+                                color: kbpBlue200,
+                                borderRadius: BorderRadius.circular(50),
                               ),
-                              child: Stack(
-                                children: [
-                                  FractionallySizedBox(
-                                    widthFactor: progress,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: kbpBlue900,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
+                              child: Text('1',
+                                  style: semiBoldTextStyle(
+                                      size: 12, color: kbpBlue900)),
                             ),
-                            const SizedBox(height: 12),
-                            Text(
-                              '${(progress * 100).toInt()}%',
-                              style: semiBoldTextStyle(
-                                  size: 14, color: kbpBlue900),
-                              textAlign: TextAlign.center,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Nonaktifkan Fake GPS atau Mock Location',
+                                style: mediumTextStyle(
+                                    size: 13, color: neutral800),
+                              ),
                             ),
                           ],
                         ),
+
+                        const SizedBox(height: 8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: kbpBlue200,
+                                borderRadius: BorderRadius.circular(50),
+                              ),
+                              child: Text('2',
+                                  style: semiBoldTextStyle(
+                                      size: 12, color: kbpBlue900)),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Pastikan Developer Options tidak aktif',
+                                style: mediumTextStyle(
+                                    size: 13, color: neutral800),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: kbpBlue200,
+                                borderRadius: BorderRadius.circular(50),
+                              ),
+                              child: Text('3',
+                                  style: semiBoldTextStyle(
+                                      size: 12, color: kbpBlue900)),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Restart aplikasi jika diperlukan',
+                                style: mediumTextStyle(
+                                    size: 13, color: neutral800),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Peringatan jika deteksi >= 3
+                  if (detectionCount >= 3)
+                    Container(
+                      margin: const EdgeInsets.only(top: 16),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 12, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: dangerR50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: dangerR200),
                       ),
-                    );
-                  },
-                );
-              },
-            );
-          },
-        );
-      }
-
-      // Tunggu hingga upload selesai
-      await completer.future;
-
-      // Dapatkan URL download
-      final TaskSnapshot taskSnapshot = await uploadTask;
-      final String downloadUrl = await taskSnapshot.ref.getDownloadURL();
-      return downloadUrl;
-    } catch (e) {
-      print('Error uploading photo: $e');
-      throw Exception('Failed to upload photo: $e');
-    }
-  }
-
-  void _startPatrol(BuildContext context) {
-    final startTime = DateTime.now();
-
-    print('Starting patrol at $startTime');
-
-    // Update task status
-    context.read<PatrolBloc>().add(UpdateTask(
-          taskId: widget.task.taskId,
-          updates: {
-            'status': 'ongoing',
-            'startTime': startTime.toIso8601String(),
-          },
-        ));
-
-    // Start patrol
-    context.read<PatrolBloc>().add(
-          StartPatrol(
-            task: widget.task,
-            startTime: startTime,
-          ),
-        );
-
-    _startPatrolTimer(); // Start timer
-    _elapsedTime = Duration.zero; // Reset timer
-    _totalDistance = 0; // Reset distance
-    _lastPosition = null;
-    _startLocationTracking(); // Start location tracking
-    print('Patroli telah dimulai setelah laporan awal');
-
-    widget.onStart();
-  }
-
-  void _updatePolyline(Position position) {
-    if (!_isMapReady || mapController == null) return;
-
-    final LatLng newPoint = LatLng(position.latitude, position.longitude);
-
-    // Debug info
-    print(
-        'Adding point to polyline: ${position.latitude}, ${position.longitude}');
-
-    // Cek jika titik berubah signifikan
-    if (_routePoints.isNotEmpty) {
-      final lastPoint = _routePoints.last;
-      final distance = Geolocator.distanceBetween(lastPoint.latitude,
-          lastPoint.longitude, newPoint.latitude, newPoint.longitude);
-
-      // Hanya tambahkan titik jika jarak cukup signifikan
-      if (distance < 5) {
-        print('Point too close, skipping');
-        return; // Skip jika kurang dari 5 meter
-      }
-    }
-
-    try {
-      setState(() {
-        // Tambahkan titik baru ke array titik
-        _routePoints.add(newPoint);
-
-        // Update polyline yang sudah ada
-        _polylines.removeWhere((polyline) =>
-            polyline.polylineId == const PolylineId('patrol_route'));
-
-        _polylines.add(
-          Polyline(
-            polylineId: const PolylineId('patrol_route'),
-            points: _routePoints,
-            color: _polylineColor,
-            width: 5,
-          ),
-        );
-      });
-
-      // Save route count to db
-      final state = context.read<PatrolBloc>().state;
-      if (state is PatrolLoaded &&
-          state.task != null &&
-          _routePoints.length % 10 == 0) {
-        print('Saving route with ${_routePoints.length} points');
-      }
-    } catch (e) {
-      print('Error updating polyline: $e');
-    }
-  }
-
-// Metode untuk menampilkan rute yang tersimpan dari database
-  void _displaySavedRoute(Map<String, dynamic>? routePath) {
-    if (routePath == null || !_isMapReady) return;
-
-    try {
-      // Konversi route_path menjadi list koordinat yang diurutkan berdasarkan timestamp
-      final entries = routePath.entries.toList()
-        ..sort((a, b) => (a.value['timestamp'] as String)
-            .compareTo(b.value['timestamp'] as String));
-
-      // Reset _routePoints
-      _routePoints.clear();
-
-      // Tambahkan semua titik dari routePath
-      for (var entry in entries) {
-        final coordinates = entry.value['coordinates'] as List;
-        _routePoints.add(LatLng(
-          (coordinates[0] as num).toDouble(),
-          (coordinates[1] as num).toDouble(),
-        ));
-      }
-
-      // Perbarui polyline
-      setState(() {
-        _polylines.clear();
-        if (_routePoints.isNotEmpty) {
-          _polylines.add(
-            Polyline(
-              polylineId: const PolylineId('patrol_route'),
-              points: _routePoints,
-              color: _polylineColor,
-              width: 5,
-            ),
-          );
-        }
-      });
-
-      print('Loaded saved route with ${_routePoints.length} points');
-
-      // Jika ada titik, zoom ke area yang mencakup semua titik
-      if (_routePoints.isNotEmpty) {
-        _zoomToPolyline();
-      }
-    } catch (e) {
-      print('Error loading saved route: $e');
-    }
-  }
-
-// Metode untuk zoom ke polyline
-  void _zoomToPolyline() {
-    if (_routePoints.isEmpty || mapController == null) return;
-
-    // Cari bounds untuk semua titik
-    double minLat = 90.0, maxLat = -90.0;
-    double minLng = 180.0, maxLng = -180.0;
-
-    for (var point in _routePoints) {
-      minLat = minLat < point.latitude ? minLat : point.latitude;
-      maxLat = maxLat > point.latitude ? maxLat : point.latitude;
-      minLng = minLng < point.longitude ? minLng : point.longitude;
-      maxLng = maxLng > point.longitude ? maxLng : point.longitude;
-    }
-
-    // Pastikan bounds cukup besar
-    final padding = 0.01; // sekitar 1km pada kebanyakan latitude
-    minLat -= padding;
-    maxLat += padding;
-    minLng -= padding;
-    maxLng += padding;
-
-    final bounds = LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
-    );
-
-    // Animasi kamera ke bounds
-    mapController?.animateCamera(
-      CameraUpdate.newLatLngBounds(bounds, 50),
-    );
-  }
-
-  // Perbaikan tampilan dialog laporan
-
-  void _showReportDialog(BuildContext context) {
-    final TextEditingController kejadianController = TextEditingController();
-    final TextEditingController catatanController = TextEditingController();
-
-    Future<void> pickImagesFromCamera() async {
-      try {
-        final pickedFile = await ImagePicker().pickImage(
-          source: ImageSource.camera,
-          maxWidth: 1024,
-          maxHeight: 1024,
-          imageQuality: 85,
-        );
-        if (pickedFile != null) {
-          setState(() {
-            selectedPhotos.add(File(pickedFile.path));
-          });
-        }
-      } catch (e) {
-        print('Error picking image: $e');
-      }
-    }
-
-    // Buat dialog di dalam showDialog
-    showDialog(
-      context: context,
-      // PENTING: Set ini ke true untuk memungkinkan tap di luar menutup dialog
-      barrierDismissible: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            // 1. Gunakan SingleChildScrollView untuk memungkinkan scrolling saat keyboard muncul
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              // 2. Gunakan insetPadding untuk memastikan dialog tidak terlalu besar
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-              child: Container(
-                // 3. Batasi ukuran dialog
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.8,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 4. Header tetap di atas
-                    Padding(
-                      padding: const EdgeInsets.only(
-                          top: 24, left: 24, right: 24, bottom: 0),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'Laporan Kejadian',
-                            style: boldTextStyle(size: 18, color: kbpBlue900),
+                          const Icon(
+                            Icons.error_outline,
+                            color: dangerR500,
+                            size: 20,
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.close, color: kbpBlue900),
-                            onPressed: () {
-                              Navigator.pop(context);
-                              selectedPhotos.clear();
-                            },
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Patroli dengan fake GPS yang terdeteksi lebih dari 3 kali akan ditandai tidak valid.',
+                              style:
+                                  mediumTextStyle(color: dangerR500, size: 13),
+                            ),
                           ),
                         ],
                       ),
                     ),
-
-                    // 5. Konten scrollable
-                    Flexible(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Input Kejadian
-                            Text(
-                              'Kejadian',
-                              style: semiBoldTextStyle(size: 14),
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: kejadianController,
-                              decoration: InputDecoration(
-                                hintText: 'Judul kejadian...',
-                                hintStyle: regularTextStyle(color: Colors.grey),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide:
-                                      const BorderSide(color: kbpBlue300),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide:
-                                      const BorderSide(color: kbpBlue300),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: const BorderSide(
-                                      color: kbpBlue900, width: 2),
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 14),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-
-                            // Input Catatan
-                            Text(
-                              'Catatan',
-                              style: semiBoldTextStyle(size: 14),
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: catatanController,
-                              maxLines: 3,
-                              decoration: InputDecoration(
-                                hintText: 'Deskripsi kejadian...',
-                                hintStyle: regularTextStyle(color: Colors.grey),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide:
-                                      const BorderSide(color: kbpBlue300),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide:
-                                      const BorderSide(color: kbpBlue300),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: const BorderSide(
-                                      color: kbpBlue900, width: 2),
-                                ),
-                                contentPadding: const EdgeInsets.all(16),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-
-                            // Bukti Kejadian
-                            Text(
-                              'Bukti Kejadian',
-                              style: semiBoldTextStyle(size: 14),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              height: 100,
-                              decoration: BoxDecoration(
-                                border: Border.all(color: kbpBlue300),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              padding: const EdgeInsets.all(8),
-                              child: ListView(
-                                scrollDirection: Axis.horizontal,
-                                children: [
-                                  // Tombol untuk menambah foto
-                                  GestureDetector(
-                                    onTap: () async {
-                                      await pickImagesFromCamera();
-                                      setState(
-                                          () {}); // Pastikan dialog diperbarui
-                                    },
-                                    child: Container(
-                                      width: 80,
-                                      margin: const EdgeInsets.only(right: 8),
-                                      decoration: BoxDecoration(
-                                        border: Border.all(color: kbpBlue900),
-                                        borderRadius: BorderRadius.circular(8),
-                                        color: kbpBlue100,
-                                      ),
-                                      child: const Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.camera_alt,
-                                            size: 32,
-                                            color: kbpBlue900,
-                                          ),
-                                          SizedBox(height: 4),
-                                          Text(
-                                            'Tambah Foto',
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              color: kbpBlue900,
-                                            ),
-                                            textAlign: TextAlign.center,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-
-                                  // Foto yang dipilih
-                                  ...selectedPhotos.map((photo) {
-                                    return Container(
-                                      width: 80,
-                                      height: 80,
-                                      margin: const EdgeInsets.only(right: 8),
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: kbpBlue300),
-                                      ),
-                                      child: Stack(
-                                        children: [
-                                          ClipRRect(
-                                            borderRadius:
-                                                BorderRadius.circular(7),
-                                            child: Image.file(
-                                              photo,
-                                              width: 80,
-                                              height: 80,
-                                              fit: BoxFit.cover,
-                                            ),
-                                          ),
-                                          Positioned(
-                                            top: 4,
-                                            right: 4,
-                                            child: GestureDetector(
-                                              onTap: () {
-                                                setState(() {
-                                                  selectedPhotos.remove(photo);
-                                                });
-                                              },
-                                              child: Container(
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: Colors.white
-                                                      .withOpacity(0.7),
-                                                ),
-                                                padding:
-                                                    const EdgeInsets.all(4),
-                                                child: const Icon(
-                                                  Icons.close,
-                                                  color: dangerR300,
-                                                  size: 16,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  }).toList(),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-
-                            // Button Kirim Laporan
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: () {
-                                  if (kejadianController.text.isNotEmpty &&
-                                      catatanController.text.isNotEmpty &&
-                                      selectedPhotos.isNotEmpty) {
-                                    // Simpan semua foto ke Firebase Storage
-                                    final report = Report(
-                                      id: DateTime.now()
-                                          .millisecondsSinceEpoch
-                                          .toString(),
-                                      title: kejadianController.text,
-                                      description: catatanController.text,
-                                      photoUrl: selectedPhotos
-                                          .map((photo) => photo.path)
-                                          .join(','), // Gabungkan path foto
-                                      timestamp: DateTime.now(),
-                                      latitude:
-                                          userCurrentLocation?.latitude ?? 0.0,
-                                      longitude:
-                                          userCurrentLocation?.longitude ?? 0.0,
-                                      taskId: widget.task.taskId,
-                                    );
-
-                                    context
-                                        .read<ReportBloc>()
-                                        .add(CreateReportEvent(report));
-                                    showCustomSnackbar(
-                                      context: context,
-                                      title: 'Laporan berhasil dikirim',
-                                      subtitle:
-                                          'Terima kasih atas laporan Anda',
-                                      type: SnackbarType.success,
-                                    );
-                                    selectedPhotos.clear();
-                                    kejadianController.clear();
-                                    catatanController.clear();
-                                    Navigator.pop(context);
-                                  } else {
-                                    showCustomSnackbar(
-                                      context: context,
-                                      title: 'Data belum lengkap',
-                                      subtitle:
-                                          'Silakan isi semua data laporan',
-                                      type: SnackbarType.danger,
-                                    );
-                                  }
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: kbpBlue900,
-                                  foregroundColor: Colors.white,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  elevation: 2,
-                                ),
-                                child: Text(
-                                  'Kirim Laporan',
-                                  style: semiBoldTextStyle(
-                                      size: 16, color: Colors.white),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               ),
-            );
-          },
-        );
-      },
-    );
-  }
+            ),
 
-  void _showMockLocationInfoDialog(BuildContext context, int detectionCount) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Fake GPS Terdeteksi',
-          style: boldTextStyle(size: 18),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Aplikasi mendeteksi penggunaan Fake GPS atau Mock Location. Hal ini tidak diperbolehkan dan akan dicatat untuk keperluan pelaporan.',
-              style: regularTextStyle(size: 14),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Untuk melanjutkan patroli:',
-              style: semiBoldTextStyle(size: 14),
-            ),
-            const SizedBox(height: 8),
-            Text('1. Nonaktifkan Fake GPS atau Mock Location'),
-            Text('2. Pastikan Developer Options tidak aktif'),
-            Text('3. Restart aplikasi jika diperlukan'),
-            if (detectionCount >= 3)
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: Text(
-                  'PERINGATAN: Patroli dengan fake GPS yang terdeteksi lebih dari 3 kali akan ditandai tidak valid.',
-                  style: TextStyle(
-                    color: dangerR500,
-                    fontWeight: FontWeight.bold,
+            // Button action
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kbpBlue900,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
+                child: Text(
+                  'Saya Mengerti',
+                  style: semiBoldTextStyle(color: Colors.white),
+                ),
               ),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Mengerti',
-              style: mediumTextStyle(color: kbpBlue900),
-            ),
-          ),
-        ],
       ),
     );
   }

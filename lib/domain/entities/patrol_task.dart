@@ -430,6 +430,86 @@ class PatrolTask {
     }
   }
 
+  bool validateAllCheckpointsVisited(
+      List<LatLng> routePointsVisited, double requiredRadius) {
+    if (assignedRoute == null || assignedRoute!.isEmpty) {
+      return true; // Tidak ada checkpoint untuk diperiksa
+    }
+
+    final missedCheckpoints =
+        getMissedCheckpoints(routePointsVisited, requiredRadius);
+    return missedCheckpoints.isEmpty;
+  }
+
+// Mendapatkan daftar checkpoint yang terlewat (tidak dikunjungi)
+  List<List<double>> getMissedCheckpoints(
+      List<LatLng> routePointsVisited, double requiredRadius) {
+    if (assignedRoute == null || assignedRoute!.isEmpty) {
+      return []; // Tidak ada checkpoint untuk diperiksa
+    }
+
+    List<List<double>> missedCheckpoints = [];
+
+    // Periksa setiap titik yang ditugaskan
+    for (var checkpoint in assignedRoute!) {
+      bool checkpointVisited = false;
+
+      // Periksa semua poin yang dikunjungi
+      for (var visitedPoint in routePointsVisited) {
+        // Hitung jarak antara titik yang dikunjungi dan checkpoint
+        final distance = Geolocator.distanceBetween(
+          checkpoint[0], // latitude checkpoint
+          checkpoint[1], // longitude checkpoint
+          visitedPoint.latitude,
+          visitedPoint.longitude,
+        );
+
+        // Jika jarak kurang dari radius yang ditentukan, checkpoint telah dikunjungi
+        if (distance <= requiredRadius) {
+          checkpointVisited = true;
+          break;
+        }
+      }
+
+      // Jika checkpoint tidak dikunjungi, tambahkan ke daftar
+      if (!checkpointVisited) {
+        missedCheckpoints.add(checkpoint);
+      }
+    }
+
+    return missedCheckpoints;
+  }
+
+// Konversi route path ke list LatLng untuk mempermudah pengecekan
+  List<LatLng> getRouteAsLatLngList() {
+    if (routePath == null || routePath!.isEmpty) {
+      return [];
+    }
+
+    try {
+      final List<LatLng> result = [];
+
+      if (routePath is Map<dynamic, dynamic>) {
+        Map<String, dynamic> pathMap = {};
+
+        (routePath as Map<dynamic, dynamic>).forEach((key, value) {
+          if (value is Map<dynamic, dynamic> &&
+              value['coordinates'] is List &&
+              value['coordinates'].length >= 2) {
+            final lat = (value['coordinates'][0] as num).toDouble();
+            final lng = (value['coordinates'][1] as num).toDouble();
+            result.add(LatLng(lat, lng));
+          }
+        });
+      }
+
+      return result;
+    } catch (e) {
+      print('Error converting route path to LatLng list: $e');
+      return [];
+    }
+  }
+
   double calculateTotalDistance() {
     if (routePath == null || routePath!.isEmpty) {
       return distance ?? 0.0;

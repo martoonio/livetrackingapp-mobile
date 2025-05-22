@@ -1986,8 +1986,9 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
             ),
             const SizedBox(height: 12),
             GestureDetector(
-              onTap: () =>
-                  _showFullScreenImage(widget.task.finalReportPhotoUrl!),
+              onTap: () => _showFullScreenImage(type == 'initial'
+                  ? widget.task.initialReportPhotoUrl!
+                  : widget.task.finalReportPhotoUrl!),
               child: Container(
                 width: double.infinity,
                 height: 200,
@@ -2304,7 +2305,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
             foregroundColor: Colors.white,
             elevation: 0,
             title: Text(
-              'Foto Laporan Akhir',
+              'Foto Laporan',
               style: semiBoldTextStyle(color: Colors.white),
             ),
             actions: [
