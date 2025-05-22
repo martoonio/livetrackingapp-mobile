@@ -91,20 +91,20 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
           ),
           if (widget.userRole == 'commandCenter')
             const NavBarItem(
-              activeIcon: Icons.dashboard,
-              inactiveIcon: Icons.dashboard_outlined,
-              label: 'Admin',
+              activeIcon: Icons.task,
+              inactiveIcon: Icons.task_outlined,
+              label: 'Penugasan',
             ),
           if (widget.userRole == 'commandCenter')
             const NavBarItem(
               activeIcon: Icons.location_city,
               inactiveIcon: Icons.location_city_outlined,
-              label: 'Clusters',
+              label: 'Tatar',
             ),
           const NavBarItem(
             activeIcon: Icons.person,
             inactiveIcon: Icons.person_outline,
-            label: 'Profile',
+            label: 'Profil',
           ),
         ],
         initialIndex: _selectedIndex,

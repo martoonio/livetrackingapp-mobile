@@ -21,23 +21,24 @@ class EditClusterScreen extends StatefulWidget {
   State<EditClusterScreen> createState() => _EditClusterScreenState();
 }
 
-class _EditClusterScreenState extends State<EditClusterScreen> with SingleTickerProviderStateMixin {
+class _EditClusterScreenState extends State<EditClusterScreen>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   late TabController _tabController;
-  
+
   // Form controllers
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  
+
   // Map variables
   final Set<Marker> _markers = {};
   final List<LatLng> _selectedPoints = [];
   GoogleMapController? _mapController;
-  
+
   // Role selection
   String _selectedRole = 'patrol';
-  
+
   // Mode editing or creating
   bool get _isEditing => widget.existingCluster != null;
 
@@ -49,15 +50,17 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
       vsync: this,
       initialIndex: widget.initialTab,
     );
-    
+
     if (_isEditing) {
       _nameController.text = widget.existingCluster!.name;
       _emailController.text = widget.existingCluster!.email;
       _selectedRole = widget.existingCluster!.role;
-      
+
       // Convert existing coordinates to markers and latLngs
       if (widget.existingCluster!.clusterCoordinates != null) {
-        for (int i = 0; i < widget.existingCluster!.clusterCoordinates!.length; i++) {
+        for (int i = 0;
+            i < widget.existingCluster!.clusterCoordinates!.length;
+            i++) {
           final coord = widget.existingCluster!.clusterCoordinates![i];
           final latLng = LatLng(coord[0], coord[1]);
           _selectedPoints.add(latLng);
@@ -89,7 +92,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEditing ? 'Edit Cluster' : 'Tambah Cluster Baru'),
+        title: Text(_isEditing ? 'Edit Tatar' : 'Tambah Tatar Baru'),
         backgroundColor: kbpBlue900,
         foregroundColor: neutralWhite,
         elevation: 0,
@@ -97,8 +100,8 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
           controller: _tabController,
           indicatorColor: neutralWhite,
           tabs: const [
-            Tab(text: 'Info Cluster'),
-            Tab(text: 'Area Cluster'),
+            Tab(text: 'Info Tatar'),
+            Tab(text: 'Area Tatar'),
           ],
         ),
       ),
@@ -132,7 +135,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
           ),
           onPressed: _submitForm,
           child: Text(
-            _isEditing ? 'Simpan Perubahan' : 'Buat Cluster',
+            _isEditing ? 'Simpan Perubahan' : 'Buat Tatar',
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -160,10 +163,10 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
               ),
             ),
             16.height,
-            
-            // Nama Cluster
+
+            // Nama Tatar
             const Text(
-              'Nama Cluster',
+              'Nama Tatar',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
@@ -188,7 +191,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
               },
             ),
             20.height,
-            
+
             // Email
             const Text(
               'Email',
@@ -208,11 +211,12 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
                   borderRadius: BorderRadius.circular(8),
                 ),
                 contentPadding: const EdgeInsets.all(16),
-                suffixIcon: _isEditing ? 
-                  const Tooltip(
-                    message: 'Email tidak dapat diubah',
-                    child: Icon(Icons.lock_outline),
-                  ) : null,
+                suffixIcon: _isEditing
+                    ? const Tooltip(
+                        message: 'Email tidak dapat diubah',
+                        child: Icon(Icons.lock_outline),
+                      )
+                    : null,
               ),
               validator: (value) {
                 if (!_isEditing && (value == null || value.isEmpty)) {
@@ -225,7 +229,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
               },
             ),
             20.height,
-            
+
             // Password (hanya untuk cluster baru)
             if (!_isEditing) ...[
               const Text(
@@ -259,7 +263,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
               ),
               20.height,
             ],
-            
+
             // Role Selection
             const Text(
               'Tipe Akun',
@@ -300,7 +304,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
                 ),
               ],
             ),
-            
+
             // Information callout
             24.height,
             Container(
@@ -320,7 +324,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _isEditing 
+                          _isEditing
                               ? 'Penyesuaian Tipe Akun'
                               : 'Tentang Tipe Akun',
                           style: semiBoldTextStyle(color: warningY500),
@@ -365,7 +369,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
           onTap: _handleMapTap,
           polygons: _buildClusterPolygon(),
         ),
-        
+
         // Info panel
         Positioned(
           top: 16,
@@ -443,8 +447,9 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
   }
 
   Set<Polygon> _buildClusterPolygon() {
-    if (_selectedPoints.length < 3) return {}; // Need at least 3 points for a polygon
-    
+    if (_selectedPoints.length < 3)
+      return {}; // Need at least 3 points for a polygon
+
     return {
       Polygon(
         polygonId: const PolygonId('clusterArea'),
@@ -471,29 +476,29 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
 
   void _zoomToSelectedPoints() {
     if (_selectedPoints.isEmpty || _mapController == null) return;
-    
+
     double minLat = 90.0, maxLat = -90.0;
     double minLng = 180.0, maxLng = -180.0;
-    
+
     for (var point in _selectedPoints) {
       minLat = minLat < point.latitude ? minLat : point.latitude;
       maxLat = maxLat > point.latitude ? maxLat : point.latitude;
       minLng = minLng < point.longitude ? minLng : point.longitude;
       maxLng = maxLng > point.longitude ? maxLng : point.longitude;
     }
-    
+
     // Add some padding
     final padding = 0.01;
     minLat -= padding;
     maxLat += padding;
     minLng -= padding;
     maxLng += padding;
-    
+
     final bounds = LatLngBounds(
       southwest: LatLng(minLat, minLng),
       northeast: LatLng(maxLat, maxLng),
     );
-    
+
     _mapController?.animateCamera(
       CameraUpdate.newLatLngBounds(bounds, 50),
     );
@@ -505,7 +510,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
       _tabController.animateTo(0);
       return;
     }
-    
+
     if (_selectedPoints.isEmpty) {
       showCustomSnackbar(
         context: context,
@@ -516,11 +521,11 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
       _tabController.animateTo(1);
       return;
     }
-    
+
     // Show confirmation dialog
     final confirmed = await _showConfirmationDialog();
     if (confirmed != true) return;
-    
+
     // Show loading
     showDialog(
       context: context,
@@ -533,12 +538,12 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
         ),
       ),
     );
-    
+
     try {
       final clusterCoordinates = _selectedPoints
           .map((point) => [point.latitude, point.longitude])
           .toList();
-      
+
       if (_isEditing) {
         // Update existing cluster
         final updatedCluster = widget.existingCluster!.copyWith(
@@ -547,43 +552,43 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
           clusterCoordinates: clusterCoordinates,
           updatedAt: DateTime.now(),
         );
-        
+
         context.read<AdminBloc>().add(
-          UpdateClusterAccount(
-            cluster: updatedCluster,
-          ),
-        );
+              UpdateClusterAccount(
+                cluster: updatedCluster,
+              ),
+            );
       } else {
         // Create new cluster
         context.read<AdminBloc>().add(
-          CreateClusterAccount(
-            name: _nameController.text,
-            email: _emailController.text,
-            password: _passwordController.text,
-            clusterCoordinates: clusterCoordinates,
-          ),
-        );
+              CreateClusterAccount(
+                name: _nameController.text,
+                email: _emailController.text,
+                password: _passwordController.text,
+                clusterCoordinates: clusterCoordinates,
+              ),
+            );
       }
-      
+
       // Close loading dialog
       Navigator.pop(context);
-      
+
       // Show success message
       showCustomSnackbar(
         context: context,
         title: 'Berhasil',
         subtitle: _isEditing
-            ? 'Cluster berhasil diperbarui'
-            : 'Cluster baru berhasil dibuat',
+            ? 'Tatar berhasil diperbarui'
+            : 'Tatar baru berhasil dibuat',
         type: SnackbarType.success,
       );
-      
+
       // Navigate back
       Navigator.of(context).pop();
     } catch (e) {
       // Close loading dialog
       Navigator.pop(context);
-      
+
       // Show error message
       showCustomSnackbar(
         context: context,
@@ -599,7 +604,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-          _isEditing ? 'Konfirmasi Perubahan' : 'Konfirmasi Pembuatan Cluster',
+          _isEditing ? 'Konfirmasi Perubahan' : 'Konfirmasi Pembuatan Tatar',
           style: boldTextStyle(),
         ),
         content: Column(
@@ -615,7 +620,8 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
             16.height,
             _infoRow('Nama', _nameController.text),
             if (!_isEditing) _infoRow('Email', _emailController.text),
-            _infoRow('Tipe', _selectedRole == 'patrol' ? 'Patroli' : 'Command Center'),
+            _infoRow('Tipe',
+                _selectedRole == 'patrol' ? 'Patroli' : 'Command Center'),
             _infoRow('Jumlah Titik Area', _selectedPoints.length.toString()),
           ],
         ),
@@ -629,7 +635,7 @@ class _EditClusterScreenState extends State<EditClusterScreen> with SingleTicker
               backgroundColor: kbpBlue900,
               foregroundColor: neutralWhite,
             ),
-            child: Text(_isEditing ? 'Simpan Perubahan' : 'Buat Cluster'),
+            child: Text(_isEditing ? 'Simpan Perubahan' : 'Buat Tatar'),
             onPressed: () => Navigator.pop(context, true),
           ),
         ],

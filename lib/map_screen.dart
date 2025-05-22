@@ -170,8 +170,21 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   bool _canStartPatrol() {
-    // Jika patroli sedang berlangsung, selalu return true
+    // Cek koneksi internet
     final state = context.read<PatrolBloc>().state;
+    final isOffline = state is PatrolLoaded ? state.isOffline : false;
+
+    // Jika offline dan belum patroli, maka tidak bisa mulai
+    if (isOffline) {
+      // Kecuali jika patroli sudah berjalan
+      if (widget.task.status == 'ongoing' ||
+          widget.task.status == 'in_progress') {
+        return true; // Boleh menyelesaikan patroli walau offline
+      }
+      return false; // Tidak bisa mulai patroli jika offline
+    }
+
+    // Jika patroli sedang berlangsung, selalu return true
     if (state is PatrolLoaded && state.isPatrolling) return true;
 
     // Jika tidak ada jadwal mulai, bisa langsung mulai
@@ -528,8 +541,25 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _handlePatrolButtonPress(BuildContext context, PatrolState state) async {
-    // Periksa apakah sudah bisa mulai patroli
-    if (!_canStartPatrol() && !(state is PatrolLoaded && state.isPatrolling)) {
+    final isOffline = state is PatrolLoaded ? state.isOffline : false;
+
+    final isPatrollingInBloc = state is PatrolLoaded && state.isPatrolling;
+    final isPatrollingInTask =
+        widget.task.status == 'ongoing' || widget.task.status == 'in_progress';
+    final isPatrolActive = isPatrollingInBloc || isPatrollingInTask;
+
+    if (isOffline && !isPatrolActive) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Tidak ada koneksi internet',
+        subtitle: 'Memulai patroli memerlukan koneksi internet',
+        type: SnackbarType.danger,
+      );
+      _resetLongPressAnimation();
+      return;
+    }
+
+    if (!_canStartPatrol() && !isPatrolActive) {
       showCustomSnackbar(
         context: context,
         title: 'Belum Waktunya Patroli',
@@ -540,12 +570,6 @@ class _MapScreenState extends State<MapScreen> {
       _resetLongPressAnimation();
       return;
     }
-
-    // Kode yang sudah ada untuk menghentikan atau memulai patroli
-    final isPatrollingInBloc = state is PatrolLoaded && state.isPatrolling;
-    final isPatrollingInTask =
-        widget.task.status == 'ongoing' || widget.task.status == 'in_progress';
-    final isPatrolActive = isPatrollingInBloc || isPatrollingInTask;
 
     print(
         'Patrol button pressed - Bloc state: $isPatrollingInBloc, Task status: $isPatrollingInTask');
@@ -567,19 +591,58 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  // Tombol mulai/stop
   Widget _buildPatrolButtonUI(bool isPatrolling) {
+    final state = context.read<PatrolBloc>().state;
+    final isOffline = state is PatrolLoaded ? state.isOffline : false;
     final canStartNow = _canStartPatrol();
 
-    // Jika tidak bisa mulai dan tidak sedang patroli
-    if (!canStartNow && !isPatrolling) {
+    if (isOffline && !isPatrolling) {
       return Container(
-        width: 120, // Lebih lebar untuk menampung teks
+        width: 120,
         height: 70,
         decoration: BoxDecoration(
           shape: BoxShape.rectangle,
           borderRadius: BorderRadius.circular(12),
-          color: neutral500, // Abu-abu untuk menunjukkan inactive
+          color: neutral500,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.wifi_off,
+              color: Colors.white,
+              size: 24,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Offline Mode',
+              style: semiBoldTextStyle(size: 12, color: Colors.white),
+            ),
+            Text(
+              'Koneksi diperlukan',
+              style: regularTextStyle(size: 10, color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (!canStartNow && !isPatrolling) {
+      return Container(
+        width: 120,
+        height: 70,
+        decoration: BoxDecoration(
+          shape: BoxShape.rectangle,
+          borderRadius: BorderRadius.circular(12),
+          color: neutral500,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.2),
@@ -611,7 +674,6 @@ class _MapScreenState extends State<MapScreen> {
       );
     }
 
-    // Kode yang sudah ada sebelumnya untuk tombol aktif
     return GestureDetector(
       onTap: () {
         // Tampilkan tooltip manual saat tap biasa
@@ -620,10 +682,16 @@ class _MapScreenState extends State<MapScreen> {
             content: Text(
               isPatrolling
                   ? 'Tekan 3 detik untuk selesai'
-                  : 'Tekan 3 detik untuk mulai',
+                  : isOffline
+                      ? 'Mode offline, koneksi diperlukan'
+                      : 'Tekan 3 detik untuk mulai',
               style: mediumTextStyle(color: Colors.white),
             ),
-            backgroundColor: isPatrolling ? dangerR300 : kbpBlue900,
+            backgroundColor: isPatrolling
+                ? dangerR300
+                : isOffline
+                    ? neutral500
+                    : kbpBlue900,
             duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
             margin: const EdgeInsets.all(16),
@@ -634,6 +702,8 @@ class _MapScreenState extends State<MapScreen> {
         );
       },
       onLongPressStart: (_) {
+        if (isOffline && !isPatrolling)
+          return; // Disable long press jika offline dan belum mulai
         final state = context.read<PatrolBloc>().state;
         _startLongPressAnimation(context, state);
       },
@@ -657,10 +727,16 @@ class _MapScreenState extends State<MapScreen> {
                 child: CircularProgressIndicator(
                   value: value,
                   strokeWidth: 6.0,
-                  color: isPatrolling ? dangerR300 : successG300,
+                  color: isPatrolling
+                      ? dangerR300
+                      : isOffline
+                          ? neutral500
+                          : successG300,
                   backgroundColor: isPatrolling
                       ? dangerR300.withOpacity(0.3)
-                      : successG300.withOpacity(0.3),
+                      : isOffline
+                          ? neutral500.withOpacity(0.3)
+                          : successG300.withOpacity(0.3),
                 ),
               );
             },
@@ -671,7 +747,11 @@ class _MapScreenState extends State<MapScreen> {
             height: 70,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isPatrolling ? dangerR300 : successG300,
+              color: isPatrolling
+                  ? dangerR300
+                  : isOffline
+                      ? neutral500
+                      : successG300,
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.3),
@@ -682,7 +762,11 @@ class _MapScreenState extends State<MapScreen> {
             ),
             child: Center(
               child: Icon(
-                isPatrolling ? Icons.stop : Icons.play_arrow,
+                isPatrolling
+                    ? Icons.stop
+                    : isOffline
+                        ? Icons.wifi_off
+                        : Icons.play_arrow,
                 color: Colors.white,
                 size: 32,
               ),
@@ -694,7 +778,9 @@ class _MapScreenState extends State<MapScreen> {
   }
 
 // Tambahkan metode untuk menampilkan dialog laporan awal
-  Future<bool> _showInitialReportDialog(BuildContext context) async {
+  Future<bool> _showInitialReportDialog(
+    BuildContext context,
+  ) async {
     File? capturedImage;
     final noteController = TextEditingController();
     bool isSubmitting = false;
@@ -2769,22 +2855,22 @@ class _MapScreenState extends State<MapScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    widget.task.officerName ?? 'Petugas',
+                                    widget.task.officerName,
                                     style: semiBoldTextStyle(size: 16),
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.directions_car,
-                                          size: 16, color: kbpBlue900),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        widget.task.vehicleId,
-                                        style: regularTextStyle(size: 14),
-                                      ),
-                                    ],
-                                  ),
+                                  if (!isPatrolling)
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.access_time,
+                                            size: 16, color: kbpBlue900),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${DateFormat('dd MMM - HH:mm').format(widget.task.assignedStartTime!)}',
+                                          style: regularTextStyle(size: 14),
+                                        ),
+                                      ],
+                                    ),
                                   const SizedBox(height: 4),
                                   Row(
                                     children: [
@@ -2799,19 +2885,6 @@ class _MapScreenState extends State<MapScreen> {
                                   ),
                                 ],
                               ),
-                            ),
-                          ],
-                        ),
-
-                        if (!isPatrolling) 8.height,
-                        Row(
-                          children: [
-                            const Icon(Icons.access_time,
-                                size: 16, color: kbpBlue900),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Patroli dimulai pada ${DateFormat('dd MMM - HH:mm').format(widget.task.assignedStartTime!)}',
-                              style: regularTextStyle(size: 14),
                             ),
                           ],
                         ),

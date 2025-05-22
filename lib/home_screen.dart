@@ -393,7 +393,7 @@ class _HomeScreenState extends State<HomeScreen> {
               final task = PatrolTask(
                 taskId: taskId,
                 userId: userId,
-                vehicleId: taskData['vehicleId']?.toString() ?? '',
+                // vehicleId: taskData['vehicleId']?.toString() ?? '',
                 status: status,
                 assignedStartTime:
                     _parseDateTime(taskData['assignedStartTime']),
@@ -672,7 +672,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final updatedTask = PatrolTask(
           taskId: originalTask.taskId,
           userId: data['userId']?.toString() ?? '',
-          vehicleId: data['vehicleId']?.toString() ?? '',
+          // vehicleId: data['vehicleId']?.toString() ?? '',
           status: data['status']?.toString() ?? '',
           assignedStartTime: _parseDateTime(data['assignedStartTime']),
           assignedEndTime: _parseDateTime(data['assignedEndTime']),
@@ -1170,13 +1170,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        task.vehicleId.isEmpty
-                            ? 'Tanpa Kendaraan'
-                            : task.vehicleId,
-                        style: mediumTextStyle(size: 14, color: kbpBlue900),
-                      ),
-                      const SizedBox(height: 4),
+                      // Text(
+                      //   task.vehicleId.isEmpty
+                      //       ? 'Tanpa Kendaraan'
+                      //       : task.vehicleId,
+                      //   style: mediumTextStyle(size: 14, color: kbpBlue900),
+                      // ),
+                      // const SizedBox(height: 4),
                       Row(
                         children: [
                           const Icon(Icons.place, size: 14, color: kbpBlue700),
@@ -1198,11 +1198,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: _getStatusColor(task.status),
+                              color: _getStatusColor(task.status,
+                                  assignedStartTime: task.assignedStartTime),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              _getStatusText(task.status),
+                              _getStatusText(task.status,
+                                  assignedStartTime: task.assignedStartTime),
                               style: mediumTextStyle(
                                   size: 10, color: Colors.white),
                             ),
@@ -1311,25 +1313,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-// Di fungsi _getStatusColor()
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'active':
-        return kbpBlue700;
-      case 'ongoing':
-      case 'in_progress':
-        return successG500;
-      case 'finished':
-        return neutral700;
-      case 'expired':
-        return dangerR500; // Merah untuk status expired
-      default:
-        return kbpBlue700;
-    }
-  }
+// Perbaiki fungsi _getStatusText() untuk menangani kondisi "Belum dimulai"
+  String _getStatusText(String status, {DateTime? assignedStartTime}) {
+    // Kondisi khusus untuk status "Aktif" yang belum bisa dimulai
+    if (status.toLowerCase() == 'active' && assignedStartTime != null) {
+      final now = DateTime.now();
+      final timeDifference = assignedStartTime.difference(now);
 
-// Di fungsi _getStatusText()
-  String _getStatusText(String status) {
+      // Jika waktu sekarang masih lebih dari 10 menit sebelum waktu mulai
+      if (timeDifference.inMinutes > 10) {
+        return 'Belum dimulai';
+      }
+    }
+
+    // Logic yang sudah ada
     switch (status.toLowerCase()) {
       case 'active':
         return 'Aktif';
@@ -1342,6 +1339,35 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'Tidak Dilaksanakan';
       default:
         return status;
+    }
+  }
+
+// Perbaiki fungsi _getStatusColor() untuk menangani kondisi "Belum dimulai"
+  Color _getStatusColor(String status, {DateTime? assignedStartTime}) {
+    // Kondisi khusus untuk status "Aktif" yang belum bisa dimulai
+    if (status.toLowerCase() == 'active' && assignedStartTime != null) {
+      final now = DateTime.now();
+      final timeDifference = assignedStartTime.difference(now);
+
+      // Jika waktu sekarang masih lebih dari 10 menit sebelum waktu mulai
+      if (timeDifference.inMinutes > 10) {
+        return neutral500; // Abu-abu untuk status belum bisa dimulai
+      }
+    }
+
+    // Logic yang sudah ada
+    switch (status.toLowerCase()) {
+      case 'active':
+        return kbpBlue700;
+      case 'ongoing':
+      case 'in_progress':
+        return successG500;
+      case 'finished':
+        return neutral700;
+      case 'expired':
+        return dangerR500;
+      default:
+        return kbpBlue700;
     }
   }
 
@@ -1475,15 +1501,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          task.vehicleId.isEmpty
-                              ? 'Tanpa Kendaraan'
-                              : task.vehicleId,
-                          style: semiBoldTextStyle(size: 16, color: kbpBlue900),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                        const SizedBox(height: 4),
+                        // Text(
+                        //   task.vehicleId.isEmpty
+                        //       ? 'Tanpa Kendaraan'
+                        //       : task.vehicleId,
+                        //   style: semiBoldTextStyle(size: 16, color: kbpBlue900),
+                        //   overflow: TextOverflow.ellipsis,
+                        //   maxLines: 1,
+                        // ),
+                        // const SizedBox(height: 4),
                         Row(
                           children: [
                             const Icon(Icons.person,
@@ -1525,11 +1551,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: _getStatusColor(task.status),
+                                color: _getStatusColor(task.status,
+                                    assignedStartTime: task.assignedStartTime),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
-                                _getStatusText(task.status),
+                                _getStatusText(task.status,
+                                    assignedStartTime: task.assignedStartTime),
                                 style: mediumTextStyle(
                                     size: 12, color: Colors.white),
                               ),
@@ -1709,12 +1737,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(width: 8),
                         ],
-                        Text(
-                          task.vehicleId.isEmpty
-                              ? 'Tanpa Kendaraan'
-                              : task.vehicleId,
-                          style: mediumTextStyle(size: 12, color: kbpBlue700),
-                        ),
+                        // Text(
+                        //   task.vehicleId.isEmpty
+                        //       ? 'Tanpa Kendaraan'
+                        //       : task.vehicleId,
+                        //   style: mediumTextStyle(size: 12, color: kbpBlue700),
+                        // ),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -1866,13 +1894,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 16),
 
                   // Vehicle info
-                  _buildInfoRow(
-                    'Kendaraan',
-                    task.vehicleId.isEmpty ? 'Tanpa Kendaraan' : task.vehicleId,
-                    Icons.directions_car,
-                    iconColor: kbpBlue700,
-                  ),
-                  const SizedBox(height: 16),
+                  // _buildInfoRow(
+                  //   'Kendaraan',
+                  //   task.vehicleId.isEmpty ? 'Tanpa Kendaraan' : task.vehicleId,
+                  //   Icons.directions_car,
+                  //   iconColor: kbpBlue700,
+                  // ),
+                  // const SizedBox(height: 16),
                   const Divider(height: 1, color: neutral300),
                   const SizedBox(height: 16),
 

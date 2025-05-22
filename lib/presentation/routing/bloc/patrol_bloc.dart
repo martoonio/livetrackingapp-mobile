@@ -126,6 +126,15 @@ class SubmitInitialReport extends PatrolEvent {
   List<Object?> get props => [photoUrl, note, reportTime];
 }
 
+class UpdateConnectivityStatus extends PatrolEvent {
+  final bool isOffline;
+
+  UpdateConnectivityStatus({required this.isOffline});
+
+  @override
+  List<Object> get props => [isOffline];
+}
+
 class UpdateMockCount extends PatrolEvent {
   final int mockCount;
 
@@ -267,6 +276,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     on<SubmitFinalReport>(_onSubmitFinalReport);
     on<SubmitInitialReport>(_onSubmitInitialReport);
     on<UpdateMockCount>(_onUpdateMockCount);
+    on<UpdateConnectivityStatus>(_onUpdateConnectivityStatus);
 
     _initializeStorage();
     _setupConnectivityMonitoring();
@@ -280,6 +290,19 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) {
     debugPrintOfflineData();
+  }
+
+  void _onUpdateConnectivityStatus(
+      UpdateConnectivityStatus event, Emitter<PatrolState> emit) {
+    if (state is PatrolLoaded) {
+      final currentState = state as PatrolLoaded;
+      emit(currentState.copyWith(isOffline: event.isOffline));
+
+      // Trigger sinkronisasi jika kembali online
+      if (!event.isOffline && _offlineLocationBox != null) {
+        add(SyncOfflineData());
+      }
+    }
   }
 
   void debugPrintOfflineData() {
@@ -922,7 +945,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       final updatedTask = PatrolTask(
         taskId: event.task.taskId,
         userId: event.task.userId,
-        vehicleId: event.task.vehicleId,
+        // vehicleId: event.task.vehicleId,
         status: 'ongoing',
         startTime: event.startTime,
         endTime: null,

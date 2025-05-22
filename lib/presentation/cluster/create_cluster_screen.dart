@@ -125,7 +125,7 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
       showCustomSnackbar(
         context: context,
         title: 'Berhasil',
-        subtitle: 'Cluster berhasil dibuat',
+        subtitle: 'Tatar berhasil dibuat',
         type: SnackbarType.success,
       );
 
@@ -148,6 +148,44 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
         type: SnackbarType.danger,
       );
     }
+  }
+
+  InputDecoration _buildInputDecoration({
+    required String labelText,
+    String? hintText,
+    required IconData prefixIcon,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      labelText: labelText,
+      hintText: hintText,
+      prefixIcon: Icon(prefixIcon, color: kbpBlue900),
+      suffixIcon: suffixIcon,
+      contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: kbpBlue300, width: 1),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: kbpBlue300, width: 1),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: kbpBlue900, width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: dangerR500, width: 1),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: dangerR500, width: 2),
+      ),
+      filled: true,
+      fillColor: Colors.white,
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
+    );
   }
 
   @override
@@ -184,7 +222,7 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            'Penentuan Area Cluster',
+                            'Penentuan Area Tatar',
                             style: boldTextStyle(size: 16),
                           ),
                           IconButton(
@@ -272,7 +310,7 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
     // Tampilan form normal
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Buat Cluster Baru'),
+        title: const Text('Buat Tatar Baru'),
         backgroundColor: kbpBlue900,
         foregroundColor: Colors.white,
       ),
@@ -296,7 +334,7 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Informasi Cluster
+                // Informasi Tatar
                 Container(
                   padding: const EdgeInsets.all(16),
                   color: Colors.white,
@@ -304,50 +342,31 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Informasi Cluster',
+                        'Informasi Tatar',
                         style: boldTextStyle(size: 18),
                       ),
-                      const SizedBox(height: 16),
+                      24.height,
                       TextFormField(
                         controller: _nameController,
-                        decoration: InputDecoration(
-                          labelText: 'Nama Cluster',
-                          hintText: 'Contoh: Cluster Barat',
-                          prefixIcon:
-                              const Icon(Icons.business, color: kbpBlue900),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide:
-                                const BorderSide(color: kbpBlue900, width: 2),
-                          ),
+                        decoration: _buildInputDecoration(
+                          labelText: 'Nama Tatar',
+                          prefixIcon: Icons.business,
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Nama cluster tidak boleh kosong';
+                            return 'Nama tatar tidak boleh kosong';
                           }
                           return null;
                         },
                       ),
-                      const SizedBox(height: 16),
+                      16.height,
+// Update pada TextFormField email:
                       TextFormField(
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
-                        decoration: InputDecoration(
+                        decoration: _buildInputDecoration(
                           labelText: 'Email',
-                          hintText: 'Contoh: cluster.barat@example.com',
-                          prefixIcon:
-                              const Icon(Icons.email, color: kbpBlue900),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide:
-                                const BorderSide(color: kbpBlue900, width: 2),
-                          ),
+                          prefixIcon: Icons.email,
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
@@ -360,13 +379,14 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 16),
+                      16.height,
+// Update pada TextFormField password:
                       TextFormField(
                         controller: _passwordController,
                         obscureText: !_showPassword,
-                        decoration: InputDecoration(
+                        decoration: _buildInputDecoration(
                           labelText: 'Password',
-                          prefixIcon: const Icon(Icons.lock, color: kbpBlue900),
+                          prefixIcon: Icons.lock,
                           suffixIcon: IconButton(
                             icon: Icon(
                               _showPassword
@@ -380,14 +400,6 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                               });
                             },
                           ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide:
-                                const BorderSide(color: kbpBlue900, width: 2),
-                          ),
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
@@ -399,14 +411,14 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 16),
+                      16.height,
+// Update pada TextFormField konfirmasi password:
                       TextFormField(
                         controller: _confirmPasswordController,
                         obscureText: !_showConfirmPassword,
-                        decoration: InputDecoration(
+                        decoration: _buildInputDecoration(
                           labelText: 'Konfirmasi Password',
-                          prefixIcon:
-                              const Icon(Icons.lock_outline, color: kbpBlue900),
+                          prefixIcon: Icons.lock_outline,
                           suffixIcon: IconButton(
                             icon: Icon(
                               _showConfirmPassword
@@ -419,14 +431,6 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                                 _showConfirmPassword = !_showConfirmPassword;
                               });
                             },
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide:
-                                const BorderSide(color: kbpBlue900, width: 2),
                           ),
                         ),
                         validator: (value) {
@@ -443,9 +447,6 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 16),
-
-                // Area Koordinat Cluster
                 Container(
                   padding: const EdgeInsets.all(16),
                   color: Colors.white,
@@ -456,7 +457,7 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            'Area Cluster',
+                            'Area Tatar',
                             style: boldTextStyle(size: 18),
                           ),
                           ElevatedButton.icon(
@@ -557,7 +558,7 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
 
                 const SizedBox(height: 24),
 
-                // Tombol Buat Cluster
+                // Tombol Buat Tatar
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: ElevatedButton(
@@ -585,7 +586,7 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                               ),
                               const SizedBox(width: 12),
                               Text(
-                                'Membuat Cluster...',
+                                'Membuat Tatar...',
                                 style: boldTextStyle(
                                   color: Colors.white,
                                   size: 16,
@@ -594,7 +595,7 @@ class _CreateClusterScreenState extends State<CreateClusterScreen> {
                             ],
                           )
                         : Text(
-                            'Buat Cluster',
+                            'Buat Tatar',
                             style: boldTextStyle(
                               color: Colors.white,
                               size: 16,

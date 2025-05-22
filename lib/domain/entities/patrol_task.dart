@@ -8,7 +8,7 @@ class PatrolTask {
   final String taskId;
   final String userId;
   final String officerId;
-  final String vehicleId;
+  // final String vehicleId;
   final String status;
   final String? timeliness;
   final String clusterId;
@@ -41,18 +41,18 @@ class PatrolTask {
   String get clusterName {
     if (_clusterName == null || _clusterName == 'Loading...') {
       return clusterId.isNotEmpty
-          ? 'Cluster #${clusterId.substring(0, Math.min(5, clusterId.length))}'
-          : 'Unknown Cluster';
+          ? 'Tatar #${clusterId.substring(0, Math.min(5, clusterId.length))}'
+          : 'Unknown Tatar';
     }
     return _clusterName!;
   }
 
-  String get vehicleName {
-    if (_vehicleName == null || _vehicleName!.isEmpty) {
-      return vehicleId.isEmpty ? 'Unknown Vehicle' : vehicleId;
-    }
-    return _vehicleName!;
-  }
+  // String get vehicleName {
+  //   if (_vehicleName == null || _vehicleName!.isEmpty) {
+  //     return vehicleId.isEmpty ? 'Unknown Vehicle' : vehicleId;
+  //   }
+  //   return _vehicleName!;
+  // }
 
   String get officerPhotoUrl {
     if (_officerPhotoUrl == null ||
@@ -81,7 +81,7 @@ class PatrolTask {
     required this.taskId,
     required this.userId,
     this.officerId = '',
-    required this.vehicleId,
+    // required this.vehicleId,
     required this.status,
     this.timeliness,
     this.clusterId = '',
@@ -121,7 +121,7 @@ class PatrolTask {
       taskId: json['taskId'] as String? ?? '',
       userId: json['userId'] as String? ?? '',
       officerId: json['officerId'] as String? ?? '',
-      vehicleId: json['vehicleId'] as String? ?? '',
+      // vehicleId: json['vehicleId'] as String? ?? '',
       status: json['status'] as String? ?? 'active',
       timeliness: json['timeliness'] as String?,
       clusterId: json['clusterId'] as String? ?? '',
@@ -174,7 +174,7 @@ class PatrolTask {
       'taskId': taskId,
       'userId': userId,
       'officerId': officerId.isNotEmpty ? officerId : userId,
-      'vehicleId': vehicleId,
+      // 'vehicleId': vehicleId,
       'status': status,
       'timeliness': timeliness,
       'clusterId': clusterId,
@@ -246,7 +246,7 @@ class PatrolTask {
       await Future.wait([
         fetchOfficerName(database),
         fetchClusterName(database),
-        fetchVehicleName(database),
+        // fetchVehicleName(database),
       ]);
     } catch (e) {
       print('Error fetching related data: $e');
@@ -330,7 +330,7 @@ class PatrolTask {
   Future<void> fetchClusterName(DatabaseReference database) async {
     try {
       if (clusterId.isEmpty) {
-        _clusterName = 'No Cluster';
+        _clusterName = 'No Tatar';
         return;
       }
 
@@ -340,7 +340,7 @@ class PatrolTask {
 
       if (userSnapshot.exists) {
         final userData = userSnapshot.value as Map<dynamic, dynamic>;
-        _clusterName = userData['name']?.toString() ?? 'Unknown Cluster';
+        _clusterName = userData['name']?.toString() ?? 'Unknown Tatar';
         print('Found cluster name in users/$clusterId: $_clusterName');
         return;
       }
@@ -350,47 +350,47 @@ class PatrolTask {
 
       if (clusterSnapshot.exists) {
         final clusterData = clusterSnapshot.value as Map<dynamic, dynamic>;
-        _clusterName = clusterData['name']?.toString() ?? 'Unknown Cluster';
+        _clusterName = clusterData['name']?.toString() ?? 'Unknown Tatar';
         print('Found cluster name in clusters/$clusterId: $_clusterName');
         return;
       }
 
       _clusterName =
-          'Cluster #${clusterId.substring(0, Math.min(5, clusterId.length))}';
+          'Tatar #${clusterId.substring(0, Math.min(5, clusterId.length))}';
       print('Could not find cluster name, using default: $_clusterName');
     } catch (e) {
       print('Error fetching cluster name: $e');
 
       _clusterName = clusterId.isNotEmpty
-          ? 'Cluster #${clusterId.substring(0, Math.min(5, clusterId.length))}'
-          : 'Unknown Cluster';
+          ? 'Tatar #${clusterId.substring(0, Math.min(5, clusterId.length))}'
+          : 'Unknown Tatar';
     }
   }
 
-  Future<void> fetchVehicleName(DatabaseReference database) async {
-    try {
-      if (vehicleId.isEmpty) return;
+  // Future<void> fetchVehicleName(DatabaseReference database) async {
+  //   try {
+  //     if (vehicleId.isEmpty) return;
 
-      final snapshot = await database.child('vehicle').child(vehicleId).get();
+  //     final snapshot = await database.child('vehicle').child(vehicleId).get();
 
-      if (snapshot.exists) {
-        final vehicleData = Map<String, dynamic>.from(snapshot.value as Map);
-        final model = vehicleData['model'] as String? ?? '';
-        final plateNumber = vehicleData['plateNumber'] as String? ?? vehicleId;
+  //     if (snapshot.exists) {
+  //       final vehicleData = Map<String, dynamic>.from(snapshot.value as Map);
+  //       final model = vehicleData['model'] as String? ?? '';
+  //       final plateNumber = vehicleData['plateNumber'] as String? ?? vehicleId;
 
-        if (model.isNotEmpty) {
-          _vehicleName = '$model ($plateNumber)';
-        } else {
-          _vehicleName = plateNumber;
-        }
-      } else {
-        _vehicleName = vehicleId;
-      }
-    } catch (e) {
-      print('Error fetching vehicle info: $e');
-      _vehicleName = vehicleId;
-    }
-  }
+  //       if (model.isNotEmpty) {
+  //         _vehicleName = '$model ($plateNumber)';
+  //       } else {
+  //         _vehicleName = plateNumber;
+  //       }
+  //     } else {
+  //       _vehicleName = vehicleId;
+  //     }
+  //   } catch (e) {
+  //     print('Error fetching vehicle info: $e');
+  //     _vehicleName = vehicleId;
+  //   }
+  // }
 
   List<LatLng> getRoutePathAsLatLng() {
     if (routePath == null || routePath!.isEmpty) {
@@ -484,7 +484,7 @@ class PatrolTask {
       taskId: taskId ?? this.taskId,
       userId: userId ?? this.userId,
       officerId: officerId ?? this.officerId,
-      vehicleId: vehicleId ?? this.vehicleId,
+      // vehicleId: vehicleId ?? this.vehicleId,
       status: status ?? this.status,
       timeliness: timeliness ?? this.timeliness,
       clusterId: clusterId ?? this.clusterId,

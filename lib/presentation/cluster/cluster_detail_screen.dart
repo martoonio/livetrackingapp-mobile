@@ -1,5 +1,6 @@
 import 'dart:developer';
 
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -34,15 +35,126 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
   GoogleMapController? _mapController;
   User? _cluster;
 
+  int _totalPatrols = 0;
+  int _ongoingPatrols = 0;
+  int _latePatrols = 0;
+  int _expiredPatrols = 0;
+  int _invalidPatrols = 0;
+  int _ontimePatrols = 0;
+  int _activePatrols = 0;
+  bool _isHistoryLoading = true;
+  String? _errorMessage;
+
+// Pada metode initState, tambahkan:
   @override
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: 3,
+      length: 4,
       vsync: this,
       initialIndex: widget.initialTab,
     );
     _loadClusterDetails();
+
+    // Tambahkan listener untuk mendeteksi perubahan tab
+    _tabController.addListener(() {
+      // Jika tab yang aktif adalah tab Riwayat (index 1)
+      if (_tabController.index == 1) {
+        _loadPatrolHistory();
+      }
+    });
+  }
+
+// Update metode _loadPatrolHistory untuk menggunakan Realtime Database
+  Future<void> _loadPatrolHistory() async {
+    if (_isHistoryLoading == false) return; // Hindari reload jika sudah dimuat
+
+    setState(() {
+      _isHistoryLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      // Gunakan Firebase Realtime Database untuk mendapatkan data
+      final databaseReference = FirebaseDatabase.instance.ref();
+
+      // Query tasks berdasarkan clusterId
+      final tasksSnapshot = await databaseReference
+          .child('tasks')
+          .orderByChild('clusterId')
+          .equalTo(widget.clusterId)
+          .get();
+
+      if (tasksSnapshot.exists) {
+        // Reset counter
+        int totalPatrols = 0;
+        int ongoingPatrols = 0;
+        int latePatrols = 0;
+        int expiredPatrols = 0;
+        int invalidPatrols = 0;
+        int ontimePatrols = 0;
+        int activePatrols = 0;
+
+        // Proses data dari snapshot
+        final tasks = tasksSnapshot.value as Map<dynamic, dynamic>;
+
+        tasks.forEach((key, value) {
+          final data = value as Map<dynamic, dynamic>;
+          totalPatrols++;
+
+          // Hitung statistik
+          final status = data['status'] as String?;
+          if (status == 'active' || status == 'assigned') {
+            activePatrols++;
+          } else if (status == 'expired') {
+            expiredPatrols++;
+          } else if (status == 'ongoing') {
+            ongoingPatrols++;
+          }
+
+          final mockLocationDetected = data['mockLocationDetected'] as bool?;
+          if (mockLocationDetected == true) {
+            invalidPatrols++;
+          }
+
+          final timeliness = data['timeliness'] as String?;
+          if (timeliness == 'late') {
+            latePatrols++;
+          } else if (timeliness == 'ontime') {
+            ontimePatrols++;
+          }
+        });
+
+        setState(() {
+          _totalPatrols = totalPatrols;
+          _ongoingPatrols = ongoingPatrols;
+          _latePatrols = latePatrols;
+          _expiredPatrols = expiredPatrols;
+          _invalidPatrols = invalidPatrols;
+          _ontimePatrols = ontimePatrols;
+          _activePatrols = activePatrols;
+          _isHistoryLoading = false;
+        });
+      } else {
+        // Jika tidak ada data
+        setState(() {
+          _totalPatrols = 0;
+          _ongoingPatrols = 0;
+          _latePatrols = 0;
+          _expiredPatrols = 0;
+          _invalidPatrols = 0;
+          _ontimePatrols = 0;
+          _activePatrols = 0;
+          _isHistoryLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading patrol history: $e');
+      setState(() {
+        _errorMessage = e.toString();
+        _isHistoryLoading = false;
+      });
+    }
   }
 
   @override
@@ -62,7 +174,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Detail Cluster'),
+        title: const Text('Detail Tatar'),
         backgroundColor: kbpBlue900,
         foregroundColor: Colors.white,
         bottom: TabBar(
@@ -72,6 +184,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
           unselectedLabelColor: Colors.white70,
           tabs: const [
             Tab(text: 'Informasi'),
+            Tab(text: 'Riwayat'),
             Tab(text: 'Petugas'),
             Tab(text: 'Titik Patroli'),
           ],
@@ -105,6 +218,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
               controller: _tabController,
               children: [
                 _buildInfoTab(state.cluster),
+                _buildHistoryTab(state.cluster),
                 _buildOfficersTab(state.cluster),
                 _buildMapTab(state.cluster),
               ],
@@ -145,6 +259,277 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     }
   }
 
+  // Perbarui method _buildHistoryTab() untuk menampilkan statistik patroli
+
+  Widget _buildHistoryTab(User cluster) {
+    // Trigger loading history jika belum dimuat
+    if (_isHistoryLoading && _errorMessage == null) {
+      _loadPatrolHistory();
+    }
+
+    // Handle loading state
+    if (_isHistoryLoading) {
+      return Center(
+        child: lottie.LottieBuilder.asset(
+          'assets/lottie/maps_loading.json',
+          width: 200,
+          height: 100,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
+    // Handle error state
+    if (_errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 64, color: dangerR500),
+            const SizedBox(height: 16),
+            Text(
+              'Error: $_errorMessage',
+              style: const TextStyle(color: Colors.red),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () {
+                _loadPatrolHistory();
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Coba Lagi'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kbpBlue900,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Tampilkan data statistik
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: kbpBlue50,
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(16),
+                    bottomRight: Radius.circular(16),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Riwayat Patroli',
+                      style: semiBoldTextStyle(size: 18),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: kbpBlue700,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.list_alt,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '$_totalPatrols Patroli',
+                            style: boldTextStyle(color: Colors.white, size: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Baris pertama statistik
+              Row(
+                children: [
+                  _buildStatCard(
+                    icon: Icons.calendar_today,
+                    title: 'Sedang Berlangsung',
+                    value: _ongoingPatrols.toString(),
+                    iconColor: kbpBlue900,
+                    bgColor: kbpBlue50,
+                  ),
+                  const SizedBox(width: 12),
+                  _buildStatCard(
+                    icon: Icons.verified,
+                    title: 'Tepat Waktu',
+                    value: _ontimePatrols.toString(),
+                    iconColor: successG500,
+                    bgColor: successG50,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Baris kedua statistik
+              Row(
+                children: [
+                  _buildStatCard(
+                    icon: Icons.timer,
+                    title: 'Terlambat',
+                    value: _latePatrols.toString(),
+                    iconColor: warningY500,
+                    bgColor: warningY50,
+                  ),
+                  const SizedBox(width: 12),
+                  _buildStatCard(
+                    icon: Icons.access_time_filled,
+                    title: 'Lewat Tenggat',
+                    value: _expiredPatrols.toString(),
+                    iconColor: dangerR500,
+                    bgColor: dangerR50,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Baris ketiga statistik
+              Row(
+                children: [
+                  _buildStatCard(
+                    icon: Icons.gps_off,
+                    title: 'Fake GPS',
+                    value: _invalidPatrols.toString(),
+                    iconColor: Colors.purple,
+                    bgColor: Color(0xFFF3E5F5), // light purple
+                  ),
+                  const SizedBox(width: 12),
+                  _buildStatCard(
+                    icon: Icons.pending_actions,
+                    title: 'Belum Dimulai',
+                    value: _activePatrols.toString(),
+                    iconColor: kbpBlue700,
+                    bgColor: kbpBlue50,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // Tombol aksi untuk riwayat lengkap
+        Expanded(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'Kelola dan analisis riwayat patroli petugas\ndalam cluster ini',
+                  textAlign: TextAlign.center,
+                  style: regularTextStyle(color: neutral600),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ClusterPatrolHistoryScreen(
+                          clusterId: widget.clusterId,
+                          clusterName: _cluster?.name ?? '',
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.history),
+                  label: const Text('Tampilkan Riwayat Lengkap'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kbpBlue900,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatCard({
+    required IconData icon,
+    required String title,
+    required String value,
+    Color iconColor = kbpBlue900,
+    Color bgColor = kbpBlue50,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: iconColor,
+                    size: 20,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              value,
+              style: boldTextStyle(size: 24, color: neutral900),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              title,
+              style: regularTextStyle(size: 12, color: neutral600),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildInfoTab(User cluster) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
@@ -162,7 +547,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Informasi Cluster',
+                    'Informasi Tatar',
                     style: boldTextStyle(size: 18),
                   ),
                   const Divider(),
@@ -201,7 +586,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                   const Divider(),
                   _buildActionButton(
                     icon: Icons.edit,
-                    label: 'Edit Informasi Cluster',
+                    label: 'Edit Informasi Tatar',
                     onPressed: () {
                       // Navigasi ke halaman edit
                     },
@@ -238,7 +623,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                   ),
                   _buildActionButton(
                     icon: Icons.delete_outline,
-                    label: 'Hapus Cluster',
+                    label: 'Hapus Tatar',
                     color: Colors.red,
                     onPressed: () {
                       _showDeleteConfirmationDialog();
@@ -908,7 +1293,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Hapus Cluster',
+        title: Text('Hapus Tatar',
             style: boldTextStyle(color: dangerR300, size: 18)),
         content: const Text(
           'Anda yakin ingin menghapus cluster ini? Tindakan ini tidak dapat dibatalkan dan akan menghapus semua data terkait cluster.',

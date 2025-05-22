@@ -330,9 +330,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             title: 'Live Tracking App',
             theme: ThemeData(
               scaffoldBackgroundColor: neutralWhite,
-              primaryColor: successG300,
+              primaryColor: kbpBlue900,
               colorScheme:
-                  ColorScheme.fromSwatch().copyWith(primary: successG300),
+                  ColorScheme.fromSwatch().copyWith(primary: kbpBlue900),
               fontFamily: 'Plus Jakarta Sans',
             ),
             home: (state is AuthAuthenticated)

@@ -504,7 +504,7 @@ class RouteRepositoryImpl implements RouteRepository {
       final task = PatrolTask(
         taskId: data['taskId']?.toString() ?? '',
         userId: data['userId']?.toString() ?? '',
-        vehicleId: data['vehicleId']?.toString() ?? '',
+        // vehicleId: data['vehicleId']?.toString() ?? '',
         officerName:
             data['officerName']?.toString(), // Support for officer name
         officerPhotoUrl:
@@ -553,7 +553,7 @@ class RouteRepositoryImpl implements RouteRepository {
       return PatrolTask(
         taskId: data['taskId']?.toString() ?? '',
         userId: data['userId']?.toString() ?? '',
-        vehicleId: data['vehicleId']?.toString() ?? '',
+        // vehicleId: data['vehicleId']?.toString() ?? '',
         assignedStartTime: data['assignedStartTime'] != null
             ? _parseDateTime(data['assignedStartTime'])
             : null,
@@ -722,7 +722,7 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
-  //Cluster Logic
+  //Tatar Logic
   // Tambahkan implementasi method-method baru ini ke AdminRepositoryImpl
 
   @override
@@ -731,7 +731,7 @@ class RouteRepositoryImpl implements RouteRepository {
       final snapshot = await _database.child('users/$clusterId').get();
 
       if (!snapshot.exists) {
-        throw Exception('Cluster not found');
+        throw Exception('Tatar not found');
       }
 
       final data = snapshot.value as Map<dynamic, dynamic>;
@@ -996,7 +996,7 @@ class RouteRepositoryImpl implements RouteRepository {
         'updated_at': DateTime.now().toIso8601String(),
         'updated_by': _auth.currentUser?.uid,
       });
-      print('Cluster coordinates updated successfully');
+      print('Tatar coordinates updated successfully');
       return;
     } catch (e) {
       print('Error updating cluster coordinates: $e');
@@ -1019,7 +1019,7 @@ class RouteRepositoryImpl implements RouteRepository {
       // Or actually delete (uncomment if needed)
       // await _database.child('users/$clusterId').remove();
 
-      print('Cluster deleted/archived successfully');
+      print('Tatar deleted/archived successfully');
       return;
     } catch (e) {
       print('Error deleting cluster: $e');
@@ -1136,7 +1136,7 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       await _checkAuth();
       await _database.child('users/$clusterId').update(updates);
-      print('Cluster updated successfully');
+      print('Tatar updated successfully');
     } catch (e) {
       print('Error updating cluster: $e');
       throw Exception('Failed to update cluster: $e');

@@ -4,6 +4,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:livetrackingapp/domain/entities/patrol_task.dart';
 import 'package:livetrackingapp/domain/entities/report.dart';
+import 'package:livetrackingapp/presentation/admin/full_screen_map.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:math' as Math;
@@ -40,6 +41,8 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
   // Di dalam _PatrolHistoryScreenState
   String? _finalReportPhotoUrl;
   String? _initialReportPhotoUrl;
+
+  bool _isMapExpanded = false;
 
   @override
   void initState() {
@@ -123,6 +126,11 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
         _addActualRoutePath();
       }
 
+      // Tambahkan ini:
+      if (widget.task.mockLocationDetected == true) {
+        _addMockLocationMarkers();
+      }
+
       setState(() {});
     } catch (e) {
       print('Error preparing route and markers: $e');
@@ -159,6 +167,7 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
               position.longitude, checkpointLat, checkpointLng);
 
           if (distance <= 5) {
+            // 5 meters tolerance
             visitedCheckpoints.add(i);
             break;
           }
@@ -244,17 +253,17 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
         ),
       );
 
-      _markers.add(
-        Marker(
-          markerId: const MarkerId('end_point'),
-          position: points.last,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-          infoWindow: const InfoWindow(
-            title: 'Titik Akhir',
-            snippet: 'Petugas mengakhiri patroli di sini',
-          ),
-        ),
-      );
+      // _markers.add(
+      //   Marker(
+      //     markerId: const MarkerId('end_point'),
+      //     position: points.last,
+      //     icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      //     infoWindow: const InfoWindow(
+      //       title: 'Titik Akhir',
+      //       snippet: 'Petugas mengakhiri patroli di sini',
+      //     ),
+      //   ),
+      // );
     }
   }
 
@@ -914,10 +923,127 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
     );
   }
 
+  // Tambahkan tombol fullscreen di _buildMapView() di PatrolHistoryScreen
   Widget _buildMapView() {
     return Column(
       children: [
-        _buildMapLegend(),
+        // Header dengan legenda dan tombol fullscreen
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          color: Colors.white,
+          child: Row(
+            children: [
+              Expanded(
+                child: Wrap(
+                  spacing: 16,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    _legendItem(kbpBlue700, 'Rute aktual'),
+                  ],
+                ),
+              ),
+              // Tombol fullscreen
+              InkWell(
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => FullScreenMapPage(
+                        task: widget.task,
+                        initialMarkers: _markers,
+                        initialPolylines: _polylines,
+                        reports: _reports,
+                      ),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: kbpBlue900,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.fullscreen,
+                          color: Colors.white, size: 16),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Lihat Detail Peta',
+                        style: mediumTextStyle(size: 12, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Legenda yang bisa di-scroll
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.location_on, color: Colors.green, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Titik dikunjungi',
+                    style: regularTextStyle(size: 12, color: neutral700),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.location_on, color: Colors.red, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Titik belum dikunjungi',
+                    style: regularTextStyle(size: 12, color: neutral700),
+                  ),
+                ],
+              ),
+              if (_reports.isNotEmpty) const SizedBox(width: 16),
+              if (_reports.isNotEmpty)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.location_on, color: Colors.blue, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Laporan (${_reports.length})',
+                      style: regularTextStyle(size: 12, color: neutral700),
+                    ),
+                  ],
+                ),
+              if (widget.task.mockLocationDetected == true)
+                const SizedBox(width: 16),
+              if (widget.task.mockLocationDetected == true)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.location_on,
+                        color: Colors.purple, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Fake GPS',
+                      style: regularTextStyle(size: 12, color: neutral700),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+        // Peta
         Expanded(
           child: Stack(
             children: [
@@ -951,6 +1077,67 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
     );
   }
 
+  // Tambahkan method baru untuk menambahkan marker mock location di peta
+  Future<void> _addMockLocationMarkers() async {
+    try {
+      final snapshot = await FirebaseDatabase.instance
+          .ref('tasks')
+          .child(widget.task.taskId)
+          .child('mock_detections')
+          .get();
+
+      if (!snapshot.exists) return;
+
+      final mockDetections = <Map<String, dynamic>>[];
+      final data = snapshot.value as Map<dynamic, dynamic>;
+
+      data.forEach((key, value) {
+        if (value is Map) {
+          mockDetections.add(Map<String, dynamic>.from(value as Map));
+        }
+      });
+
+      for (int i = 0; i < mockDetections.length; i++) {
+        final detection = mockDetections[i];
+        final coordinates = detection['coordinates'] as List?;
+        final isUnrealisticMovement = detection['unrealistic_movement'] == true;
+
+        if (coordinates != null && coordinates.length >= 2) {
+          // Buat custom marker icon
+          final BitmapDescriptor icon = isUnrealisticMovement
+              ? BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueOrange)
+              : BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueViolet);
+
+          final position = LatLng(
+            (coordinates[0] as num).toDouble(),
+            (coordinates[1] as num).toDouble(),
+          );
+
+          _markers.add(
+            Marker(
+              markerId: MarkerId('mock-$i'),
+              position: position,
+              icon: icon,
+              infoWindow: InfoWindow(
+                title: isUnrealisticMovement
+                    ? 'Gerakan Tidak Realistis'
+                    : 'Fake GPS Terdeteksi',
+                snippet: 'Klik untuk detail',
+                onTap: () => _showMockLocationDetails(),
+              ),
+            ),
+          );
+        }
+      }
+
+      setState(() {});
+    } catch (e) {
+      print('Error adding mock location markers: $e');
+    }
+  }
+
   // Tambahkan fungsi _legendItem di dalam class _PatrolHistoryScreenState
   Widget _legendItem(Color color, String text, {bool isDashed = false}) {
     return Row(
@@ -976,6 +1163,263 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
       ],
     );
   }
+
+  // Tambahkan di _PatrolHistoryScreenState class
+  Future<void> _showMockLocationDetails() async {
+    try {
+      setState(() {
+        _isLoadingMockData = true;
+      });
+
+      final snapshot = await FirebaseDatabase.instance
+          .ref('tasks')
+          .child(widget.task.taskId)
+          .child('mock_detections')
+          .get();
+
+      setState(() {
+        _isLoadingMockData = false;
+      });
+
+      if (!snapshot.exists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Data deteksi Fake GPS tidak ditemukan'),
+            backgroundColor: warningY500,
+          ),
+        );
+        return;
+      }
+
+      final mockDetections = <Map<String, dynamic>>[];
+
+      final data = snapshot.value as Map<dynamic, dynamic>;
+      data.forEach((key, value) {
+        if (value is Map) {
+          mockDetections.add({
+            'id': key,
+            ...Map<String, dynamic>.from(value as Map),
+          });
+        }
+      });
+
+      // Urutkan berdasarkan waktu, terbaru di atas
+      mockDetections.sort((a, b) {
+        final aTimestamp = a['timestamp'] as String?;
+        final bTimestamp = b['timestamp'] as String?;
+        if (aTimestamp == null || bTimestamp == null) return 0;
+        return bTimestamp.compareTo(aTimestamp);
+      });
+
+      if (mockDetections.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tidak ada data detail mock location'),
+            backgroundColor: warningY500,
+          ),
+        );
+        return;
+      }
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (context) {
+          return Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.75,
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Detail Deteksi Fake GPS',
+                      style: boldTextStyle(size: 18),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const Divider(),
+                Text(
+                  'Terdeteksi ${mockDetections.length} kali upaya penggunaan Fake GPS',
+                  style: mediumTextStyle(size: 14, color: neutral700),
+                ),
+                const SizedBox(height: 16),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: mockDetections.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (context, index) {
+                      final detection = mockDetections[index];
+                      final timestamp = parseDateTime(detection['timestamp']);
+                      final coordinates = detection['coordinates'] as List?;
+                      final unrealisticMovement =
+                          detection['unrealistic_movement'] == true;
+                      final deviceInfo = detection['deviceInfo'] as Map?;
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: unrealisticMovement
+                                      ? warningY100
+                                      : dangerR100,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  unrealisticMovement
+                                      ? Icons.speed
+                                      : Icons.gps_off,
+                                  color: unrealisticMovement
+                                      ? warningY300
+                                      : dangerR300,
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      unrealisticMovement
+                                          ? 'Gerakan Tidak Realistis'
+                                          : 'Mock Location API',
+                                      style: semiBoldTextStyle(size: 14),
+                                    ),
+                                    if (timestamp != null)
+                                      Text(
+                                        '${dateFormatter.format(timestamp)} ${timeFormatter.format(timestamp)}',
+                                        style: regularTextStyle(
+                                            size: 12, color: neutral500),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.map_outlined,
+                                    color: kbpBlue700, size: 20),
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                  if (coordinates != null &&
+                                      coordinates.length >= 2) {
+                                    _tabController!.animateTo(0);
+                                    Future.delayed(
+                                        const Duration(milliseconds: 300), () {
+                                      _mapController?.animateCamera(
+                                        CameraUpdate.newLatLngZoom(
+                                          LatLng(
+                                            (coordinates[0] as num).toDouble(),
+                                            (coordinates[1] as num).toDouble(),
+                                          ),
+                                          18,
+                                        ),
+                                      );
+                                    });
+                                  }
+                                },
+                                tooltip: 'Lihat di peta',
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          if (coordinates != null && coordinates.length >= 2)
+                            Text(
+                              'Lokasi: ${(coordinates[0] as num).toStringAsFixed(6)}, ${(coordinates[1] as num).toStringAsFixed(6)}',
+                              style: regularTextStyle(size: 12),
+                            ),
+
+                          // Tampilkan detail gerakan tidak realistis jika ada
+                          if (unrealisticMovement) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: warningY50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: warningY200),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (detection['movement_speed'] != null)
+                                    Text(
+                                      'Kecepatan: ${(detection['movement_speed'] as num).toStringAsFixed(2)} m/s',
+                                      style: regularTextStyle(size: 12),
+                                    ),
+                                  if (detection['movement_distance'] != null)
+                                    Text(
+                                      'Jarak: ${(detection['movement_distance'] as num).toStringAsFixed(2)} m',
+                                      style: regularTextStyle(size: 12),
+                                    ),
+                                  if (detection['movement_time'] != null)
+                                    Text(
+                                      'Waktu: ${(detection['movement_time'] as num).toStringAsFixed(2)} detik',
+                                      style: regularTextStyle(size: 12),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          // Tampilkan info device jika ada
+                          if (deviceInfo != null && deviceInfo.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Informasi Perangkat:',
+                              style: mediumTextStyle(size: 12),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Model: ${deviceInfo['model'] ?? 'Unknown'}',
+                              style: regularTextStyle(size: 12),
+                            ),
+                            Text(
+                              'OS: ${deviceInfo['os'] ?? 'Android'} ${deviceInfo['osVersion'] ?? ''}',
+                              style: regularTextStyle(size: 12),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    } catch (e) {
+      setState(() {
+        _isLoadingMockData = false;
+      });
+      print('Error showing mock location details: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gagal memuat data: $e'),
+          backgroundColor: dangerR500,
+        ),
+      );
+    }
+  }
+
+// Tambahkan variable state baru
+  bool _isLoadingMockData = false;
 
   Widget _buildMapLegend() {
     return Container(
@@ -1024,6 +1468,31 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                 const SizedBox(width: 8),
                 Text(
                   'Laporan (${_reports.length})',
+                  style: regularTextStyle(size: 12, color: neutral700),
+                ),
+              ],
+            ),
+          if (widget.task.mockLocationDetected == true)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.location_on, color: Colors.purple, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Fake GPS',
+                  style: regularTextStyle(size: 12, color: neutral700),
+                ),
+              ],
+            ),
+
+          if (widget.task.mockLocationDetected == true)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.location_on, color: Colors.orange, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Gerakan Tidak Realistis',
                   style: regularTextStyle(size: 12, color: neutral700),
                 ),
               ],
@@ -1094,22 +1563,48 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                               style: boldTextStyle(size: 16),
                             ),
                             const SizedBox(height: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: _getStatusBgColor(widget.task.status),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                _getStatusText(widget.task.status),
-                                style: mediumTextStyle(
-                                  color: _getStatusColor(widget.task.status),
-                                  size: 12,
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        _getStatusBgColor(widget.task.status),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    _getStatusText(widget.task.status),
+                                    style: mediumTextStyle(
+                                      color:
+                                          _getStatusColor(widget.task.status),
+                                      size: 12,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(width: 8),
+                                // is Mock location detected??
+                                if (widget.task.mockLocationDetected == true)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: dangerR500.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      'Terindikasi Fake GPS',
+                                      style: mediumTextStyle(
+                                        color: dangerR500,
+                                        size: 12,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ),
@@ -1127,9 +1622,9 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                     ),
                   ],
                   const SizedBox(height: 16),
-                  _infoRow(
-                      Icons.directions_car, 'Kendaraan', widget.task.vehicleId),
-                  const SizedBox(height: 8),
+                  // _infoRow(
+                  //     Icons.directions_car, 'Kendaraan', widget.task.vehicleId),
+                  // const SizedBox(height: 8),
                   _infoRow(
                     Icons.access_time,
                     'Waktu Mulai',
@@ -1315,6 +1810,119 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
           ),
 
           const SizedBox(height: 16),
+
+          // Tambahkan di PatrolHistoryScreen class dalam metode _buildTaskDetailsView()
+// Setelah kartu progress ("Progress Kunjungan")
+
+// Mock Location Card
+          if (widget.task.mockLocationDetected == true &&
+              widget.task.mockLocationCount != null &&
+              widget.task.mockLocationCount! > 0)
+            const SizedBox(height: 16),
+          Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: dangerR100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.gps_off,
+                          color: dangerR500,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Deteksi Fake GPS',
+                              style: semiBoldTextStyle(size: 16),
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: dangerR500,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'Terdeteksi ${widget.task.mockLocationCount ?? 0} kali',
+                                style: mediumTextStyle(
+                                    size: 12, color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Terdapat upaya penggunaan Fake GPS terdeteksi selama patroli ini.',
+                    style: regularTextStyle(size: 14, color: neutral700),
+                  ),
+                  const SizedBox(height: 8),
+                  if (widget.task.mockLocationCount != null &&
+                      widget.task.mockLocationCount! >= 3)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: warningY50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: warningY300),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber, color: warningY500),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Patroli ini kemungkinan tidak valid karena terdeteksi penggunaan Fake GPS lebih dari 3 kali.',
+                              style:
+                                  mediumTextStyle(size: 14, color: warningY300),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Tambahkan tombol untuk melihat detail jika ada
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.info_outline),
+                      label: const Text('Lihat Detail Deteksi'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kbpBlue900,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () => _showMockLocationDetails(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
           // Activity timeline
           Card(

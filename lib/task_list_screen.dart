@@ -132,7 +132,7 @@ class _TaskListScreenState extends State<TaskListScreen> {
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Vehicle: ${task.vehicleId}'),
+                            // Text('Vehicle: ${task.vehicleId}'),
                             Text('Status: ${task.status}'),
                             Text('Created: ${task.createdAt}'),
                           ],

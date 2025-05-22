@@ -356,15 +356,15 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       return;
     }
 
-    if (_vehicleId.isEmpty) {
-      showCustomSnackbar(
-        context: context,
-        title: 'Error',
-        subtitle: 'Silakan pilih kendaraan terlebih dahulu',
-        type: SnackbarType.danger,
-      );
-      return;
-    }
+    // if (_vehicleId.isEmpty) {
+    //   showCustomSnackbar(
+    //     context: context,
+    //     title: 'Error',
+    //     subtitle: 'Silakan pilih kendaraan terlebih dahulu',
+    //     type: SnackbarType.danger,
+    //   );
+    //   return;
+    // }
 
     if (_selectedPoints.isEmpty) {
       showCustomSnackbar(
@@ -462,7 +462,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
   Future<bool?> _showConfirmationDialog() async {
     String officerName = _selectedOfficer?.name ?? 'Tidak ditemukan';
-    String clusterName = 'Unknown Cluster';
+    String clusterName = 'Unknown Tatar';
 
     // Get readable shift display text
     String shiftText = '';
@@ -529,10 +529,10 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('Detail Tugas:', style: semiBoldTextStyle()),
-                _infoRow('Cluster', clusterName),
+                _infoRow('Tatar', clusterName),
                 _infoRow(
                     'Petugas', '$officerName ($typeText - Shift $shiftText)'),
-                _infoRow('Kendaraan', _vehicleId),
+                // _infoRow('Kendaraan', _vehicleId),
                 _infoRow(
                     'Jumlah Titik Patroli', _selectedPoints.length.toString()),
                 _infoRow('Mulai Patroli',
@@ -632,32 +632,30 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       case ShiftType.pagi:
         // Organik: 07:00-15:00
         startDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 7, 0);
-        endDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 15, 0);
+        endDate = startDate.add(const Duration(hours: 1));
         break;
       case ShiftType.sore:
         // Organik: 15:00-23:00
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 15, 0);
-        endDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 0);
+        endDate = startDate.add(const Duration(hours: 1));
         break;
       case ShiftType.malam:
         // Organik: 23:00-07:00
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 0);
-        endDate =
-            DateTime(tomorrow.year, tomorrow.month, tomorrow.day + 1, 7, 0);
+        endDate = startDate.add(const Duration(hours: 1));
         break;
       case ShiftType.siang:
         // Outsource: 07:00-19:00
         startDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 7, 0);
-        endDate = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 19, 0);
+        endDate = startDate.add(const Duration(hours: 1));
         break;
       case ShiftType.malamPanjang:
         // Outsource: 19:00-07:00
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 19, 0);
-        endDate =
-            DateTime(tomorrow.year, tomorrow.month, tomorrow.day + 1, 7, 0);
+        endDate = startDate.add(const Duration(hours: 1));
         break;
     }
 
@@ -940,13 +938,10 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Dropdown Cluster
-                        const Text(
-                          'Cluster',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: neutral900,
-                          ),
+                        // Dropdown Tatar
+                        Text(
+                          'Tatar',
+                          style: boldTextStyle(size: 16),
                         ),
                         const SizedBox(height: 8),
                         Container(
@@ -961,7 +956,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                                   horizontal: 16, vertical: 8),
                               border: InputBorder.none,
                             ),
-                            hint: const Text('Pilih Cluster'),
+                            hint: const Text('Pilih Tatar'),
                             isExpanded: true,
                             items: clusters.map((cluster) {
                               return DropdownMenuItem(
@@ -1000,16 +995,14 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                             },
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        // const SizedBox(height: 16),
 
                         // Dropdown Petugas - hanya tampilkan jika cluster telah dipilih
                         if (_selectedClusterId != null) ...[
-                          const Text(
+                          16.height,
+                          Text(
                             'Petugas',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: neutral900,
-                            ),
+                            style: boldTextStyle(size: 16),
                           ),
                           const SizedBox(height: 8),
                           Container(
@@ -1076,56 +1069,56 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                               },
                             ),
                           ),
-                          const SizedBox(height: 16),
+                          // const SizedBox(height: 16),
                         ],
 
                         // Dropdown Kendaraan
-                        const Text(
-                          'Kendaraan',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: neutral900,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: kbpBlue900),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: DropdownButtonFormField<String>(
-                            value: _vehicleId.isEmpty ? null : _vehicleId,
-                            decoration: const InputDecoration(
-                              contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 8),
-                              border: InputBorder.none,
-                            ),
-                            hint: const Text('Pilih Kendaraan'),
-                            isExpanded: true,
-                            items: vehicles.map((vehicle) {
-                              return DropdownMenuItem(
-                                value: vehicle,
-                                child: Text(vehicle),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              setState(() {
-                                _vehicleId = value ?? '';
-                              });
-                            },
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Silakan pilih kendaraan';
-                              }
-                              return null;
-                            },
-                          ),
-                        ),
+                        // const Text(
+                        //   'Kendaraan',
+                        //   style: TextStyle(
+                        //     fontWeight: FontWeight.bold,
+                        //     color: neutral900,
+                        //   ),
+                        // ),
+                        // const SizedBox(height: 8),
+                        // Container(
+                        //   decoration: BoxDecoration(
+                        //     border: Border.all(color: kbpBlue900),
+                        //     borderRadius: BorderRadius.circular(8),
+                        //   ),
+                        //   child: DropdownButtonFormField<String>(
+                        //     value: _vehicleId.isEmpty ? null : _vehicleId,
+                        //     decoration: const InputDecoration(
+                        //       contentPadding: EdgeInsets.symmetric(
+                        //           horizontal: 16, vertical: 8),
+                        //       border: InputBorder.none,
+                        //     ),
+                        //     hint: const Text('Pilih Kendaraan'),
+                        //     isExpanded: true,
+                        //     items: vehicles.map((vehicle) {
+                        //       return DropdownMenuItem(
+                        //         value: vehicle,
+                        //         child: Text(vehicle),
+                        //       );
+                        //     }).toList(),
+                        //     onChanged: (value) {
+                        //       setState(() {
+                        //         _vehicleId = value ?? '';
+                        //       });
+                        //     },
+                        //     validator: (value) {
+                        //       if (value == null || value.isEmpty) {
+                        //         return 'Silakan pilih kendaraan';
+                        //       }
+                        //       return null;
+                        //     },
+                        //   ),
+                        // ),
                       ],
                     ),
                   ),
 
-                  const SizedBox(height: 16),
+                  // const SizedBox(height: 16),
 
                   // Jadwal Patroli
                   Container(
@@ -1138,12 +1131,12 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
                           'Jadwal Patroli',
                           style: boldTextStyle(size: 18),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 4),
 
                         // Waktu Mulai dan Selesai (disesuaikan dengan shift officer)
                         if (_selectedOfficer != null) ...[
                           Text(
-                            'Jadwal otomatis berdasarkan Shift ${_selectedOfficer!.shift}',
+                            'Shift ${getShiftDisplayText(_selectedOfficer!.shift)}',
                             style: const TextStyle(
                               fontStyle: FontStyle.italic,
                               color: kbpBlue700,
@@ -1588,7 +1581,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           finalStartDate = DateTime(
             selectedDate.year,
             selectedDate.month,
-            selectedDate.day + 1,
+            selectedDate.day,
             selectedTime.hour,
             selectedTime.minute,
           );

@@ -281,7 +281,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
     return PatrolTask(
       taskId: taskId,
       userId: data['userId']?.toString() ?? '',
-      vehicleId: data['vehicleId']?.toString() ?? '',
+      // vehicleId: data['vehicleId']?.toString() ?? '',
       status: data['status']?.toString() ?? 'unknown',
       assignedStartTime: _parseDateTime(data['assignedStartTime']),
       assignedEndTime: _parseDateTime(data['assignedEndTime']),
@@ -405,7 +405,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
               title:
                   '${task.officerName}${task.timeliness != null ? " (${getTimelinessText(task.timeliness)})" : ""}',
               snippet:
-                  'Cluster: ${_clusterNames[task.clusterId] ?? task.clusterId.substring(0, Math.min(8, task.clusterId.length))}, Jarak: ${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
+                  'Tatar: ${_clusterNames[task.clusterId] ?? task.clusterId.substring(0, Math.min(8, task.clusterId.length))}, Jarak: ${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
             ),
             icon: _getMarkerIconForCluster(task.clusterId),
             onTap: () {
@@ -544,16 +544,16 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          task.officerName ?? 'Petugas Patroli',
+                          task.officerName,
                           style: boldTextStyle(size: 16, color: kbpBlue900),
                           overflow: TextOverflow.ellipsis,
                         ),
-                        Text(
-                          task.vehicleId.isEmpty
-                              ? 'Tanpa Kendaraan'
-                              : task.vehicleId,
-                          style: regularTextStyle(size: 14, color: kbpBlue700),
-                        ),
+                        // Text(
+                        //   task.vehicleId.isEmpty
+                        //       ? 'Tanpa Kendaraan'
+                        //       : task.vehicleId,
+                        //   style: regularTextStyle(size: 14, color: kbpBlue700),
+                        // ),
                       ],
                     ),
                   ),
@@ -641,7 +641,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                   Expanded(
                     child: _infoItem(
                       Icons.speed,
-                      'Cluster',
+                      'Tatar',
                       task.clusterId
                           .substring(0, Math.min(8, task.clusterId.length)),
                     ),
@@ -743,6 +743,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
           style: semiBoldTextStyle(size: 18, color: Colors.white),
         ),
         backgroundColor: kbpBlue900,
+        automaticallyImplyLeading: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
@@ -815,7 +816,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            'Filter Cluster',
+                            'Filter Tatar',
                             style:
                                 semiBoldTextStyle(size: 14, color: kbpBlue900),
                           ),
@@ -865,7 +866,7 @@ class _AdminMapScreenState extends State<AdminMapScreen> {
                                       _clusterNames.keys.elementAt(index);
                                   final clusterName =
                                       _clusterNames[clusterId] ??
-                                          'Cluster #$index';
+                                          'Tatar #$index';
 
                                   return CheckboxListTile(
                                     value: _clusterFilters[clusterId] ?? true,

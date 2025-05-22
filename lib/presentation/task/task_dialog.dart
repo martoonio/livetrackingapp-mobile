@@ -34,7 +34,7 @@ class TaskDetailDialog extends StatelessWidget {
             Text('Informasi Tugas:', style: semiBoldTextStyle()),
             const SizedBox(height: 8),
             // _infoRow('ID Tugas', task.taskId),
-            _infoRow('Kendaraan', task.vehicleId),
+            // _infoRow('Kendaraan', task.vehicleId),
             if (task.assignedStartTime != null)
               _infoRow('Waktu Mulai',
                   "${formatDateFromString(task.assignedStartTime.toString())} Pukul ${formatTimeFromString(task.assignedStartTime.toString())}"),

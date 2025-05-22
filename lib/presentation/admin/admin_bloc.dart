@@ -238,7 +238,7 @@ class OfficersAndVehiclesError extends AdminState {
   OfficersAndVehiclesError(this.message);
 }
 
-// Cluster Account States
+// Tatar Account States
 class ClustersLoaded extends AdminState {
   final List<User> clusters;
 

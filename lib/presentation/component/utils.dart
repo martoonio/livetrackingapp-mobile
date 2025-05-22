@@ -161,6 +161,21 @@ Color getTimelinessColor(String? timeliness) {
   }
 }
 
+String getShiftDisplayText(ShiftType shift) {
+  switch (shift) {
+    case ShiftType.pagi:
+      return 'Pagi (07:00 - 15:00)';
+    case ShiftType.sore:
+      return 'Sore (15:00 - 23:00)';
+    case ShiftType.malam:
+      return 'Malam (23:00 - 07:00)';
+    case ShiftType.siang:
+      return 'Siang (07:00 - 19:00)';
+    case ShiftType.malamPanjang:
+      return 'Malam (19:00 - 07:00)';
+  }
+}
+
 Widget buildTimelinessIndicator(String? timeliness) {
   if (timeliness == null) {
     return Container(
@@ -214,4 +229,29 @@ String getTimelinessDetailDescription(
     return 'Patroli tidak diselesaikan dalam rentang waktu yang ditentukan.';
   }
   return 'Status ketepatan waktu tidak tersedia.';
+}
+
+DateTime? parseDateTime(dynamic value) {
+  if (value == null) return null;
+
+  try {
+    if (value is String) {
+      if (value.contains('.')) {
+        final parts = value.split('.');
+        final mainPart = parts[0];
+        final microPart = parts[1];
+
+        final cleanMicroPart =
+            microPart.length > 6 ? microPart.substring(0, 6) : microPart;
+
+        return DateTime.parse('$mainPart.$cleanMicroPart');
+      }
+      return DateTime.parse(value);
+    } else if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+  } catch (e) {
+    print('Error parsing datetime: $value, error: $e');
+  }
+  return null;
 }

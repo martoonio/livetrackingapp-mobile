@@ -1174,14 +1174,14 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
                     widget.task.officerName ?? 'Tidak diketahui',
                   ),
                 ),
-                Expanded(
-                  child: _buildInfoItem(
-                    'ID Kendaraan',
-                    widget.task.vehicleId.isEmpty
-                        ? 'Tidak ada'
-                        : widget.task.vehicleId,
-                  ),
-                ),
+                // Expanded(
+                //   child: _buildInfoItem(
+                //     'ID Kendaraan',
+                //     widget.task.vehicleId.isEmpty
+                //         ? 'Tidak ada'
+                //         : widget.task.vehicleId,
+                //   ),
+                // ),
               ],
             ),
           ],

@@ -167,7 +167,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   .then((_) => _loadData());
             },
             icon: const Icon(Icons.add),
-            label: const Text('Buat Cluster Baru'),
+            label: const Text('Buat Tatar Baru'),
             style: ElevatedButton.styleFrom(
               backgroundColor: kbpBlue900,
               foregroundColor: Colors.white,
@@ -197,7 +197,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _buildStatItem(
-              'Clusters',
+              'Tatar',
               state.clusters.length.toString(),
               kbpBlue900,
             ),
@@ -230,7 +230,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _buildStatItem(
-              'Clusters',
+              'Tatar',
               state.clusters.length.toString(),
               kbpBlue900,
             ),

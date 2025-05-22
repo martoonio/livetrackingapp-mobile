@@ -556,32 +556,6 @@ class _ClusterPatrolHistoryScreenState
                 ],
               ),
 
-              // Tambahkan informasi timeliness jika ada
-              if (task.timeliness != null) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(
-                      task.timeliness?.toLowerCase() == 'ontime'
-                          ? Icons.check_circle
-                          : task.timeliness?.toLowerCase() == 'late'
-                              ? Icons.access_time
-                              : Icons.error,
-                      size: 14,
-                      color: getTimelinessColor(task.timeliness),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      getTimelinessDescription(task.timeliness),
-                      style: mediumTextStyle(
-                        size: 13,
-                        color: getTimelinessColor(task.timeliness),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-
               const SizedBox(height: 12),
 
               // Progress
@@ -659,7 +633,15 @@ class _ClusterPatrolHistoryScreenState
     );
   }
 
+  // Perbaiki fungsi _showFilterSheet - fokus pada perbaikan tanggal
+
   void _showFilterSheet(BuildContext context) {
+    // Simpan state lokal filter yang aktif saat ini
+    String? tempOfficerId = selectedOfficerId;
+    String? tempStatus = selectedStatus;
+    DateTime? tempStartDate = startDate;
+    DateTime? tempEndDate = endDate;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -669,15 +651,70 @@ class _ClusterPatrolHistoryScreenState
       builder: (context) {
         return BlocBuilder<AdminBloc, AdminState>(
           builder: (context, state) {
-            // Perbaiki kondisi untuk memeriksa state yang benar
             if (state is ClusterTasksLoaded) {
               final officers = state.cluster!.officers ?? [];
 
               return StatefulBuilder(
-                builder: (context, setState) {
-                  return Padding(
+                builder: (context, setModalState) {
+                  // Fungsi pembantu untuk memilih tanggal mulai
+                  Future<void> _selectStartDate() async {
+                    final DateTime? picked = await showDatePicker(
+                      context: context,
+                      initialDate: tempStartDate ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2101),
+                      builder: (BuildContext context, Widget? child) {
+                        return Theme(
+                          data: ThemeData.light().copyWith(
+                            primaryColor: kbpBlue900,
+                            colorScheme: ColorScheme.light(primary: kbpBlue900),
+                            buttonTheme: const ButtonThemeData(
+                                textTheme: ButtonTextTheme.primary),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+
+                    if (picked != null) {
+                      setModalState(() {
+                        tempStartDate = picked;
+                        print('Tanggal mulai dipilih: $tempStartDate');
+                      });
+                    }
+                  }
+
+                  // Fungsi pembantu untuk memilih tanggal akhir
+                  Future<void> _selectEndDate() async {
+                    final DateTime? picked = await showDatePicker(
+                      context: context,
+                      initialDate: tempEndDate ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2101),
+                      builder: (BuildContext context, Widget? child) {
+                        return Theme(
+                          data: ThemeData.light().copyWith(
+                            primaryColor: kbpBlue900,
+                            colorScheme: ColorScheme.light(primary: kbpBlue900),
+                            buttonTheme: const ButtonThemeData(
+                                textTheme: ButtonTextTheme.primary),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+
+                    if (picked != null) {
+                      setModalState(() {
+                        tempEndDate = picked;
+                        print('Tanggal akhir dipilih: $tempEndDate');
+                      });
+                    }
+                  }
+
+                  return Container(
                     padding: EdgeInsets.only(
-                      bottom: MediaQuery.of(context).viewInsets.bottom,
+                      bottom: MediaQuery.of(context).viewInsets.bottom + 16,
                       left: 16,
                       right: 16,
                       top: 16,
@@ -715,7 +752,7 @@ class _ClusterPatrolHistoryScreenState
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: DropdownButtonFormField<String?>(
-                              value: selectedOfficerId,
+                              value: tempOfficerId,
                               decoration: const InputDecoration(
                                 contentPadding:
                                     EdgeInsets.symmetric(horizontal: 12),
@@ -735,8 +772,8 @@ class _ClusterPatrolHistoryScreenState
                                 }).toList(),
                               ],
                               onChanged: (value) {
-                                setState(() {
-                                  selectedOfficerId = value;
+                                setModalState(() {
+                                  tempOfficerId = value;
                                 });
                               },
                             ),
@@ -756,7 +793,7 @@ class _ClusterPatrolHistoryScreenState
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: DropdownButtonFormField<String?>(
-                              value: selectedStatus,
+                              value: tempStatus,
                               decoration: const InputDecoration(
                                 contentPadding:
                                     EdgeInsets.symmetric(horizontal: 12),
@@ -794,8 +831,8 @@ class _ClusterPatrolHistoryScreenState
                                 ),
                               ],
                               onChanged: (value) {
-                                setState(() {
-                                  selectedStatus = value;
+                                setModalState(() {
+                                  tempStatus = value;
                                 });
                               },
                             ),
@@ -803,7 +840,7 @@ class _ClusterPatrolHistoryScreenState
 
                           const SizedBox(height: 24),
 
-                          // Date range filter
+                          // Date range filter dengan MaterialButton (lebih responsif)
                           Text(
                             'Rentang Tanggal',
                             style: semiBoldTextStyle(size: 14),
@@ -812,46 +849,14 @@ class _ClusterPatrolHistoryScreenState
                           Row(
                             children: [
                               Expanded(
-                                child: TextButton(
-                                  onPressed: () async {
-                                    final selected = await showDatePicker(
-                                      context: context,
-                                      initialDate: startDate ?? DateTime.now(),
-                                      firstDate: DateTime(2020),
-                                      lastDate: DateTime(2101),
-                                      builder: (context, child) {
-                                        return Theme(
-                                          data: Theme.of(context).copyWith(
-                                            primaryColor: kbpBlue900,
-                                            // accentColor: kbpBlue900,
-                                            colorScheme: ColorScheme.light(
-                                                primary: kbpBlue900),
-                                            buttonTheme: ButtonThemeData(
-                                                textTheme:
-                                                    ButtonTextTheme.primary),
-                                          ),
-                                          child: child!,
-                                        );
-                                      },
-                                    );
-
-                                    if (selected != null) {
-                                      setState(() {
-                                        startDate = DateTime(
-                                          selected.year,
-                                          selected.month,
-                                          selected.day,
-                                        );
-                                      });
-                                    }
-                                  },
-                                  style: TextButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
-                                    backgroundColor: kbpBlue50,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
+                                child: MaterialButton(
+                                  onPressed: _selectStartDate,
+                                  color: kbpBlue50,
+                                  elevation: 0,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -860,8 +865,9 @@ class _ClusterPatrolHistoryScreenState
                                           size: 16, color: kbpBlue900),
                                       const SizedBox(width: 8),
                                       Text(
-                                        startDate != null
-                                            ? dateFormatter.format(startDate!)
+                                        tempStartDate != null
+                                            ? dateFormatter
+                                                .format(tempStartDate!)
                                             : 'Pilih Tanggal Mulai',
                                         style:
                                             mediumTextStyle(color: kbpBlue900),
@@ -872,46 +878,14 @@ class _ClusterPatrolHistoryScreenState
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: TextButton(
-                                  onPressed: () async {
-                                    final selected = await showDatePicker(
-                                      context: context,
-                                      initialDate: endDate ?? DateTime.now(),
-                                      firstDate: DateTime(2020),
-                                      lastDate: DateTime(2101),
-                                      builder: (context, child) {
-                                        return Theme(
-                                          data: Theme.of(context).copyWith(
-                                            primaryColor: kbpBlue900,
-                                            // accentColor: kbpBlue900,
-                                            colorScheme: ColorScheme.light(
-                                                primary: kbpBlue900),
-                                            buttonTheme: ButtonThemeData(
-                                                textTheme:
-                                                    ButtonTextTheme.primary),
-                                          ),
-                                          child: child!,
-                                        );
-                                      },
-                                    );
-
-                                    if (selected != null) {
-                                      setState(() {
-                                        endDate = DateTime(
-                                          selected.year,
-                                          selected.month,
-                                          selected.day,
-                                        );
-                                      });
-                                    }
-                                  },
-                                  style: TextButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 12),
-                                    backgroundColor: kbpBlue50,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
+                                child: MaterialButton(
+                                  onPressed: _selectEndDate,
+                                  color: kbpBlue50,
+                                  elevation: 0,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -920,8 +894,8 @@ class _ClusterPatrolHistoryScreenState
                                           size: 16, color: kbpBlue900),
                                       const SizedBox(width: 8),
                                       Text(
-                                        endDate != null
-                                            ? dateFormatter.format(endDate!)
+                                        tempEndDate != null
+                                            ? dateFormatter.format(tempEndDate!)
                                             : 'Pilih Tanggal Selesai',
                                         style:
                                             mediumTextStyle(color: kbpBlue900),
@@ -937,50 +911,57 @@ class _ClusterPatrolHistoryScreenState
 
                           // Filter actions
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              ElevatedButton(
-                                onPressed: () {
-                                  setState(() {
-                                    // Apply filters and close sheet
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      selectedOfficerId = tempOfficerId;
+                                      selectedStatus = tempStatus;
+                                      startDate = tempStartDate;
+                                      endDate = tempEndDate;
+                                    });
                                     Navigator.pop(context);
-                                  });
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: kbpBlue900,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 12, horizontal: 24),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: kbpBlue900,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12, horizontal: 24),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
                                   ),
+                                  child: const Text('Terapkan Filter'),
                                 ),
-                                child: Text('Terapkan Filter'),
                               ),
-                              TextButton(
-                                onPressed: () {
-                                  setState(() {
-                                    // Reset filters
-                                    selectedOfficerId = null;
-                                    selectedStatus = null;
-                                    startDate = null;
-                                    endDate = null;
-                                  });
-                                },
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 12, horizontal: 24),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextButton(
+                                  onPressed: () {
+                                    setModalState(() {
+                                      tempOfficerId = null;
+                                      tempStatus = null;
+                                      tempStartDate = null;
+                                      tempEndDate = null;
+                                    });
+                                  },
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12, horizontal: 24),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
                                   ),
-                                ),
-                                child: Text(
-                                  'Reset Filter',
-                                  style: TextStyle(color: dangerR500),
+                                  child: Text(
+                                    'Reset Filter',
+                                    style: TextStyle(color: dangerR500),
+                                  ),
                                 ),
                               ),
                             ],
                           ),
+                          const SizedBox(height: 16),
                         ],
                       ),
                     ),

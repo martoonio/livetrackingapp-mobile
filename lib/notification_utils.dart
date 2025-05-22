@@ -124,7 +124,7 @@ void _processNotificationWithContext(String? notificationType,
             final task = PatrolTask(
               taskId: taskId,
               userId: taskData['userId']?.toString() ?? '',
-              vehicleId: taskData['vehicleId']?.toString() ?? '',
+              // vehicleId: taskData['vehicleId']?.toString() ?? '',
               status: taskData['status']?.toString() ?? '',
               assignedStartTime: _parseDateTime(taskData['assignedStartTime']),
               assignedEndTime: _parseDateTime(taskData['assignedEndTime']),

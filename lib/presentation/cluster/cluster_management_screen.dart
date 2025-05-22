@@ -27,7 +27,7 @@
 //   Widget build(BuildContext context) {
 //     return Scaffold(
 //       appBar: AppBar(
-//         title: const Text('Manajemen Cluster'),
+//         title: const Text('Manajemen Tatar'),
 //         backgroundColor: kbpBlue900,
 //         foregroundColor: neutralWhite,
 //         elevation: 0,
@@ -73,7 +73,7 @@
 //                     24.height,
 //                     ElevatedButton.icon(
 //                       icon: const Icon(Icons.add),
-//                       label: const Text('Tambah Cluster Baru'),
+//                       label: const Text('Tambah Tatar Baru'),
 //                       style: ElevatedButton.styleFrom(
 //                         backgroundColor: kbpBlue900,
 //                         foregroundColor: neutralWhite,

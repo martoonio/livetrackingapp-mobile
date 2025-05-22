@@ -111,9 +111,9 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
       filteredTasks = filteredTasks.where((task) {
         final officerNameMatch =
             task.officerName?.toLowerCase().contains(searchTerm) ?? false;
-        final vehicleIdMatch =
-            task.vehicleId.toLowerCase().contains(searchTerm);
-        return officerNameMatch || vehicleIdMatch;
+        // final vehicleIdMatch =
+        //     task.vehicleId.toLowerCase().contains(searchTerm);
+        return officerNameMatch;
       }).toList();
     }
 
@@ -137,23 +137,23 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
     }
 
     // Filter berdasarkan kendaraan
-    if (_selectedVehicleId != null) {
-      filteredTasks = filteredTasks
-          .where((task) => task.vehicleId == _selectedVehicleId)
-          .toList();
-    }
+    // if (_selectedVehicleId != null) {
+    //   filteredTasks = filteredTasks
+    //       .where((task) => task.vehicleId == _selectedVehicleId)
+    //       .toList();
+    // }
 
     return filteredTasks;
   }
 
   void _showFilterBottomSheet() {
     // Daftar kendaraan unik
-    final vehicleIds = _historyTasks
-        .map((task) => task.vehicleId)
-        .where((id) => id.isNotEmpty)
-        .toSet()
-        .toList();
-    vehicleIds.sort();
+    // final vehicleIds = _historyTasks
+    //     .map((task) => task.vehicleId)
+    //     .where((id) => id.isNotEmpty)
+    //     .toSet()
+    //     .toList();
+    // vehicleIds.sort();
 
     showModalBottomSheet(
       context: context,
@@ -324,46 +324,46 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                       ),
                     ),
 
-                    if (vehicleIds.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        'Kendaraan',
-                        style: semiBoldTextStyle(size: 14),
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: neutral300),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: DropdownButtonFormField<String?>(
-                          value: _selectedVehicleId,
-                          decoration: const InputDecoration(
-                            contentPadding:
-                                EdgeInsets.symmetric(horizontal: 12),
-                            border: InputBorder.none,
-                            hintText: 'Semua Kendaraan',
-                          ),
-                          items: [
-                            const DropdownMenuItem<String?>(
-                              value: null,
-                              child: Text('Semua Kendaraan'),
-                            ),
-                            ...vehicleIds
-                                .map((id) => DropdownMenuItem<String>(
-                                      value: id,
-                                      child: Text(id),
-                                    ))
-                                .toList(),
-                          ],
-                          onChanged: (value) {
-                            setState(() {
-                              _selectedVehicleId = value;
-                            });
-                          },
-                        ),
-                      ),
-                    ],
+                    // if (vehicleIds.isNotEmpty) ...[
+                    //   const SizedBox(height: 16),
+                    //   Text(
+                    //     'Kendaraan',
+                    //     style: semiBoldTextStyle(size: 14),
+                    //   ),
+                    //   const SizedBox(height: 8),
+                    //   Container(
+                    //     decoration: BoxDecoration(
+                    //       border: Border.all(color: neutral300),
+                    //       borderRadius: BorderRadius.circular(8),
+                    //     ),
+                    //     child: DropdownButtonFormField<String?>(
+                    //       value: _selectedVehicleId,
+                    //       decoration: const InputDecoration(
+                    //         contentPadding:
+                    //             EdgeInsets.symmetric(horizontal: 12),
+                    //         border: InputBorder.none,
+                    //         hintText: 'Semua Kendaraan',
+                    //       ),
+                    //       items: [
+                    //         const DropdownMenuItem<String?>(
+                    //           value: null,
+                    //           child: Text('Semua Kendaraan'),
+                    //         ),
+                    //         ...vehicleIds
+                    //             .map((id) => DropdownMenuItem<String>(
+                    //                   value: id,
+                    //                   child: Text(id),
+                    //                 ))
+                    //             .toList(),
+                    //       ],
+                    //       onChanged: (value) {
+                    //         setState(() {
+                    //           _selectedVehicleId = value;
+                    //         });
+                    //       },
+                    //     ),
+                    //   ),
+                    // ],
 
                     const SizedBox(height: 24),
 
@@ -760,24 +760,24 @@ class _PatrolHistoryListScreenState extends State<PatrolHistoryListScreen> {
                                                     overflow:
                                                         TextOverflow.ellipsis,
                                                   ),
-                                                  const SizedBox(height: 4),
-                                                  Row(
-                                                    children: [
-                                                      const Icon(
-                                                          Icons.directions_car,
-                                                          size: 14,
-                                                          color: kbpBlue700),
-                                                      const SizedBox(width: 4),
-                                                      Text(
-                                                        task.vehicleId.isEmpty
-                                                            ? 'Tanpa Kendaraan'
-                                                            : task.vehicleId,
-                                                        style: regularTextStyle(
-                                                            size: 14,
-                                                            color: kbpBlue700),
-                                                      ),
-                                                    ],
-                                                  ),
+                                                  // const SizedBox(height: 4),
+                                                  // Row(
+                                                  //   children: [
+                                                  //     const Icon(
+                                                  //         Icons.directions_car,
+                                                  //         size: 14,
+                                                  //         color: kbpBlue700),
+                                                  //     const SizedBox(width: 4),
+                                                  //     Text(
+                                                  //       task.vehicleId.isEmpty
+                                                  //           ? 'Tanpa Kendaraan'
+                                                  //           : task.vehicleId,
+                                                  //       style: regularTextStyle(
+                                                  //           size: 14,
+                                                  //           color: kbpBlue700),
+                                                  //     ),
+                                                  //   ],
+                                                  // ),
                                                 ],
                                               ),
                                             ),

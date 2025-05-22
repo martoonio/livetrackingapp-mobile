@@ -41,7 +41,7 @@ class _ManageClustersScreenState extends State<ManageClustersScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Manajemen Cluster'),
+        title: const Text('Manajemen Tatar'),
         backgroundColor: kbpBlue900,
         foregroundColor: Colors.white,
         automaticallyImplyLeading: false,
