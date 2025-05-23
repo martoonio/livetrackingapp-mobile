@@ -413,6 +413,8 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
               assignedOfficerId: _selectedOfficerId!,
               assignedStartTime: _assignedStartTime,
               assignedEndTime: _assignedEndTime,
+              officerName: _selectedOfficer?.name,
+              clusterName: _selectedClusterName,
             ),
           );
 

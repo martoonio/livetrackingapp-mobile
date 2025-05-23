@@ -42,6 +42,8 @@ abstract class RouteRepository {
     required String? assignedOfficerId,
     required DateTime? assignedStartTime,
     required DateTime? assignedEndTime,
+    required String? officerName,
+    required String? clusterName,
   });
 
   // Get tasks for a specific cluster

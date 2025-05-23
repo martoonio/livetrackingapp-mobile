@@ -31,6 +31,8 @@ class CreateTask extends AdminEvent {
   final String assignedOfficerId;
   final DateTime assignedStartTime;
   final DateTime assignedEndTime;
+  final String? officerName;
+  final String? clusterName;
 
   const CreateTask({
     required this.clusterId,
@@ -39,6 +41,8 @@ class CreateTask extends AdminEvent {
     required this.assignedOfficerId,
     required this.assignedStartTime,
     required this.assignedEndTime,
+    this.officerName,
+    this.clusterName,
   });
 }
 
@@ -355,6 +359,8 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
         assignedOfficerId: event.assignedOfficerId,
         assignedStartTime: event.assignedStartTime,
         assignedEndTime: event.assignedEndTime,
+        officerName: event.officerName,
+        clusterName: event.clusterName,
       );
 
       emit(CreateTaskSuccess(taskId: taskId));

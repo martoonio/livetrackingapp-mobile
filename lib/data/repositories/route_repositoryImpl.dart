@@ -625,6 +625,8 @@ class RouteRepositoryImpl implements RouteRepository {
     required String? assignedOfficerId,
     required DateTime? assignedStartTime,
     required DateTime? assignedEndTime,
+    required String? officerName,
+    required String? clusterName,
   }) async {
     try {
       await _checkAuth();
@@ -641,6 +643,8 @@ class RouteRepositoryImpl implements RouteRepository {
         'assigned_route': assignedRoute,
         'assignedStartTime': assignedStartTime?.toIso8601String(),
         'assignedEndTime': assignedEndTime?.toIso8601String(),
+        'officerName': officerName,
+        'clusterName': clusterName,
         'status': 'active',
         'createdAt': DateTime.now().toIso8601String(),
         'route_path': null,
