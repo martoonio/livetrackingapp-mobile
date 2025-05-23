@@ -12,8 +12,11 @@ import 'package:livetrackingapp/domain/entities/report.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
+import 'package:livetrackingapp/presentation/report/bloc/report_state.dart';
 import 'package:livetrackingapp/services/location_validator.dart';
 import 'package:livetrackingapp/notification_utils.dart'; // Import notification_utils
+import 'package:path_provider/path_provider.dart';
+import 'package:wakelock/wakelock.dart';
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
@@ -59,6 +62,8 @@ class _MapScreenState extends State<MapScreen> {
 
   final Set<Polyline> _polylines = {};
   final List<LatLng> _routePoints = [];
+
+  bool isWakeLockEnabled = false;
 
   // Warna untuk polyline
   static const Color _polylineColor = kbpBlue900;
@@ -169,7 +174,31 @@ class _MapScreenState extends State<MapScreen> {
       context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
     });
 
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final patrolState = context.read<PatrolBloc>().state;
+      if (patrolState is PatrolLoaded && patrolState.isPatrolling) {
+        _enableWakelock();
+      }
+    });
+
     _initializeMap();
+  }
+
+  void _enableWakelock() async {
+    isWakeLockEnabled = await Wakelock.enabled;
+    if (!isWakeLockEnabled) {
+      Wakelock.enable();
+      print('Wakelock enabled.');
+      isWakeLockEnabled = true;
+    }
+  }
+
+  void _disableWakelock() async {
+    if (isWakeLockEnabled) {
+      Wakelock.disable();
+      print('Wakelock disabled.');
+      isWakeLockEnabled = false;
+    }
   }
 
   bool _canStartPatrol() {
@@ -1647,42 +1676,197 @@ class _MapScreenState extends State<MapScreen> {
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(
-                                onPressed: () {
+                                // Perbaikan pada bagian pengiriman report di _showReportDialog
+                                onPressed: () async {
                                   if (kejadianController.text.isNotEmpty &&
                                       catatanController.text.isNotEmpty &&
                                       selectedPhotos.isNotEmpty) {
-                                    // Simpan semua foto ke Firebase Storage
-                                    final report = Report(
-                                      id: DateTime.now()
-                                          .millisecondsSinceEpoch
-                                          .toString(),
-                                      title: kejadianController.text,
-                                      description: catatanController.text,
-                                      photoUrl: selectedPhotos
-                                          .map((photo) => photo.path)
-                                          .join(','), // Gabungkan path foto
-                                      timestamp: DateTime.now(),
-                                      latitude:
-                                          userCurrentLocation?.latitude ?? 0.0,
-                                      longitude:
-                                          userCurrentLocation?.longitude ?? 0.0,
-                                      taskId: widget.task.taskId,
+                                    // Tampilkan loading dialog dengan progress
+                                    BuildContext? loadingDialogContext;
+                                    showDialog(
+                                      context: context,
+                                      barrierDismissible: false,
+                                      builder: (dialogContext) {
+                                        loadingDialogContext = dialogContext;
+                                        return WillPopScope(
+                                          onWillPop: () async =>
+                                              false, // Prevent back button close
+                                          child: AlertDialog(
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                            ),
+                                            content: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const SizedBox(height: 16),
+                                                const CircularProgressIndicator(
+                                                  valueColor:
+                                                      AlwaysStoppedAnimation<
+                                                          Color>(kbpBlue900),
+                                                ),
+                                                const SizedBox(height: 24),
+                                                Text(
+                                                  'Mengirim laporan...',
+                                                  style: semiBoldTextStyle(
+                                                      size: 16),
+                                                  textAlign: TextAlign.center,
+                                                ),
+                                                const SizedBox(height: 8),
+                                                Text(
+                                                  'Proses upload foto sedang berlangsung',
+                                                  style: regularTextStyle(
+                                                      size: 14,
+                                                      color: neutral600),
+                                                  textAlign: TextAlign.center,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
                                     );
 
-                                    context
-                                        .read<ReportBloc>()
-                                        .add(CreateReportEvent(report));
-                                    showCustomSnackbar(
-                                      context: context,
-                                      title: 'Laporan berhasil dikirim',
-                                      subtitle:
-                                          'Terima kasih atas laporan Anda',
-                                      type: SnackbarType.success,
-                                    );
-                                    selectedPhotos.clear();
-                                    kejadianController.clear();
-                                    catatanController.clear();
-                                    Navigator.pop(context);
+                                    try {
+                                      // Buat ID unik dari Firebase daripada menggunakan format sendiri
+                                      final reportRef = FirebaseDatabase
+                                          .instance
+                                          .ref('reports')
+                                          .push();
+                                      final reportId = reportRef
+                                          .key!; // Auto-generated key dari Firebase
+
+                                      // Cek apakah directory reports sudah ada, jika tidak buat
+                                      final directory = Directory(
+                                          '${(await getApplicationDocumentsDirectory()).path}/reports');
+                                      if (!await directory.exists()) {
+                                        await directory.create();
+                                      }
+
+                                      // Simpan path gambar yang dipilih
+                                      final photoPathsList = <String>[];
+                                      for (int i = 0;
+                                          i < selectedPhotos.length;
+                                          i++) {
+                                        final photo = selectedPhotos[i];
+
+                                        // Simpan file sementara dengan nama yang unik
+                                        final savedFile = await photo.copy(
+                                            '${directory.path}/${reportId}_photo_$i.jpg');
+                                        photoPathsList.add(savedFile.path);
+                                        print(
+                                            'Saved photo to: ${savedFile.path}');
+                                      }
+
+                                      // Gabungkan path foto dengan koma
+                                      final combinedPhotoPath =
+                                          photoPathsList.join(',');
+
+                                      // Buat objek Report dengan ID otomatis dari Firebase
+                                      final report = Report(
+                                        id: reportId,
+                                        taskId: widget.task.taskId,
+                                        userId: widget.task.userId,
+                                        clusterId: widget.task.clusterId,
+                                        title: kejadianController.text,
+                                        description: catatanController.text,
+                                        photoUrl: combinedPhotoPath,
+                                        timestamp: DateTime.now(),
+                                        latitude:
+                                            userCurrentLocation?.latitude ??
+                                                0.0,
+                                        longitude:
+                                            userCurrentLocation?.longitude ??
+                                                0.0,
+                                      );
+
+                                      // Proses selanjutnya sama seperti sebelumnya
+                                      final reportCompleter = Completer<void>();
+
+                                      final subscription = context
+                                          .read<ReportBloc>()
+                                          .stream
+                                          .listen((state) {
+                                        if (state is ReportSuccess) {
+                                          reportCompleter.complete();
+                                        } else if (state is ReportFailure) {
+                                          reportCompleter
+                                              .completeError(state.error);
+                                        }
+                                      });
+
+                                      // Kirim report
+                                      context
+                                          .read<ReportBloc>()
+                                          .add(CreateReportEvent(report));
+
+                                      // Tunggu sampai report selesai dikirim atau error
+                                      try {
+                                        await reportCompleter.future;
+
+                                        // Bersihkan subscription setelah selesai
+                                        subscription.cancel();
+
+                                        // Tutup loading dialog
+                                        if (loadingDialogContext != null &&
+                                            mounted) {
+                                          Navigator.pop(loadingDialogContext!);
+                                        }
+
+                                        // Tutup dialog report
+                                        Navigator.pop(context);
+
+                                        // Reset form
+                                        selectedPhotos.clear();
+                                        kejadianController.clear();
+                                        catatanController.clear();
+
+                                        // Tampilkan notifikasi sukses
+                                        showCustomSnackbar(
+                                          context: context,
+                                          title: 'Laporan berhasil dikirim',
+                                          subtitle:
+                                              'Terima kasih atas laporan Anda',
+                                          type: SnackbarType.success,
+                                        );
+
+                                        print(
+                                            'Laporan berhasil dikirim: ${report.toJson()}');
+                                      } catch (error) {
+                                        // Bersihkan subscription jika error
+                                        subscription.cancel();
+
+                                        print('Error sending report: $error');
+
+                                        // Tutup loading dialog jika error
+                                        if (loadingDialogContext != null &&
+                                            mounted) {
+                                          Navigator.pop(loadingDialogContext!);
+                                        }
+
+                                        // Tampilkan error
+                                        showCustomSnackbar(
+                                          context: context,
+                                          title: 'Gagal mengirim laporan',
+                                          subtitle: 'Terjadi kesalahan: $error',
+                                          type: SnackbarType.danger,
+                                        );
+                                      }
+                                    } catch (e) {
+                                      // Tutup loading dialog jika error
+                                      if (loadingDialogContext != null &&
+                                          mounted) {
+                                        Navigator.pop(loadingDialogContext!);
+                                      }
+
+                                      print('Error in report preparation: $e');
+                                      showCustomSnackbar(
+                                        context: context,
+                                        title: 'Gagal mengirim laporan',
+                                        subtitle: 'Terjadi kesalahan: $e',
+                                        type: SnackbarType.danger,
+                                      );
+                                    }
                                   } else {
                                     showCustomSnackbar(
                                       context: context,
@@ -2874,6 +3058,7 @@ class _MapScreenState extends State<MapScreen> {
     _positionStreamSubscription?.cancel();
     _longPressTimer?.cancel();
     mapController?.dispose();
+    _disableWakelock();
     super.dispose();
   }
 
@@ -2890,6 +3075,14 @@ class _MapScreenState extends State<MapScreen> {
             subtitle: state.message,
             type: SnackbarType.danger,
           );
+        }
+
+        if (state is PatrolLoaded) {
+          if (state.isPatrolling) {
+            _enableWakelock(); // Aktifkan wakelock saat patroli aktif
+          } else {
+            _disableWakelock(); // Nonaktifkan wakelock saat patroli berhenti
+          }
         }
       },
       child: BlocBuilder<PatrolBloc, PatrolState>(builder: (context, state) {

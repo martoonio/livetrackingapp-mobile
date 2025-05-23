@@ -5,11 +5,14 @@ import 'package:intl/intl.dart';
 import 'package:livetrackingapp/domain/entities/patrol_task.dart';
 import 'package:livetrackingapp/domain/entities/report.dart';
 import 'package:livetrackingapp/presentation/admin/full_screen_map.dart';
+import 'package:livetrackingapp/presentation/component/photo_gallery_fullscreen.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:math' as Math;
 import 'package:firebase_database/firebase_database.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:carousel_slider/carousel_slider.dart';
+import 'package:dots_indicator/dots_indicator.dart';
 
 class PatrolHistoryScreen extends StatefulWidget {
   final PatrolTask task;
@@ -396,8 +399,14 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
     setState(() {});
   }
 
-  // Method untuk menampilkan detail laporan
   void _showReportDetail(Report report) {
+    // Parse multiple photo URLs
+    final List<String> photoUrls =
+        report.photoUrl.isNotEmpty ? report.photoUrl.split(',') : [];
+
+    // Current photo index untuk carousel
+    int currentPhotoIndex = 0;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -405,286 +414,383 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(16),
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.7,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Detail Laporan',
-                    style: boldTextStyle(size: 18),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Container(
+              padding: const EdgeInsets.all(16),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.85,
               ),
-              const Divider(),
-
-              // Content
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Judul laporan
                       Text(
-                        report.title,
-                        style: boldTextStyle(size: 16),
+                        'Detail Laporan',
+                        style: boldTextStyle(size: 18),
                       ),
-                      const SizedBox(height: 8),
-
-                      // Waktu laporan
-                      Row(
-                        children: [
-                          const Icon(Icons.access_time,
-                              size: 16, color: neutral500),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${dateFormatter.format(report.timestamp)} ${timeFormatter.format(report.timestamp)}',
-                            style:
-                                regularTextStyle(size: 14, color: neutral600),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Foto laporan
-                      if (report.photoUrl.isNotEmpty)
-                        GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => Scaffold(
-                                  appBar: AppBar(
-                                    title: Text('Foto Laporan'),
-                                    backgroundColor: kbpBlue900,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  body: Center(
-                                    child: InteractiveViewer(
-                                      panEnabled: true,
-                                      boundaryMargin: EdgeInsets.all(20),
-                                      minScale: 0.5,
-                                      maxScale: 3.0,
-                                      child: Image.network(
-                                        report.photoUrl,
-                                        loadingBuilder:
-                                            (context, child, loadingProgress) {
-                                          if (loadingProgress == null)
-                                            return child;
-                                          return Center(
-                                            child: CircularProgressIndicator(
-                                              value: loadingProgress
-                                                          .expectedTotalBytes !=
-                                                      null
-                                                  ? loadingProgress
-                                                          .cumulativeBytesLoaded /
-                                                      loadingProgress
-                                                          .expectedTotalBytes!
-                                                  : null,
-                                            ),
-                                          );
-                                        },
-                                        errorBuilder:
-                                            (context, error, stackTrace) {
-                                          return Column(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              Icon(Icons.broken_image,
-                                                  size: 64, color: neutral400),
-                                              SizedBox(height: 16),
-                                              Text('Gagal memuat gambar',
-                                                  style: mediumTextStyle()),
-                                            ],
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                          child: Hero(
-                            tag: 'report_image_${report.id}',
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: Image.network(
-                                report.photoUrl,
-                                height: 200,
-                                width: double.infinity,
-                                fit: BoxFit.cover,
-                                loadingBuilder:
-                                    (context, child, loadingProgress) {
-                                  if (loadingProgress == null) return child;
-                                  return Container(
-                                    height: 200,
-                                    color: neutral200,
-                                    child: Center(
-                                      child: CircularProgressIndicator(
-                                        value: loadingProgress
-                                                    .expectedTotalBytes !=
-                                                null
-                                            ? loadingProgress
-                                                    .cumulativeBytesLoaded /
-                                                loadingProgress
-                                                    .expectedTotalBytes!
-                                            : null,
-                                      ),
-                                    ),
-                                  );
-                                },
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Container(
-                                    height: 200,
-                                    color: neutral200,
-                                    child: const Center(
-                                      child: Icon(Icons.broken_image,
-                                          size: 48, color: neutral500),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        Container(
-                          height: 200,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: neutral200,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.image_not_supported,
-                                    size: 48, color: neutral500),
-                                SizedBox(height: 8),
-                                Text('Tidak ada foto'),
-                              ],
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 16),
-
-                      // Deskripsi
-                      Text(
-                        'Deskripsi',
-                        style: semiBoldTextStyle(size: 16),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        report.description,
-                        style: regularTextStyle(size: 14),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Lokasi
-                      Text(
-                        'Lokasi',
-                        style: semiBoldTextStyle(size: 16),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on,
-                              size: 16, color: kbpBlue700),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              '${report.latitude.toStringAsFixed(6)}, ${report.longitude.toStringAsFixed(6)}',
-                              style: regularTextStyle(size: 14),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.map_outlined,
-                                color: kbpBlue700),
-                            onPressed: () async {
-                              // Tutup dialog detail laporan dulu
-                              Navigator.pop(context);
-
-                              // Pindah ke tab peta (tab index 0)
-                              _tabController!.animateTo(0);
-
-                              // Tunggu sebentar agar UI terupdate
-                              await Future.delayed(
-                                  const Duration(milliseconds: 300));
-
-                              // Zoom ke lokasi laporan
-                              _mapController?.animateCamera(
-                                CameraUpdate.newLatLngZoom(
-                                  LatLng(report.latitude, report.longitude),
-                                  18, // Zoom level yang cukup detail
-                                ),
-                              );
-
-                              // Opsional: tampilkan snackbar sebagai feedback
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Menampilkan lokasi laporan di peta',
-                                    style: mediumTextStyle(color: Colors.white),
-                                  ),
-                                  backgroundColor: kbpBlue900,
-                                  duration: const Duration(seconds: 2),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            },
-                            tooltip: 'Lihat di Peta Patroli',
-                          ),
-                        ],
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
                       ),
                     ],
                   ),
-                ),
-              ),
+                  const Divider(),
 
-              // Button to view on map
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.map),
-                  label: const Text('Tampilkan di Peta'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kbpBlue900,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                  // Content
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Judul laporan
+                          Text(
+                            report.title,
+                            style: boldTextStyle(size: 16),
+                          ),
+                          const SizedBox(height: 8),
+
+                          // Waktu laporan
+                          Row(
+                            children: [
+                              const Icon(Icons.access_time,
+                                  size: 16, color: neutral500),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${dateFormatter.format(report.timestamp)} ${timeFormatter.format(report.timestamp)}',
+                                style: regularTextStyle(
+                                    size: 14, color: neutral600),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Foto laporan dengan carousel jika ada multiple photos
+                          if (photoUrls.isNotEmpty)
+                            Column(
+                              children: [
+                                GestureDetector(
+                                  onTap: () {
+                                    // Navigate to full screen gallery view
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => PhotoGalleryScreen(
+                                          title: 'Foto Laporan',
+                                          photoUrls: photoUrls,
+                                          initialIndex: currentPhotoIndex,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                          color: neutral300, width: 1),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        // Photo carousel
+                                        CarouselSlider(
+                                          options: CarouselOptions(
+                                            height: 240.0,
+                                            viewportFraction: 1.0,
+                                            enlargeCenterPage: false,
+                                            enableInfiniteScroll:
+                                                photoUrls.length > 1,
+                                            onPageChanged: (index, reason) {
+                                              setState(() {
+                                                currentPhotoIndex = index;
+                                              });
+                                            },
+                                          ),
+                                          items: photoUrls.map((url) {
+                                            return Builder(
+                                              builder: (BuildContext context) {
+                                                return ClipRRect(
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                  child: Stack(
+                                                    fit: StackFit.expand,
+                                                    children: [
+                                                      Image.network(
+                                                        url.trim(),
+                                                        fit: BoxFit.cover,
+                                                        loadingBuilder: (context,
+                                                            child,
+                                                            loadingProgress) {
+                                                          if (loadingProgress ==
+                                                              null)
+                                                            return child;
+                                                          return Container(
+                                                            color: neutral200,
+                                                            child: Center(
+                                                              child:
+                                                                  CircularProgressIndicator(
+                                                                value: loadingProgress
+                                                                            .expectedTotalBytes !=
+                                                                        null
+                                                                    ? loadingProgress
+                                                                            .cumulativeBytesLoaded /
+                                                                        loadingProgress
+                                                                            .expectedTotalBytes!
+                                                                    : null,
+                                                                color:
+                                                                    kbpBlue700,
+                                                              ),
+                                                            ),
+                                                          );
+                                                        },
+                                                        errorBuilder: (context,
+                                                            error, stackTrace) {
+                                                          return Container(
+                                                            color: neutral200,
+                                                            child: Center(
+                                                              child: Column(
+                                                                mainAxisAlignment:
+                                                                    MainAxisAlignment
+                                                                        .center,
+                                                                children: [
+                                                                  Icon(
+                                                                      Icons
+                                                                          .broken_image,
+                                                                      size: 48,
+                                                                      color:
+                                                                          neutral500),
+                                                                  const SizedBox(
+                                                                      height:
+                                                                          8),
+                                                                  Text(
+                                                                    'Gagal memuat gambar',
+                                                                    style: mediumTextStyle(
+                                                                        color:
+                                                                            neutral600),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                            ),
+                                                          );
+                                                        },
+                                                      ),
+
+                                                      // Overlay untuk menampilkan ikon zoom
+                                                      Positioned(
+                                                        right: 12,
+                                                        bottom: 12,
+                                                        child: Container(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .all(8),
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color: Colors.black
+                                                                .withOpacity(
+                                                                    0.6),
+                                                            shape:
+                                                                BoxShape.circle,
+                                                          ),
+                                                          child: const Icon(
+                                                            Icons.zoom_in,
+                                                            color: Colors.white,
+                                                            size: 24,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                              },
+                                            );
+                                          }).toList(),
+                                        ),
+
+                                        // Indicator dots untuk multiple photos
+                                        if (photoUrls.length > 1)
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: 8),
+                                            child: DotsIndicator(
+                                              dotsCount: photoUrls.length,
+                                              position:
+                                                  currentPhotoIndex.toDouble(),
+                                              decorator: DotsDecorator(
+                                                activeColor: kbpBlue900,
+                                                color: neutral300,
+                                                size: const Size(8, 8),
+                                                activeSize: const Size(10, 10),
+                                                spacing:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 4),
+                                              ),
+                                            ),
+                                          ),
+
+                                        // Counter text + lihat semua
+                                        if (photoUrls.length > 1)
+                                          Padding(
+                                            padding: const EdgeInsets.fromLTRB(
+                                                12, 0, 12, 8),
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Text(
+                                                  'Foto ${currentPhotoIndex + 1} dari ${photoUrls.length}',
+                                                  style: regularTextStyle(
+                                                      size: 13,
+                                                      color: neutral600),
+                                                ),
+                                                Text(
+                                                  'Lihat semua foto',
+                                                  style: semiBoldTextStyle(
+                                                    size: 13,
+                                                    color: kbpBlue900,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          else
+                            Container(
+                              height: 200,
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: neutral200,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.image_not_supported,
+                                        size: 48, color: neutral500),
+                                    SizedBox(height: 8),
+                                    Text('Tidak ada foto'),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 16),
+
+                          // Deskripsi
+                          Text(
+                            'Deskripsi',
+                            style: semiBoldTextStyle(size: 16),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            report.description,
+                            style: regularTextStyle(size: 14),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Lokasi
+                          Text(
+                            'Lokasi',
+                            style: semiBoldTextStyle(size: 16),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(Icons.location_on,
+                                  size: 16, color: kbpBlue700),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  '${report.latitude.toStringAsFixed(6)}, ${report.longitude.toStringAsFixed(6)}',
+                                  style: regularTextStyle(size: 14),
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.map_outlined,
+                                    color: kbpBlue700),
+                                onPressed: () async {
+                                  // Tutup dialog detail laporan dulu
+                                  Navigator.pop(context);
+
+                                  // Pindah ke tab peta (tab index 0)
+                                  _tabController!.animateTo(0);
+
+                                  // Tunggu sebentar agar UI terupdate
+                                  await Future.delayed(
+                                      const Duration(milliseconds: 300));
+
+                                  // Zoom ke lokasi laporan
+                                  _mapController?.animateCamera(
+                                    CameraUpdate.newLatLngZoom(
+                                      LatLng(report.latitude, report.longitude),
+                                      18, // Zoom level yang cukup detail
+                                    ),
+                                  );
+
+                                  // Opsional: tampilkan snackbar sebagai feedback
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Menampilkan lokasi laporan di peta',
+                                        style: mediumTextStyle(
+                                            color: Colors.white),
+                                      ),
+                                      backgroundColor: kbpBlue900,
+                                      duration: const Duration(seconds: 2),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                },
+                                tooltip: 'Lihat di Peta Patroli',
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  onPressed: () {
-                    Navigator.pop(context);
 
-                    // Pindah ke tab peta dan zoom ke posisi laporan
-                    _tabController!.animateTo(0); // Tab peta adalah index 0
+                  // Button to view on map
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.map),
+                      label: const Text('Tampilkan di Peta'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kbpBlue900,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(context);
 
-                    // Zoom ke lokasi laporan
-                    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(
-                      LatLng(report.latitude, report.longitude),
-                      18,
-                    ));
-                  },
-                ),
+                        // Pindah ke tab peta dan zoom ke posisi laporan
+                        _tabController!.animateTo(0); // Tab peta adalah index 0
+
+                        // Zoom ke lokasi laporan
+                        _mapController
+                            ?.animateCamera(CameraUpdate.newLatLngZoom(
+                          LatLng(report.latitude, report.longitude),
+                          18,
+                        ));
+                      },
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -734,6 +840,11 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
       separatorBuilder: (context, index) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
         final report = _reports[index];
+
+        // Parse multiple photo URLs
+        final List<String> photoUrls =
+            report.photoUrl.isNotEmpty ? report.photoUrl.split(',') : [];
+
         return Card(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -789,47 +900,79 @@ class _PatrolHistoryScreenState extends State<PatrolHistoryScreen>
                 ),
 
                 // Gambar laporan
-                if (report.photoUrl.isNotEmpty)
-                  ClipRRect(
-                    borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(12),
-                      bottomRight: Radius.circular(12),
-                    ),
-                    child: Image.network(
-                      report.photoUrl,
-                      height: 180,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
+                if (photoUrls.isNotEmpty)
+                  Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: const BorderRadius.only(
+                          bottomLeft: Radius.circular(12),
+                          bottomRight: Radius.circular(12),
+                        ),
+                        child: Image.network(
+                          photoUrls.first.trim(), // Show first image in list
                           height: 180,
-                          color: neutral200,
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              value: loadingProgress.expectedTotalBytes != null
-                                  ? loadingProgress.cumulativeBytesLoaded /
-                                      loadingProgress.expectedTotalBytes!
-                                  : null,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return Container(
+                              height: 180,
+                              color: neutral200,
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  value: loadingProgress.expectedTotalBytes !=
+                                          null
+                                      ? loadingProgress.cumulativeBytesLoaded /
+                                          loadingProgress.expectedTotalBytes!
+                                      : null,
+                                ),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              height: 180,
+                              color: neutral200,
+                              child: const Center(
+                                child: Icon(Icons.broken_image,
+                                    size: 48, color: neutral500),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+
+                      // Photo count badge if multiple photos
+                      if (photoUrls.length > 1)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.7),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.photo_library,
+                                    color: Colors.white, size: 14),
+                                const SizedBox(width: 4),
+                                Text(
+                                  '${photoUrls.length}',
+                                  style: mediumTextStyle(
+                                      size: 12, color: Colors.white),
+                                ),
+                              ],
                             ),
                           ),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          height: 180,
-                          color: neutral200,
-                          child: const Center(
-                            child: Icon(Icons.broken_image,
-                                size: 48, color: neutral500),
-                          ),
-                        );
-                      },
-                    ),
+                        ),
+                    ],
                   ),
 
                 // Deskripsi jika tidak ada foto
-                if (report.photoUrl.isEmpty)
+                if (photoUrls.isEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     child: Column(

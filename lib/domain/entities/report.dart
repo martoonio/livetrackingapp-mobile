@@ -1,6 +1,8 @@
 class Report {
   final String id;
   final String taskId;
+  final String? userId; // Tambahkan userId (nullable)
+  final String? clusterId; // Tambahkan clusterId (nullable)
   final String title;
   final String description;
   final double latitude;
@@ -11,6 +13,8 @@ class Report {
   Report({
     required this.id,
     required this.taskId,
+    this.userId,
+    this.clusterId,
     required this.title,
     required this.description,
     required this.latitude,
@@ -23,10 +27,15 @@ class Report {
     return Report(
       id: id,
       taskId: json['taskId'] as String? ?? '',
+      userId: json['userId'] as String?,
+      clusterId: json['clusterId'] as String?,
       title: json['title'] as String? ?? '',
       description: json['description'] as String? ?? '',
-      latitude: json['latitude'] is num ? (json['latitude'] as num).toDouble() : 0.0,
-      longitude: json['longitude'] is num ? (json['longitude'] as num).toDouble() : 0.0,
+      latitude:
+          json['latitude'] is num ? (json['latitude'] as num).toDouble() : 0.0,
+      longitude: json['longitude'] is num
+          ? (json['longitude'] as num).toDouble()
+          : 0.0,
       photoUrl: json['photoUrl'] as String? ?? '',
       timestamp: json['timestamp'] != null
           ? DateTime.parse(json['timestamp'] as String)
@@ -37,6 +46,8 @@ class Report {
   Map<String, dynamic> toJson() {
     return {
       'taskId': taskId,
+      'userId': userId,
+      'clusterId': clusterId,
       'title': title,
       'description': description,
       'latitude': latitude,
