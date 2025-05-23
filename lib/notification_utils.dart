@@ -342,12 +342,12 @@ void navigateToAdminMapForMissedCheckpoints(BuildContext context, String taskId,
   } catch (e) {
     log('Failed to navigate to PatrolHistoryScreen: $e');
     // Tampilkan pesan error
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Gagal membuka detail patroli: $e'),
-        backgroundColor: dangerR300,
-      ),
-    );
+    // ScaffoldMessenger.of(context).showSnackBar(
+    //   SnackBar(
+    //     content: Text('Gagal membuka detail patroli: $e'),
+    //     backgroundColor: dangerR300,
+    //   ),
+    // );
   }
 }
 
@@ -385,12 +385,12 @@ void navigateToAdminMapForMockLocation(BuildContext context, String taskId,
     log('Navigation to AdminMapScreen for mock location successful');
   } catch (e) {
     log('Failed to navigate to AdminMapScreen for mock location: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Gagal membuka peta admin: $e'),
-        backgroundColor: dangerR300,
-      ),
-    );
+    // ScaffoldMessenger.of(context).showSnackBar(
+    //   SnackBar(
+    //     content: Text('Gagal membuka peta admin: $e'),
+    //     backgroundColor: dangerR300,
+    //   ),
+    // );
   }
 }
 // --- AKHIR FITUR BARU ---
@@ -821,6 +821,114 @@ Future<void> sendMissedCheckpointsNotification({
   required List<List<double>> missedCheckpoints,
 }) async {
   try {
+    // PERBAIKAN: Cek dan ambil data lengkap dari database Firebase
+    String displayOfficerName = officerName;
+    String displayClusterName = clusterName;
+
+    print('Original officer name: $officerName');
+    print('Original cluster name: $clusterName');
+
+    // Selalu fetch data untuk memastikan akurasi, tidak hanya jika format default
+    try {
+      // Ambil data langsung dari task di Firebase
+      final taskSnapshot = await FirebaseDatabase.instance
+          .ref('tasks')
+          .child(patrolTaskId)
+          .get();
+
+      if (taskSnapshot.exists) {
+        final taskData = taskSnapshot.value as Map<dynamic, dynamic>;
+
+        // Gunakan officerName dan clusterName dari task jika tersedia
+        if (taskData['officerName'] != null) {
+          displayOfficerName = taskData['officerName'].toString();
+          print('Using task officerName from DB: $displayOfficerName');
+        }
+
+        if (taskData['clusterName'] != null) {
+          displayClusterName = taskData['clusterName'].toString();
+          print('Using task clusterName from DB: $displayClusterName');
+        }
+
+        // Jika masih tidak ada, coba ambil dari user data
+        if ((displayOfficerName.trim().isEmpty ||
+                displayOfficerName == "Unknown Officer") &&
+            taskData['userId'] != null) {
+          final officerId = taskData['userId'].toString();
+          final clusterId = taskData['clusterId']?.toString() ?? '';
+
+          if (clusterId.isNotEmpty) {
+            try {
+              final officersSnapshot = await FirebaseDatabase.instance
+                  .ref('users')
+                  .child(clusterId)
+                  .child('officers')
+                  .get();
+
+              if (officersSnapshot.exists) {
+                final officersData =
+                    officersSnapshot.value as Map<dynamic, dynamic>;
+
+                // Cari officer berdasarkan ID
+                officersData.forEach((key, value) {
+                  if (value is Map && value['id'] == officerId) {
+                    displayOfficerName =
+                        value['name']?.toString() ?? "Unknown Officer";
+                    print(
+                        'Found officer name in officers collection: $displayOfficerName');
+                  }
+                });
+              }
+            } catch (e) {
+              print('Error finding officer in users/$clusterId/officers: $e');
+            }
+          }
+        }
+
+        // Jika cluster name masih kosong atau default
+        if ((displayClusterName.trim().isEmpty ||
+                displayClusterName == "No Tatar") &&
+            taskData['clusterId'] != null) {
+          final clusterId = taskData['clusterId'].toString();
+
+          try {
+            final clusterSnapshot = await FirebaseDatabase.instance
+                .ref('users')
+                .child(clusterId)
+                .get();
+
+            if (clusterSnapshot.exists) {
+              final clusterData =
+                  clusterSnapshot.value as Map<dynamic, dynamic>;
+              if (clusterData['name'] != null) {
+                displayClusterName = clusterData['name'].toString();
+                print(
+                    'Using cluster name from users collection: $displayClusterName');
+              }
+            }
+          } catch (e) {
+            print('Error finding cluster name: $e');
+          }
+        }
+      }
+    } catch (e) {
+      print('Error fetching detailed data for notification: $e');
+      // Fallback to defaults if fetching fails
+    }
+
+    // Fallback values jika masih kosong
+    if (displayOfficerName.trim().isEmpty ||
+        displayOfficerName == "Unknown Officer") {
+      displayOfficerName = "Petugas";
+    }
+
+    if (displayClusterName.trim().isEmpty || displayClusterName == "No Tatar") {
+      displayClusterName = "Tatar";
+    }
+
+    print('Final officer name for notification: $displayOfficerName');
+    print('Final cluster name for notification: $displayClusterName');
+
     // Ambil admin bearer token
     final bearerToken = await NotificationAccessToken.getToken;
     if (bearerToken == null) {
@@ -843,7 +951,7 @@ Future<void> sendMissedCheckpointsNotification({
     int totalMissed = missedCheckpoints.length;
     String title = 'Titik Patroli Terlewat';
     String body =
-        '$officerName dari $clusterName melewatkan $totalMissed titik patroli';
+        '$displayOfficerName dari $displayClusterName melewatkan $totalMissed titik patroli';
 
     // Konversi koordinat ke string untuk FCM payload
     // FCM data hanya menerima string sebagai value
@@ -858,8 +966,8 @@ Future<void> sendMissedCheckpointsNotification({
       'type': 'missed_checkpoints',
       'task_id': patrolTaskId,
       'officer_id': officerId,
-      'officer_name': officerName,
-      'cluster_name': clusterName,
+      'officer_name': displayOfficerName,
+      'cluster_name': displayClusterName,
       'missed_checkpoints':
           missedCheckpointsJson, // Koordinat dalam bentuk string JSON
       'total_missed': totalMissed.toString(),
