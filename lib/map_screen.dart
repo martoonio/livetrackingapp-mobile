@@ -16,11 +16,11 @@ import 'package:livetrackingapp/presentation/report/bloc/report_state.dart';
 import 'package:livetrackingapp/services/location_validator.dart';
 import 'package:livetrackingapp/notification_utils.dart'; // Import notification_utils
 import 'package:path_provider/path_provider.dart';
-import 'package:wakelock/wakelock.dart';
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 class MapScreen extends StatefulWidget {
   final PatrolTask task;
@@ -185,9 +185,9 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _enableWakelock() async {
-    isWakeLockEnabled = await Wakelock.enabled;
+    isWakeLockEnabled = await WakelockPlus.enabled;
     if (!isWakeLockEnabled) {
-      Wakelock.enable();
+      WakelockPlus.enable();
       print('Wakelock enabled.');
       isWakeLockEnabled = true;
     }
@@ -195,7 +195,7 @@ class _MapScreenState extends State<MapScreen> {
 
   void _disableWakelock() async {
     if (isWakeLockEnabled) {
-      Wakelock.disable();
+      WakelockPlus.disable();
       print('Wakelock disabled.');
       isWakeLockEnabled = false;
     }
