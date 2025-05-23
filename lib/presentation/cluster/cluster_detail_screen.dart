@@ -57,23 +57,40 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     );
     _loadClusterDetails();
 
-    // Tambahkan listener untuk mendeteksi perubahan tab
+    // Tambahkan listener untuk mendeteksi perubahan tab dengan post-frame callback
     _tabController.addListener(() {
       // Jika tab yang aktif adalah tab Riwayat (index 1)
       if (_tabController.index == 1) {
-        _loadPatrolHistory();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _loadPatrolHistory();
+          }
+        });
       }
     });
+
+    // Jika tab awal adalah Riwayat, muat data riwayat setelah build
+    if (widget.initialTab == 1) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _loadPatrolHistory();
+        }
+      });
+    }
   }
 
 // Update metode _loadPatrolHistory untuk menggunakan Realtime Database
   Future<void> _loadPatrolHistory() async {
-    if (_isHistoryLoading == false) return; // Hindari reload jika sudah dimuat
+    // Periksa jika sudah loading atau widget tidak mounted
+    if (!mounted || (_isHistoryLoading && _errorMessage == null)) return;
 
-    setState(() {
-      _isHistoryLoading = true;
-      _errorMessage = null;
-    });
+    // Set loading state
+    if (mounted) {
+      setState(() {
+        _isHistoryLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       // Gunakan Firebase Realtime Database untuk mendapatkan data
@@ -85,6 +102,9 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
           .orderByChild('clusterId')
           .equalTo(widget.clusterId)
           .get();
+
+      // Pastikan widget masih mounted sebelum setState
+      if (!mounted) return;
 
       if (tasksSnapshot.exists) {
         // Reset counter
@@ -129,37 +149,45 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
           }
         });
 
-        setState(() {
-          _totalPatrols = totalPatrols;
-          _ongoingPatrols = ongoingPatrols;
-          _latePatrols = latePatrols;
-          _expiredPatrols = expiredPatrols;
-          _invalidPatrols = invalidPatrols;
-          _ontimePatrols = ontimePatrols;
-          _activePatrols = activePatrols;
-          _cancelledPatrols = cancelledPatrols;
-          _isHistoryLoading = false;
-        });
+        // Update state jika masih mounted
+        if (mounted) {
+          setState(() {
+            _totalPatrols = totalPatrols;
+            _ongoingPatrols = ongoingPatrols;
+            _latePatrols = latePatrols;
+            _expiredPatrols = expiredPatrols;
+            _invalidPatrols = invalidPatrols;
+            _ontimePatrols = ontimePatrols;
+            _activePatrols = activePatrols;
+            _cancelledPatrols = cancelledPatrols;
+            _isHistoryLoading = false;
+          });
+        }
       } else {
-        // Jika tidak ada data
-        setState(() {
-          _totalPatrols = 0;
-          _ongoingPatrols = 0;
-          _latePatrols = 0;
-          _expiredPatrols = 0;
-          _invalidPatrols = 0;
-          _ontimePatrols = 0;
-          _activePatrols = 0;
-          _cancelledPatrols = 0;
-          _isHistoryLoading = false;
-        });
+        // Jika tidak ada data dan masih mounted
+        if (mounted) {
+          setState(() {
+            _totalPatrols = 0;
+            _ongoingPatrols = 0;
+            _latePatrols = 0;
+            _expiredPatrols = 0;
+            _invalidPatrols = 0;
+            _ontimePatrols = 0;
+            _activePatrols = 0;
+            _cancelledPatrols = 0;
+            _isHistoryLoading = false;
+          });
+        }
       }
     } catch (e) {
       print('Error loading patrol history: $e');
-      setState(() {
-        _errorMessage = e.toString();
-        _isHistoryLoading = false;
-      });
+      // Pastikan masih mounted sebelum update state
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString();
+          _isHistoryLoading = false;
+        });
+      }
     }
   }
 
@@ -268,9 +296,14 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
   // Perbarui method _buildHistoryTab() untuk menampilkan statistik patroli
 
   Widget _buildHistoryTab(User cluster) {
-    // Trigger loading history jika belum dimuat
+    // Trigger loading history jika belum dimuat, tapi gunakan post-frame callback
     if (_isHistoryLoading && _errorMessage == null) {
-      _loadPatrolHistory();
+      // Tunda hingga setelah build frame selesai
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _loadPatrolHistory();
+        }
+      });
     }
 
     // Handle loading state
