@@ -7,6 +7,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/cluster/cluster_patrol_history_screen.dart';
+import 'package:livetrackingapp/presentation/cluster/edit_map_screen.dart';
 import 'package:livetrackingapp/presentation/cluster/officer_management_screen.dart';
 import 'package:livetrackingapp/presentation/component/map_section.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
@@ -46,6 +47,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
   bool _isHistoryLoading = true;
   String? _errorMessage;
 
+  bool _isHistoryLoadingProcessing = false; // Tambahkan flag ini
+
 // Pada metode initState, tambahkan:
   @override
   void initState() {
@@ -57,10 +60,12 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     );
     _loadClusterDetails();
 
-    // Tambahkan listener untuk mendeteksi perubahan tab dengan post-frame callback
+    // Tambahkan listener untuk mendeteksi perubahan tab
     _tabController.addListener(() {
-      // Jika tab yang aktif adalah tab Riwayat (index 1)
-      if (_tabController.index == 1) {
+      // Jika tab yang aktif adalah tab Riwayat (index 1) dan belum dimuat
+      if (_tabController.index == 1 &&
+          _isHistoryLoading &&
+          !_isHistoryLoadingProcessing) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             _loadPatrolHistory();
@@ -72,7 +77,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     // Jika tab awal adalah Riwayat, muat data riwayat setelah build
     if (widget.initialTab == 1) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
+        if (mounted && _isHistoryLoading && !_isHistoryLoadingProcessing) {
           _loadPatrolHistory();
         }
       });
@@ -81,8 +86,14 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
 
 // Update metode _loadPatrolHistory untuk menggunakan Realtime Database
   Future<void> _loadPatrolHistory() async {
-    // Periksa jika sudah loading atau widget tidak mounted
-    if (!mounted || (_isHistoryLoading && _errorMessage == null)) return;
+    // PERBAIKAN: Hanya return jika tidak mounted
+    if (!mounted) return;
+
+    // Mencegah multiple calls jika sudah di proses loading
+    if (_isHistoryLoadingProcessing) return;
+
+    // Set flag processing to true
+    _isHistoryLoadingProcessing = true;
 
     // Set loading state
     if (mounted) {
@@ -188,6 +199,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
           _isHistoryLoading = false;
         });
       }
+    } finally {
+      _isHistoryLoadingProcessing = false;
     }
   }
 
@@ -1071,17 +1084,37 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
   Widget _buildMapTab(User cluster) {
     return Stack(
       children: [
-        // Map fullscreen
+        // Map fullscreen - Ganti MapSection dengan GoogleMap langsung
         SizedBox(
           height: MediaQuery.of(context).size.height,
-          child: MapSection(
-            mapController: _mapController,
+          child: GoogleMap(
+            mapType: MapType.normal,
+            initialCameraPosition: _selectedPoints.isNotEmpty
+                ? CameraPosition(
+                    target: _selectedPoints.first,
+                    zoom: 17,
+                  )
+                : const CameraPosition(
+                    target: LatLng(-6.8737, 107.5757), // Default: Bandung
+                    zoom: 14,
+                  ),
             markers: _markers,
-            onMapTap: _handleMapTap,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: true,
+            zoomControlsEnabled: true,
+            onMapCreated: (GoogleMapController controller) {
+              _mapController = controller;
+              // Zoom to points jika sudah ada titik
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted && _selectedPoints.isNotEmpty) {
+                  _zoomToSelectedPoints();
+                }
+              });
+            },
           ),
         ),
 
-        // Edit toggle and actions bar
+        // Info dan tombol edit
         Positioned(
           top: 16,
           left: 16,
@@ -1103,77 +1136,29 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                         'Titik Patroli (${_selectedPoints.length})',
                         style: boldTextStyle(size: 16),
                       ),
-                      Switch(
-                        value: _isEditingPoints,
-                        onChanged: (value) {
-                          setState(() {
-                            _isEditingPoints = value;
-                            if (!value) {
-                              // Reset to original points when exiting edit mode
-                              _setupMarkersFromCluster(cluster);
-                            }
-                          });
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          // Navigasi ke halaman edit map terpisah
+                          _navigateToEditMapScreen(cluster);
                         },
-                        activeColor: kbpBlue900,
-                        inactiveTrackColor: neutral600,
+                        icon: const Icon(Icons.edit_location_alt,
+                            color: Colors.white),
+                        label: const Text('Edit Titik'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kbpBlue900,
+                          foregroundColor: Colors.white,
+                        ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _isEditingPoints
-                        ? 'Mode Edit: Klik pada peta untuk menambah titik'
-                        : 'Mode Lihat: Aktifkan switch untuk mengedit',
+                    'Klik tombol Edit untuk mengedit titik patroli di halaman penuh',
                     style: regularTextStyle(
-                      color: kbpBlue900,
+                      color: neutral600,
                       size: 14,
                     ),
                   ),
-                  if (_isEditingPoints) ...[
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _selectedPoints.isEmpty
-                                ? null
-                                : () {
-                                    setState(() {
-                                      if (_selectedPoints.isNotEmpty) {
-                                        _selectedPoints.removeLast();
-                                        _updateMarkers();
-                                      }
-                                    });
-                                  },
-                            icon: const Icon(Icons.undo, color: Colors.white),
-                            label: const Text('Hapus Titik Terakhir'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: kbpBlue700,
-                              foregroundColor: Colors.white,
-                              disabledBackgroundColor: neutral300,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _selectedPoints.isEmpty
-                                ? null
-                                : () {
-                                    _showSavePointsConfirmation();
-                                  },
-                            icon: const Icon(Icons.save, color: Colors.white),
-                            label: const Text('Simpan Perubahan'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: kbpBlue900,
-                              foregroundColor: Colors.white,
-                              disabledBackgroundColor: neutral300,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -1181,6 +1166,31 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
         ),
       ],
     );
+  }
+
+// Tambahkan method untuk navigasi ke halaman edit map
+  void _navigateToEditMapScreen(User cluster) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditMapScreen(
+          clusterId: widget.clusterId,
+          points: List<LatLng>.from(_selectedPoints),
+          clusterName: cluster.name,
+        ),
+      ),
+    );
+
+    if (result != null && result is List<LatLng>) {
+      setState(() {
+        _selectedPoints.clear();
+        _selectedPoints.addAll(result);
+        _updateMarkers();
+      });
+
+      // Refresh cluster data
+      _loadClusterDetails();
+    }
   }
 
   dynamic _handleMapTap(LatLng position) {
