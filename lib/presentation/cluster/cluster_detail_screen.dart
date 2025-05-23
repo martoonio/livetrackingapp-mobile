@@ -596,18 +596,18 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                     style: boldTextStyle(size: 18),
                   ),
                   const Divider(),
-                  _buildActionButton(
-                    icon: Icons.edit,
-                    label: 'Edit Informasi Tatar',
-                    onPressed: () {
-                      // Navigasi ke halaman edit
-                    },
-                  ),
+                  // _buildActionButton(
+                  //   icon: Icons.edit,
+                  //   label: 'Edit Informasi Tatar',
+                  //   onPressed: () {
+                  //     // Navigasi ke halaman edit
+                  //   },
+                  // ),
                   _buildActionButton(
                     icon: Icons.people,
                     label: 'Kelola Petugas',
                     onPressed: () {
-                      _tabController.animateTo(1); // Pindah ke tab Petugas
+                      _tabController.animateTo(2); // Pindah ke tab Petugas
                     },
                   ),
                   _buildActionButton(
@@ -615,22 +615,14 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
                     label: 'Edit Titik Patroli',
                     onPressed: () {
                       _tabController
-                          .animateTo(2); // Pindah ke tab Titik Patroli
+                          .animateTo(3); // Pindah ke tab Titik Patroli
                     },
                   ),
                   _buildActionButton(
                     icon: Icons.task_alt,
                     label: 'Lihat Riwayat Patroli',
                     onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ClusterPatrolHistoryScreen(
-                            clusterId: widget.clusterId,
-                            clusterName: _cluster?.name ?? '',
-                          ),
-                        ),
-                      );
+                      _tabController.animateTo(1);
                     },
                   ),
                   _buildActionButton(
