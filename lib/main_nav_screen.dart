@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:livetrackingapp/admin_map_screen.dart';
+import 'package:livetrackingapp/presentation/auth/bloc/auth_bloc.dart';
 import 'package:livetrackingapp/presentation/component/customNavBar.dart';
+import 'package:livetrackingapp/presentation/survey/survey_list_screen.dart';
 
 import 'home_screen.dart';
 import 'presentation/admin/admin_dashboard_screen.dart';
@@ -66,18 +69,52 @@ class MainNavigationScreenState extends State<MainNavigationScreen>
         // --- AKHIR FITUR BARU ---
         AdminDashboardScreen(key: _getKeyForIndex(1)),
         ManageClustersScreen(key: _getKeyForIndex(2)),
-        ProfileScreen(key: _getKeyForIndex(3)),
+        // Tambahkan Survey List Screen disini
+        SurveyListScreen(
+          key: _getKeyForIndex(3),
+          userId: getCurrentUserId(), // Implementasikan metode ini untuk mendapatkan user ID
+          userName: getCurrentUserName(), // Implementasikan metode ini untuk mendapatkan user name
+        ),
+        ProfileScreen(key: _getKeyForIndex(4)),
       ];
     } else {
-      // Normal users get HomeScreen
+      // Normal users get HomeScreen and now also SurveyListScreen
       _pages = [
         HomeScreen(key: _getKeyForIndex(0)),
-        ProfileScreen(key: _getKeyForIndex(1)),
+        // Tambahkan Survey List Screen untuk user biasa
+        SurveyListScreen(
+          key: _getKeyForIndex(1),
+          userId: getCurrentUserId(),
+          userName: getCurrentUserName(),
+        ),
+        ProfileScreen(key: _getKeyForIndex(2)),
       ];
     }
 
     // Inisialisasi PageController
     _pageController = PageController(initialPage: _selectedIndex);
+  }
+
+  // Mendapatkan user ID dari AuthBloc
+  String getCurrentUserId() {
+    // Implementasi aktual: mendapatkan user ID dari AuthBloc
+    // Contoh implementasi sederhana:
+    final authState = context.read<AuthBloc>().state;
+    if (authState is AuthAuthenticated) {
+      return authState.user.id;
+    }
+    return '';
+  }
+
+  // Mendapatkan nama user dari AuthBloc
+  String getCurrentUserName() {
+    // Implementasi aktual: mendapatkan user name dari AuthBloc
+    // Contoh implementasi sederhana:
+    final authState = context.read<AuthBloc>().state;
+    if (authState is AuthAuthenticated) {
+      return authState.user.name;
+    }
+    return '';
   }
 
   // Mendapatkan atau membuat key untuk index tertentu
@@ -125,30 +162,53 @@ class MainNavigationScreenState extends State<MainNavigationScreen>
         },
       ),
       bottomNavigationBar: CustomNavBar(
-        items: [
-          const NavBarItem(
-            activeIcon: Icons.home,
-            inactiveIcon: Icons.home_outlined,
-            label: 'Home',
-          ),
-          if (widget.userRole == 'commandCenter')
-            const NavBarItem(
-              activeIcon: Icons.task,
-              inactiveIcon: Icons.task_outlined,
-              label: 'Penugasan',
-            ),
-          if (widget.userRole == 'commandCenter')
-            const NavBarItem(
-              activeIcon: Icons.location_city,
-              inactiveIcon: Icons.location_city_outlined,
-              label: 'Tatar',
-            ),
-          const NavBarItem(
-            activeIcon: Icons.person,
-            inactiveIcon: Icons.person_outline,
-            label: 'Profil',
-          ),
-        ],
+        items: widget.userRole == 'commandCenter'
+            ? [
+                const NavBarItem(
+                  activeIcon: Icons.home,
+                  inactiveIcon: Icons.home_outlined,
+                  label: 'Home',
+                ),
+                const NavBarItem(
+                  activeIcon: Icons.task,
+                  inactiveIcon: Icons.task_outlined,
+                  label: 'Penugasan',
+                ),
+                const NavBarItem(
+                  activeIcon: Icons.location_city,
+                  inactiveIcon: Icons.location_city_outlined,
+                  label: 'Tatar',
+                ),
+                // Tambahkan NavBarItem untuk Survey
+                const NavBarItem(
+                  activeIcon: Icons.assessment,
+                  inactiveIcon: Icons.assessment_outlined,
+                  label: 'Survey',
+                ),
+                const NavBarItem(
+                  activeIcon: Icons.person,
+                  inactiveIcon: Icons.person_outline,
+                  label: 'Profil',
+                ),
+              ]
+            : [
+                const NavBarItem(
+                  activeIcon: Icons.home,
+                  inactiveIcon: Icons.home_outlined,
+                  label: 'Home',
+                ),
+                // Tambahkan NavBarItem untuk Survey (user biasa)
+                const NavBarItem(
+                  activeIcon: Icons.assessment,
+                  inactiveIcon: Icons.assessment_outlined,
+                  label: 'Survey',
+                ),
+                const NavBarItem(
+                  activeIcon: Icons.person,
+                  inactiveIcon: Icons.person_outline,
+                  label: 'Profil',
+                ),
+              ],
         initialIndex: _selectedIndex,
         onItemSelected: (index) {
           // Jika tab yang sama diklik lagi, refresh halaman
@@ -184,14 +244,33 @@ class MainNavigationScreenState extends State<MainNavigationScreen>
             _pages[2] = ManageClustersScreen(key: _pageKeys[index]);
             break;
           case 3:
-            _pages[3] = ProfileScreen(key: _pageKeys[index]);
+            // Refresh SurveyListScreen
+            _pages[3] = SurveyListScreen(
+              key: _pageKeys[index],
+              userId: getCurrentUserId(),
+              userName: getCurrentUserName(),
+            );
+            break;
+          case 4:
+            _pages[4] = ProfileScreen(key: _pageKeys[index]);
             break;
         }
       } else {
-        if (index == 0) {
-          _pages[0] = HomeScreen(key: _pageKeys[index]);
-        } else {
-          _pages[1] = ProfileScreen(key: _pageKeys[index]);
+        switch (index) {
+          case 0:
+            _pages[0] = HomeScreen(key: _pageKeys[index]);
+            break;
+          case 1:
+            // Refresh SurveyListScreen untuk user biasa
+            _pages[1] = SurveyListScreen(
+              key: _pageKeys[index],
+              userId: getCurrentUserId(),
+              userName: getCurrentUserName(),
+            );
+            break;
+          case 2:
+            _pages[2] = ProfileScreen(key: _pageKeys[index]);
+            break;
         }
       }
     });

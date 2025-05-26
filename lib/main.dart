@@ -11,7 +11,9 @@ import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:livetrackingapp/data/repositories/report_repositoryImpl.dart';
+import 'package:livetrackingapp/data/repositories/survey_repositoryImpl.dart';
 import 'package:livetrackingapp/domain/repositories/report_repository.dart';
+import 'package:livetrackingapp/domain/repositories/survey_repository.dart';
 import 'package:livetrackingapp/domain/usecases/report_usecase.dart';
 import 'package:livetrackingapp/firebase_options.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
@@ -20,6 +22,7 @@ import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/auth/login_screen.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
+import 'package:livetrackingapp/presentation/survey/survey_bloc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:livetrackingapp/data/repositories/route_repositoryImpl.dart';
 import 'data/repositories/auth_repositoryImpl.dart';
@@ -65,11 +68,11 @@ void setupLocator() {
   getIt.registerLazySingleton<CreateReportUseCase>(
     () => CreateReportUseCase(getIt<ReportRepository>()),
   );
-  
+
   getIt.registerLazySingleton<SyncOfflineReportsUseCase>(
     () => SyncOfflineReportsUseCase(getIt<ReportRepository>()),
   );
-  
+
   getIt.registerLazySingleton<GetOfflineReportsUseCase>(
     () => GetOfflineReportsUseCase(getIt<ReportRepository>()),
   );
@@ -117,7 +120,8 @@ Future<void> initializeApp() async {
     try {
       // Enable persistence only after authentication
       FirebaseDatabase.instance.setPersistenceEnabled(true);
-      print('Database persistence enabled for user: ${FirebaseAuth.instance.currentUser?.uid}');
+      print(
+          'Database persistence enabled for user: ${FirebaseAuth.instance.currentUser?.uid}');
     } catch (e) {
       print('Error enabling persistence: $e');
     }
@@ -235,13 +239,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             }
           });
         }
-        
+
         // Sinkronisasi laporan offline saat aplikasi kembali aktif
         _syncOfflineReports(context);
       });
     }
   }
-  
+
   // Method untuk sinkronisasi laporan offline
   void _syncOfflineReports(BuildContext? context) {
     if (context != null) {
@@ -266,13 +270,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
     // Proses initialMessage jika ada
     if (widget.initialMessage != null) {
-      print('Processing initial message: ${widget.initialMessage?.notification?.title}');
+      print(
+          'Processing initial message: ${widget.initialMessage?.notification?.title}');
       _processNotificationMessage(widget.initialMessage!);
     }
 
     // Proses notifikasi tertunda jika ada
     if (_pendingNotification != null) {
-      print('Processing pending notification: ${_pendingNotification?.notification?.title}');
+      print(
+          'Processing pending notification: ${_pendingNotification?.notification?.title}');
       _processNotificationMessage(_pendingNotification!);
       _pendingNotification = null;
     }
@@ -290,8 +296,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
         // Retry setelah delay tambahan jika masih null
         Future.delayed(const Duration(seconds: 1), () {
-          if (navigatorKey.currentContext != null && _pendingNotification != null) {
-            handleNotificationClick(_pendingNotification!, navigatorKey.currentContext);
+          if (navigatorKey.currentContext != null &&
+              _pendingNotification != null) {
+            handleNotificationClick(
+                _pendingNotification!, navigatorKey.currentContext);
             _pendingNotification = null;
           }
         });
@@ -309,7 +317,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             repository: getIt<AuthRepository>(),
           )..add(CheckAuthStatus()),
         ),
-        
+
         // PatrolBloc - untuk fitur patroli
         BlocProvider<PatrolBloc>(
           create: (context) {
@@ -320,7 +328,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             return bloc;
           },
         ),
-        
+
         // AdminBloc - untuk fitur admin (satu instance saja)
         BlocProvider<AdminBloc>(
           create: (context) {
@@ -335,13 +343,19 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           },
           lazy: false, // Initialize immediately
         ),
-        
+
         // ReportBloc - untuk fitur pelaporan dengan dukungan offline
         BlocProvider<ReportBloc>(
           create: (context) => ReportBloc(
             createReportUseCase: getIt<CreateReportUseCase>(),
             syncOfflineReportsUseCase: getIt<SyncOfflineReportsUseCase>(),
             getOfflineReportsUseCase: getIt<GetOfflineReportsUseCase>(),
+          ),
+        ),
+        BlocProvider<SurveyBloc>(
+          create: (context) => SurveyBloc(
+            repository:
+                getIt<SurveyRepository>(), 
           ),
         ),
       ],
@@ -354,7 +368,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             theme: ThemeData(
               scaffoldBackgroundColor: neutralWhite,
               primaryColor: kbpBlue900,
-              colorScheme: ColorScheme.fromSwatch().copyWith(primary: kbpBlue900),
+              colorScheme:
+                  ColorScheme.fromSwatch().copyWith(primary: kbpBlue900),
               fontFamily: 'Plus Jakarta Sans',
             ),
             home: (state is AuthAuthenticated)
