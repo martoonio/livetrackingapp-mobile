@@ -71,178 +71,190 @@ class _ClusterPatrolHistoryScreenState
           },
         ),
       ),
-      body: BlocBuilder<AdminBloc, AdminState>(
-        builder: (context, state) {
-          if (state is ClustersLoading || state is AdminLoading) {
-            return Center(
-              child: Lottie.asset(
-                'assets/lottie/maps_loading.json',
-                width: 200,
-                height: 100,
-              ),
-            );
-          } else if (state is ClusterTasksLoaded) {
-            // Get officers and tasks
-            final cluster = state.cluster;
-            final officers = cluster!.officers ?? [];
-            List<PatrolTask> tasks = state.tasks;
-
-            // Apply filters if set
-            if (selectedOfficerId != null) {
-              tasks = tasks
-                  .where((task) => task.officerId == selectedOfficerId)
-                  .toList();
-            }
-
-            if (selectedStatus != null) {
-              tasks =
-                  tasks.where((task) => task.status == selectedStatus).toList();
-            }
-
-            if (startDate != null) {
-              tasks = tasks.where((task) {
-                if (task.startTime == null) return false;
-                return task.startTime!.isAfter(startDate!);
-              }).toList();
-            }
-
-            if (endDate != null) {
-              tasks = tasks.where((task) {
-                if (task.endTime == null) return false;
-                return task.endTime!
-                    .isBefore(endDate!.add(const Duration(days: 1)));
-              }).toList();
-            }
-
-            // Sort tasks by date (newest first)
-            tasks.sort((a, b) {
-              if (a.startTime == null) return 1;
-              if (b.startTime == null) return -1;
-              return b.startTime!.compareTo(a.startTime!);
-            });
-
-            if (tasks.isEmpty) {
-              return EmptyState(
-                icon: Icons.history,
-                title: 'Belum ada riwayat patroli',
-                subtitle: selectedOfficerId != null ||
-                        selectedStatus != null ||
-                        startDate != null ||
-                        endDate != null
-                    ? 'Tidak ada hasil yang cocok dengan filter yang dipilih'
-                    : 'Belum ada tugas patroli yang diselesaikan di cluster ini',
-                buttonText: 'Segarkan',
-                onButtonPressed: _loadClusterTasks,
+      body: WillPopScope(
+        onWillPop: () async {
+          Navigator.pop(context);
+          context.read<AdminBloc>().add(
+                GetClusterDetail(widget.clusterId),
               );
-            }
+          return false;
+        },
+        child: BlocBuilder<AdminBloc, AdminState>(
+          builder: (context, state) {
+            if (state is ClustersLoading || state is AdminLoading) {
+              return Center(
+                child: Lottie.asset(
+                  'assets/lottie/maps_loading.json',
+                  width: 200,
+                  height: 100,
+                ),
+              );
+            } else if (state is ClusterTasksLoaded) {
+              // Get officers and tasks
+              final cluster = state.cluster;
+              final officers = cluster!.officers ?? [];
+              List<PatrolTask> tasks = state.tasks;
 
-            return Column(
-              children: [
-                // Active filters strip
-                if (selectedOfficerId != null ||
-                    selectedStatus != null ||
-                    startDate != null ||
-                    endDate != null)
-                  _buildActiveFiltersStrip(officers),
+              // Apply filters if set
+              if (selectedOfficerId != null) {
+                tasks = tasks
+                    .where((task) => task.officerId == selectedOfficerId)
+                    .toList();
+              }
 
-                // Tasks list
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: tasks.length,
-                    itemBuilder: (context, index) {
-                      final task = tasks[index];
+              if (selectedStatus != null) {
+                tasks = tasks
+                    .where((task) => task.status == selectedStatus)
+                    .toList();
+              }
 
-                      // Find the officer for this task - improved to check both officerId and userId
-                      final officer = officers.firstWhere(
-                        (o) => o.id == task.officerId || o.id == task.userId,
-                        orElse: () {
-                          // Log untuk debugging
-                          print('Officer not found for task ${task.taskId}');
-                          print(
-                              '  - Trying to find by officerId: ${task.officerId}');
-                          print('  - Trying to find by userId: ${task.userId}');
-                          print(
-                              '  - Available officers: ${officers.map((o) => "${o.id} (${o.name})").join(", ")}');
+              if (startDate != null) {
+                tasks = tasks.where((task) {
+                  if (task.startTime == null) return false;
+                  return task.startTime!.isAfter(startDate!);
+                }).toList();
+              }
 
-                          // Jika officer tidak ditemukan, coba gunakan nilai yang ada di task.officerName
-                          if (task.officerName != 'Loading...') {
+              if (endDate != null) {
+                tasks = tasks.where((task) {
+                  if (task.endTime == null) return false;
+                  return task.endTime!
+                      .isBefore(endDate!.add(const Duration(days: 1)));
+                }).toList();
+              }
+
+              // Sort tasks by date (newest first)
+              tasks.sort((a, b) {
+                if (a.startTime == null) return 1;
+                if (b.startTime == null) return -1;
+                return b.startTime!.compareTo(a.startTime!);
+              });
+
+              if (tasks.isEmpty) {
+                return EmptyState(
+                  icon: Icons.history,
+                  title: 'Belum ada riwayat patroli',
+                  subtitle: selectedOfficerId != null ||
+                          selectedStatus != null ||
+                          startDate != null ||
+                          endDate != null
+                      ? 'Tidak ada hasil yang cocok dengan filter yang dipilih'
+                      : 'Belum ada tugas patroli yang diselesaikan di cluster ini',
+                  buttonText: 'Segarkan',
+                  onButtonPressed: _loadClusterTasks,
+                );
+              }
+
+              return Column(
+                children: [
+                  // Active filters strip
+                  if (selectedOfficerId != null ||
+                      selectedStatus != null ||
+                      startDate != null ||
+                      endDate != null)
+                    _buildActiveFiltersStrip(officers),
+
+                  // Tasks list
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: tasks.length,
+                      itemBuilder: (context, index) {
+                        final task = tasks[index];
+
+                        // Find the officer for this task - improved to check both officerId and userId
+                        final officer = officers.firstWhere(
+                          (o) => o.id == task.officerId || o.id == task.userId,
+                          orElse: () {
+                            // Log untuk debugging
+                            print('Officer not found for task ${task.taskId}');
+                            print(
+                                '  - Trying to find by officerId: ${task.officerId}');
+                            print(
+                                '  - Trying to find by userId: ${task.userId}');
+                            print(
+                                '  - Available officers: ${officers.map((o) => "${o.id} (${o.name})").join(", ")}');
+
+                            // Jika officer tidak ditemukan, coba gunakan nilai yang ada di task.officerName
+                            if (task.officerName != 'Loading...') {
+                              return Officer(
+                                id: task.officerId.isNotEmpty
+                                    ? task.officerId
+                                    : task.userId,
+                                name: task.officerName,
+                                type: OfficerType.organik, // Default
+                                shift: ShiftType.pagi, // Default
+                                clusterId: widget.clusterId,
+                                photoUrl: task.officerPhotoUrl != 'P'
+                                    ? task.officerPhotoUrl
+                                    : null,
+                              );
+                            }
+
+                            // Fallback jika benar-benar tidak ada informasi
                             return Officer(
                               id: task.officerId.isNotEmpty
                                   ? task.officerId
                                   : task.userId,
-                              name: task.officerName,
-                              type: OfficerType.organik, // Default
-                              shift: ShiftType.pagi, // Default
+                              name: 'Petugas tidak ditemukan',
+                              type: OfficerType.organik,
+                              shift: ShiftType.pagi,
                               clusterId: widget.clusterId,
-                              photoUrl: task.officerPhotoUrl != 'P'
-                                  ? task.officerPhotoUrl
-                                  : null,
                             );
-                          }
+                          },
+                        );
 
-                          // Fallback jika benar-benar tidak ada informasi
-                          return Officer(
-                            id: task.officerId.isNotEmpty
-                                ? task.officerId
-                                : task.userId,
-                            name: 'Petugas tidak ditemukan',
-                            type: OfficerType.organik,
-                            shift: ShiftType.pagi,
-                            clusterId: widget.clusterId,
-                          );
-                        },
-                      );
-
-                      return _buildTaskCard(task, officer);
-                    },
+                        return _buildTaskCard(task, officer);
+                      },
+                    ),
                   ),
-                ),
-              ],
-            );
-          } else if (state is AdminError || state is ClustersError) {
-            final message = state is AdminError
-                ? (state as AdminError).message
-                : (state as ClustersError).message;
+                ],
+              );
+            } else if (state is AdminError || state is ClustersError) {
+              final message = state is AdminError
+                  ? (state as AdminError).message
+                  : (state as ClustersError).message;
 
-            return Center(
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline,
+                        size: 64, color: dangerR300),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Error: $message',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kbpBlue900,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _loadClusterTasks,
+                      child: const Text('Coba Lagi'),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return const Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error_outline, size: 64, color: dangerR300),
-                  const SizedBox(height: 16),
+                  CircularProgressIndicator(color: kbpBlue700),
+                  SizedBox(height: 16),
                   Text(
-                    'Error: $message',
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kbpBlue900,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _loadClusterTasks,
-                    child: const Text('Coba Lagi'),
+                    'Memuat riwayat patroli...',
+                    style: TextStyle(color: neutral600, fontSize: 14),
                   ),
                 ],
               ),
             );
-          }
-
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircularProgressIndicator(color: kbpBlue700),
-                SizedBox(height: 16),
-                Text(
-                  'Memuat riwayat patroli...',
-                  style: TextStyle(color: neutral600, fontSize: 14),
-                ),
-              ],
-            ),
-          );
-        },
+          },
+        ),
       ),
     );
   }

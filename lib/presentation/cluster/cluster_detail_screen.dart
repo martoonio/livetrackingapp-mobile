@@ -219,67 +219,75 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Detail Tatar'),
-        backgroundColor: kbpBlue900,
-        foregroundColor: Colors.white,
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [
-            Tab(text: 'Informasi'),
-            Tab(text: 'Riwayat'),
-            Tab(text: 'Petugas'),
-            Tab(text: 'Titik Patroli'),
-          ],
+    return WillPopScope(
+      onWillPop: () async {
+        context.read<AdminBloc>().add(
+              LoadAllClusters(),
+            );
+        return true; // Allow pop
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Detail Tatar'),
+          backgroundColor: kbpBlue900,
+          foregroundColor: Colors.white,
+          bottom: TabBar(
+            controller: _tabController,
+            indicatorColor: Colors.white,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            tabs: const [
+              Tab(text: 'Informasi'),
+              Tab(text: 'Riwayat'),
+              Tab(text: 'Petugas'),
+              Tab(text: 'Titik Patroli'),
+            ],
+          ),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              Navigator.pop(context);
+              context.read<AdminBloc>().add(
+                    LoadAllClusters(),
+                  );
+            },
+          ),
         ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            Navigator.pop(context);
-            context.read<AdminBloc>().add(
-                  LoadAllClusters(),
-                );
+        body: BlocBuilder<AdminBloc, AdminState>(
+          builder: (context, state) {
+            if (state is AdminLoading) {
+              return Center(
+                child: lottie.LottieBuilder.asset(
+                  'assets/lottie/maps_loading.json',
+                  width: 200,
+                  height: 100,
+                  fit: BoxFit.cover,
+                ),
+              );
+            } else if (state is ClusterDetailLoaded) {
+              _cluster = state.cluster;
+              _setupMarkersFromCluster(state.cluster);
+      
+              return TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildInfoTab(state.cluster),
+                  _buildHistoryTab(state.cluster),
+                  _buildOfficersTab(state.cluster),
+                  _buildMapTab(state.cluster),
+                ],
+              );
+            } else if (state is AdminError) {
+              return Center(
+                child: Text(
+                  'Error: ${state.message}',
+                  style: const TextStyle(color: Colors.red),
+                ),
+              );
+            }
+            return const Center(child: Text('Loading cluster details...'));
           },
         ),
-      ),
-      body: BlocBuilder<AdminBloc, AdminState>(
-        builder: (context, state) {
-          if (state is AdminLoading) {
-            return Center(
-              child: lottie.LottieBuilder.asset(
-                'assets/lottie/maps_loading.json',
-                width: 200,
-                height: 100,
-                fit: BoxFit.cover,
-              ),
-            );
-          } else if (state is ClusterDetailLoaded) {
-            _cluster = state.cluster;
-            _setupMarkersFromCluster(state.cluster);
-
-            return TabBarView(
-              controller: _tabController,
-              children: [
-                _buildInfoTab(state.cluster),
-                _buildHistoryTab(state.cluster),
-                _buildOfficersTab(state.cluster),
-                _buildMapTab(state.cluster),
-              ],
-            );
-          } else if (state is AdminError) {
-            return Center(
-              child: Text(
-                'Error: ${state.message}',
-                style: const TextStyle(color: Colors.red),
-              ),
-            );
-          }
-          return const Center(child: Text('Loading cluster details...'));
-        },
       ),
     );
   }

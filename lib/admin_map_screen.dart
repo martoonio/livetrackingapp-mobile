@@ -38,9 +38,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
   final Map<String, List<LatLng>> _taskRoutes = {};
 
   // Custom marker icons
-  BitmapDescriptor? _carIcon;
-  BitmapDescriptor? _motorcycleIcon;
-  BitmapDescriptor? _bicycleIcon;
   BitmapDescriptor? _defaultIcon;
 
   bool _isLoading = true;
@@ -137,14 +134,8 @@ class AdminMapScreenState extends State<AdminMapScreen> {
 
   Future<void> _loadMarkerIcons() async {
     try {
-      _carIcon = await _getBitmapDescriptorFromAssetBytes(
-          'assets/markers/car_marker.png', 120);
 
-      _motorcycleIcon = await _getBitmapDescriptorFromAssetBytes(
-          'assets/markers/motorcycle_marker.png', 120);
 
-      _bicycleIcon = await _getBitmapDescriptorFromAssetBytes(
-          'assets/markers/bicycle_marker.png', 120);
 
       _defaultIcon = await _getBitmapDescriptorFromAssetBytes(
           'assets/markers/default_marker.png', 120);
