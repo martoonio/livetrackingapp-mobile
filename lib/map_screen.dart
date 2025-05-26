@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
@@ -1676,11 +1677,17 @@ class _MapScreenState extends State<MapScreen> {
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(
-                                // Perbaikan pada bagian pengiriman report di _showReportDialog
                                 onPressed: () async {
                                   if (kejadianController.text.isNotEmpty &&
                                       catatanController.text.isNotEmpty &&
                                       selectedPhotos.isNotEmpty) {
+                                    // Cek koneksi internet terlebih dahulu
+                                    final connectivityResult =
+                                        await Connectivity()
+                                            .checkConnectivity();
+                                    final isOffline = connectivityResult ==
+                                        ConnectivityResult.none;
+
                                     // Tampilkan loading dialog dengan progress
                                     BuildContext? loadingDialogContext;
                                     showDialog(
@@ -1689,8 +1696,7 @@ class _MapScreenState extends State<MapScreen> {
                                       builder: (dialogContext) {
                                         loadingDialogContext = dialogContext;
                                         return WillPopScope(
-                                          onWillPop: () async =>
-                                              false, // Prevent back button close
+                                          onWillPop: () async => false,
                                           child: AlertDialog(
                                             shape: RoundedRectangleBorder(
                                               borderRadius:
@@ -1707,14 +1713,18 @@ class _MapScreenState extends State<MapScreen> {
                                                 ),
                                                 const SizedBox(height: 24),
                                                 Text(
-                                                  'Mengirim laporan...',
+                                                  isOffline
+                                                      ? 'Menyimpan laporan...'
+                                                      : 'Mengirim laporan...',
                                                   style: semiBoldTextStyle(
                                                       size: 16),
                                                   textAlign: TextAlign.center,
                                                 ),
                                                 const SizedBox(height: 8),
                                                 Text(
-                                                  'Proses upload foto sedang berlangsung',
+                                                  isOffline
+                                                      ? 'Laporan akan dikirim saat terhubung internet'
+                                                      : 'Proses upload foto sedang berlangsung',
                                                   style: regularTextStyle(
                                                       size: 14,
                                                       color: neutral600),
@@ -1728,15 +1738,14 @@ class _MapScreenState extends State<MapScreen> {
                                     );
 
                                     try {
-                                      // Buat ID unik dari Firebase daripada menggunakan format sendiri
+                                      // Buat ID unik dari Firebase
                                       final reportRef = FirebaseDatabase
                                           .instance
                                           .ref('reports')
                                           .push();
-                                      final reportId = reportRef
-                                          .key!; // Auto-generated key dari Firebase
+                                      final reportId = reportRef.key!;
 
-                                      // Cek apakah directory reports sudah ada, jika tidak buat
+                                      // Cek directory reports
                                       final directory = Directory(
                                           '${(await getApplicationDocumentsDirectory()).path}/reports');
                                       if (!await directory.exists()) {
@@ -1749,25 +1758,23 @@ class _MapScreenState extends State<MapScreen> {
                                           i < selectedPhotos.length;
                                           i++) {
                                         final photo = selectedPhotos[i];
-
-                                        // Simpan file sementara dengan nama yang unik
                                         final savedFile = await photo.copy(
                                             '${directory.path}/${reportId}_photo_$i.jpg');
                                         photoPathsList.add(savedFile.path);
-                                        print(
-                                            'Saved photo to: ${savedFile.path}');
                                       }
 
                                       // Gabungkan path foto dengan koma
                                       final combinedPhotoPath =
                                           photoPathsList.join(',');
 
-                                      // Buat objek Report dengan ID otomatis dari Firebase
+                                      // Buat objek Report
                                       final report = Report(
                                         id: reportId,
                                         taskId: widget.task.taskId,
                                         userId: widget.task.userId,
+                                        officerName: widget.task.officerName,
                                         clusterId: widget.task.clusterId,
+                                        clusterName: widget.task.clusterName,
                                         title: kejadianController.text,
                                         description: catatanController.text,
                                         photoUrl: combinedPhotoPath,
@@ -1778,88 +1785,57 @@ class _MapScreenState extends State<MapScreen> {
                                         longitude:
                                             userCurrentLocation?.longitude ??
                                                 0.0,
+                                        isSynced:
+                                            !isOffline, // Tandai sesuai status koneksi
                                       );
 
-                                      // Proses selanjutnya sama seperti sebelumnya
-                                      final reportCompleter = Completer<void>();
-
-                                      final subscription = context
-                                          .read<ReportBloc>()
-                                          .stream
-                                          .listen((state) {
-                                        if (state is ReportSuccess) {
-                                          reportCompleter.complete();
-                                        } else if (state is ReportFailure) {
-                                          reportCompleter
-                                              .completeError(state.error);
-                                        }
-                                      });
-
-                                      // Kirim report
+                                      // Kirim report menggunakan bloc
                                       context
                                           .read<ReportBloc>()
                                           .add(CreateReportEvent(report));
 
-                                      // Tunggu sampai report selesai dikirim atau error
-                                      try {
-                                        await reportCompleter.future;
+                                      // Tunggu sebentar untuk memberi waktu proses penyimpanan
+                                      await Future.delayed(
+                                          const Duration(milliseconds: 800));
 
-                                        // Bersihkan subscription setelah selesai
-                                        subscription.cancel();
-
-                                        // Tutup loading dialog
-                                        if (loadingDialogContext != null &&
-                                            mounted) {
-                                          Navigator.pop(loadingDialogContext!);
-                                        }
-
-                                        // Tutup dialog report
-                                        Navigator.pop(context);
-
-                                        // Reset form
-                                        selectedPhotos.clear();
-                                        kejadianController.clear();
-                                        catatanController.clear();
-
-                                        // Tampilkan notifikasi sukses
-                                        showCustomSnackbar(
-                                          context: context,
-                                          title: 'Laporan berhasil dikirim',
-                                          subtitle:
-                                              'Terima kasih atas laporan Anda',
-                                          type: SnackbarType.success,
-                                        );
-
-                                        print(
-                                            'Laporan berhasil dikirim: ${report.toJson()}');
-                                      } catch (error) {
-                                        // Bersihkan subscription jika error
-                                        subscription.cancel();
-
-                                        print('Error sending report: $error');
-
-                                        // Tutup loading dialog jika error
-                                        if (loadingDialogContext != null &&
-                                            mounted) {
-                                          Navigator.pop(loadingDialogContext!);
-                                        }
-
-                                        // Tampilkan error
-                                        showCustomSnackbar(
-                                          context: context,
-                                          title: 'Gagal mengirim laporan',
-                                          subtitle: 'Terjadi kesalahan: $error',
-                                          type: SnackbarType.danger,
-                                        );
-                                      }
-                                    } catch (e) {
-                                      // Tutup loading dialog jika error
+                                      // Tutup dialog loading
                                       if (loadingDialogContext != null &&
-                                          mounted) {
+                                          Navigator.canPop(
+                                              loadingDialogContext!)) {
                                         Navigator.pop(loadingDialogContext!);
                                       }
 
-                                      print('Error in report preparation: $e');
+                                      // Tutup dialog form
+                                      if (mounted &&
+                                          Navigator.canPop(context)) {
+                                        Navigator.pop(context);
+                                      }
+
+                                      // Reset form
+                                      selectedPhotos.clear();
+                                      kejadianController.clear();
+                                      catatanController.clear();
+
+                                      // Tampilkan snackbar berdasarkan status koneksi
+                                      showCustomSnackbar(
+                                        context: context,
+                                        title: isOffline
+                                            ? 'Laporan disimpan untuk dikirim nanti'
+                                            : 'Laporan berhasil dikirim',
+                                        subtitle: isOffline
+                                            ? 'Laporan akan dikirim saat terhubung internet'
+                                            : 'Terima kasih atas laporan Anda',
+                                        type: SnackbarType.success,
+                                      );
+                                    } catch (e) {
+                                      // Tangani error
+                                      if (loadingDialogContext != null &&
+                                          mounted &&
+                                          Navigator.canPop(
+                                              loadingDialogContext!)) {
+                                        Navigator.pop(loadingDialogContext!);
+                                      }
+
                                       showCustomSnackbar(
                                         context: context,
                                         title: 'Gagal mengirim laporan',

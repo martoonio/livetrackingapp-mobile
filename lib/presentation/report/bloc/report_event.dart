@@ -7,3 +7,8 @@ class CreateReportEvent extends ReportEvent {
 
   CreateReportEvent(this.report);
 }
+
+// Tambahkan event baru
+class SyncOfflineReportsEvent extends ReportEvent {}
+
+class GetOfflineReportsEvent extends ReportEvent {}

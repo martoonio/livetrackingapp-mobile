@@ -40,10 +40,10 @@ class PatrolTask {
   }
 
   String get clusterName {
-    if (_clusterName == null || _clusterName == 'Loading...') {
+    if (_clusterName == null || _clusterName!.isEmpty) {
       return clusterId.isNotEmpty
           ? 'Tatar #${clusterId.substring(0, Math.min(5, clusterId.length))}'
-          : 'Unknown Tatar';
+          : 'No Tatar';
     }
     return _clusterName!;
   }

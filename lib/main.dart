@@ -7,6 +7,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
+import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:livetrackingapp/data/repositories/report_repositoryImpl.dart';
 import 'package:livetrackingapp/domain/repositories/report_repository.dart';
@@ -17,6 +19,7 @@ import 'package:livetrackingapp/notification_utils.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/auth/login_screen.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
+import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:livetrackingapp/data/repositories/route_repositoryImpl.dart';
 import 'data/repositories/auth_repositoryImpl.dart';
@@ -31,14 +34,14 @@ export 'package:livetrackingapp/main.dart' show navigatorKey;
 final getIt = GetIt.instance;
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 
-// Tambahkan navigator key global untuk navigasi dari mana saja
-// Pastikan navigatorKey didefinisikan sebagai global variable dan exported
+// Navigator key global untuk navigasi dari mana saja
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-void setupLocator() {
-  // Remove MapboxService registration
+// Box untuk menyimpan data offline
+late Box offlineReportsBox;
 
-  // Register RouteRepository implementation
+void setupLocator() {
+  // Register repositories
   getIt.registerLazySingleton<RouteRepository>(
     () => RouteRepositoryImpl(),
   );
@@ -48,15 +51,27 @@ void setupLocator() {
       firebaseAuth: FirebaseAuth.instance,
     ),
   );
+
+  // Register report repository dengan Hive storage
   getIt.registerLazySingleton<ReportRepository>(
     () => ReportRepositoryImpl(
       firebaseStorage: FirebaseStorage.instance,
       databaseReference: FirebaseDatabase.instance.ref(),
+      offlineReportsBox: offlineReportsBox,
     ),
   );
 
+  // Register report use cases
   getIt.registerLazySingleton<CreateReportUseCase>(
     () => CreateReportUseCase(getIt<ReportRepository>()),
+  );
+  
+  getIt.registerLazySingleton<SyncOfflineReportsUseCase>(
+    () => SyncOfflineReportsUseCase(getIt<ReportRepository>()),
+  );
+  
+  getIt.registerLazySingleton<GetOfflineReportsUseCase>(
+    () => GetOfflineReportsUseCase(getIt<ReportRepository>()),
   );
 }
 
@@ -85,7 +100,7 @@ Future<void> requestNotificationPermission() async {
 }
 
 Future<void> initializeApp() async {
-  // Initialize Firebase with platform-specific options
+  // Initialize Firebase dengan platform-specific options
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // Wait for auth state to be determined
@@ -93,12 +108,16 @@ Future<void> initializeApp() async {
 
   await initializeDateFormatting('id_ID', null);
 
+  // Initialize Hive dan box untuk offline reports
+  await Hive.initFlutter();
+  offlineReportsBox = await Hive.openBox('offline_reports');
+  print('Initialized Hive box for offline reports');
+
   if (FirebaseAuth.instance.currentUser != null) {
     try {
       // Enable persistence only after authentication
       FirebaseDatabase.instance.setPersistenceEnabled(true);
-      print(
-          'Database persistence enabled for user: ${FirebaseAuth.instance.currentUser?.uid}');
+      print('Database persistence enabled for user: ${FirebaseAuth.instance.currentUser?.uid}');
     } catch (e) {
       print('Error enabling persistence: $e');
     }
@@ -216,7 +235,27 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             }
           });
         }
+        
+        // Sinkronisasi laporan offline saat aplikasi kembali aktif
+        _syncOfflineReports(context);
       });
+    }
+  }
+  
+  // Method untuk sinkronisasi laporan offline
+  void _syncOfflineReports(BuildContext? context) {
+    if (context != null) {
+      try {
+        // Periksa apakah ada laporan offline yang perlu disinkronkan
+        getIt<GetOfflineReportsUseCase>().call().then((reports) {
+          if (reports.isNotEmpty) {
+            print('Found ${reports.length} offline reports to sync');
+            context.read<ReportBloc>().add(SyncOfflineReportsEvent());
+          }
+        });
+      } catch (e) {
+        print('Error checking offline reports: $e');
+      }
     }
   }
 
@@ -227,15 +266,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
     // Proses initialMessage jika ada
     if (widget.initialMessage != null) {
-      print(
-          'Processing initial message: ${widget.initialMessage?.notification?.title}');
+      print('Processing initial message: ${widget.initialMessage?.notification?.title}');
       _processNotificationMessage(widget.initialMessage!);
     }
 
     // Proses notifikasi tertunda jika ada
     if (_pendingNotification != null) {
-      print(
-          'Processing pending notification: ${_pendingNotification?.notification?.title}');
+      print('Processing pending notification: ${_pendingNotification?.notification?.title}');
       _processNotificationMessage(_pendingNotification!);
       _pendingNotification = null;
     }
@@ -253,10 +290,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
         // Retry setelah delay tambahan jika masih null
         Future.delayed(const Duration(seconds: 1), () {
-          if (navigatorKey.currentContext != null &&
-              _pendingNotification != null) {
-            handleNotificationClick(
-                _pendingNotification!, navigatorKey.currentContext);
+          if (navigatorKey.currentContext != null && _pendingNotification != null) {
+            handleNotificationClick(_pendingNotification!, navigatorKey.currentContext);
             _pendingNotification = null;
           }
         });
@@ -268,12 +303,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return MultiBlocProvider(
       providers: [
+        // AuthBloc - untuk otentikasi
         BlocProvider<AuthBloc>(
           create: (context) => AuthBloc(
             repository: getIt<AuthRepository>(),
           )..add(CheckAuthStatus()),
         ),
-        // Remove duplicate PatrolBloc provider
+        
+        // PatrolBloc - untuk fitur patroli
         BlocProvider<PatrolBloc>(
           create: (context) {
             final bloc = PatrolBloc(
@@ -283,43 +320,29 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             return bloc;
           },
         ),
+        
+        // AdminBloc - untuk fitur admin (satu instance saja)
         BlocProvider<AdminBloc>(
           create: (context) {
-            // Inisialisasi AdminBloc dengan repository dari GetIt
             final bloc = AdminBloc(
               repository: getIt<RouteRepository>(),
             );
-            // Load data awal yang diperlukan
+            // Load semua data yang diperlukan
             bloc.add(LoadAllClusters());
-            // Load cluster details will be handled after selecting a cluster
             bloc.add(LoadAllTasks());
             bloc.add(LoadOfficersAndVehicles());
             return bloc;
           },
           lazy: false, // Initialize immediately
         ),
+        
+        // ReportBloc - untuk fitur pelaporan dengan dukungan offline
         BlocProvider<ReportBloc>(
           create: (context) => ReportBloc(
-            getIt<CreateReportUseCase>(),
+            createReportUseCase: getIt<CreateReportUseCase>(),
+            syncOfflineReportsUseCase: getIt<SyncOfflineReportsUseCase>(),
+            getOfflineReportsUseCase: getIt<GetOfflineReportsUseCase>(),
           ),
-        ),
-        BlocProvider<AdminBloc>(
-          create: (context) => AdminBloc(
-            repository: getIt<RouteRepository>(),
-          )..add(LoadOfficersAndVehicles()),
-          lazy: false,
-        ),
-        BlocProvider<AdminBloc>(
-          create: (context) => AdminBloc(
-            repository: RouteRepositoryImpl(),
-          )..add(LoadAllTasks()),
-          lazy: false,
-        ),
-        BlocProvider<ReportBloc>(
-          create: (context) => ReportBloc(
-            getIt<CreateReportUseCase>(),
-          ),
-          lazy: false,
         ),
       ],
       child: BlocBuilder<AuthBloc, AuthState>(
@@ -331,8 +354,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             theme: ThemeData(
               scaffoldBackgroundColor: neutralWhite,
               primaryColor: kbpBlue900,
-              colorScheme:
-                  ColorScheme.fromSwatch().copyWith(primary: kbpBlue900),
+              colorScheme: ColorScheme.fromSwatch().copyWith(primary: kbpBlue900),
               fontFamily: 'Plus Jakarta Sans',
             ),
             home: (state is AuthAuthenticated)

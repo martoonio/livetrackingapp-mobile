@@ -3,6 +3,8 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
+import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
 import '../../../domain/entities/patrol_task.dart';
 import '../../../domain/repositories/route_repository.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -307,8 +309,12 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       emit(currentState.copyWith(isOffline: event.isOffline));
 
       // Trigger sinkronisasi jika kembali online
-      if (!event.isOffline && _offlineLocationBox != null) {
+      if (!event.isOffline) {
         add(SyncOfflineData());
+        
+        // Note: Report sync should be handled by the UI layer, not here
+        // Since we don't have access to BuildContext in the bloc
+        print('Connection restored - UI should trigger report sync');
       }
     }
   }
