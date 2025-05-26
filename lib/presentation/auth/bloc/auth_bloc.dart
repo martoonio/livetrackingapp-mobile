@@ -48,7 +48,9 @@ class AuthUnauthenticated extends AuthState {}
 
 class AuthError extends AuthState {
   final String message;
-  AuthError(this.message);
+  final String code;
+  
+  AuthError(this.message, {this.code = 'unknown_error'});
 }
 
 // BLoC
@@ -83,9 +85,47 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
       print('Emitting AuthAuthenticated state');
       emit(AuthAuthenticated(user));
-        } catch (e) {
+    } catch (e) {
       print('Login error in bloc: $e');
-      emit(AuthError(e.toString()));
+      
+      // Parse error message to identify specific error types
+      final errorString = e.toString().toLowerCase();
+      String errorMessage;
+      String errorCode;
+      
+      if (errorString.contains('user-not-found') || 
+          errorString.contains('no user record')) {
+        errorMessage = 'Email tidak terdaftar dalam sistem. Silakan hubungi admin untuk pendaftaran.';
+        errorCode = 'user-not-found';
+      } 
+      else if (errorString.contains('wrong-password') || 
+               errorString.contains('invalid-credential')) {
+        errorMessage = 'Password yang Anda masukkan salah. Silakan coba lagi.';
+        errorCode = 'wrong-password';
+      }
+      else if (errorString.contains('invalid-email')) {
+        errorMessage = 'Format email tidak valid. Harap periksa kembali.';
+        errorCode = 'invalid-email';
+      }
+      else if (errorString.contains('user-disabled')) {
+        errorMessage = 'Akun Anda telah dinonaktifkan. Silakan hubungi admin.';
+        errorCode = 'user-disabled';
+      }
+      else if (errorString.contains('too-many-requests')) {
+        errorMessage = 'Terlalu banyak percobaan login yang gagal. Silakan coba lagi nanti.';
+        errorCode = 'too-many-requests';
+      }
+      else if (errorString.contains('network-request-failed') || 
+               errorString.contains('network error')) {
+        errorMessage = 'Gagal terhubung ke server. Periksa koneksi internet Anda.';
+        errorCode = 'network-error';
+      }
+      else {
+        errorMessage = 'Terjadi kesalahan saat login. Silakan coba lagi.';
+        errorCode = 'unknown-error';
+      }
+      
+      emit(AuthError(errorMessage, code: errorCode));
     }
   }
 
@@ -95,10 +135,27 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) async {
     emit(AuthLoading());
     try {
-      await repository.logout();
+      // Ambil user ID dari state saat ini
+      String? userId;
+      if (state is AuthAuthenticated) {
+        userId = (state as AuthAuthenticated).user.id;
+        print('Logging out user with ID: $userId');
+      } else {
+        print('No authenticated user found in state');
+      }
+      
+      // Panggil logout dengan userId
+      await repository.logout(userId: userId);
+      
+      // Penting: Selalu emit state ini, bahkan jika terjadi error
       emit(AuthUnauthenticated());
     } catch (e) {
-      emit(AuthError(e.toString()));
+      print('Error during logout in bloc: $e');
+      
+      // Jangan sampai error mengganggu proses logout
+      // Tetap emit AuthUnauthenticated meskipun gagal menghapus token
+      print('Proceeding with logout despite error');
+      emit(AuthUnauthenticated());
     }
   }
 

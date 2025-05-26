@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:livetrackingapp/notification_utils.dart';
 import '../../domain/entities/user.dart';
 import '../../domain/repositories/auth_repository.dart';
@@ -7,6 +8,7 @@ import '../../domain/repositories/auth_repository.dart';
 class AuthRepositoryImpl implements AuthRepository {
   final firebase_auth.FirebaseAuth _firebaseAuth;
   final DatabaseReference _database = FirebaseDatabase.instance.ref();
+  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
 
   AuthRepositoryImpl({
     firebase_auth.FirebaseAuth? firebaseAuth,
@@ -56,6 +58,10 @@ class AuthRepositoryImpl implements AuthRepository {
       await getFirebaseMessagingToken(user);
 
       return user;
+    } on firebase_auth.FirebaseAuthException catch (e) {
+      // Melempar exception dengan kode error dari Firebase agar bisa digunakan oleh bloc
+      print('Firebase Auth Error: ${e.code} - ${e.message}');
+      throw Exception('${e.code}: ${e.message}');
     } catch (e) {
       print('Login error in repository: $e');
       throw Exception('Login failed: ${e.toString()}');
@@ -120,8 +126,55 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<void> logout() async {
-    await _firebaseAuth.signOut();
+  Future<void> removePushToken(String userId) async {
+    try {
+      print('Removing push token for user: $userId');
+      
+      // Cek apakah user ada di database
+      final snapshot = await _database.child('users').child(userId).get();
+      if (!snapshot.exists) {
+        print('User not found in database');
+        return;
+      }
+      
+      // Hapus push_token dari database
+      await _database.child('users').child(userId).child('push_token').remove();
+      print('Push token removed successfully');
+      
+      // Unsubscribe dari FCM topic untuk user ini
+      await _firebaseMessaging.unsubscribeFromTopic('user_$userId');
+      print('Unsubscribed from FCM topic: user_$userId');
+      
+    } catch (e) {
+      print('Error removing push token: $e');
+      // Tidak throw exception karena ini tidak boleh mengganggu proses logout
+    }
+  }
+
+  @override
+  Future<void> logout({String? userId}) async {
+    try {
+      // Dapatkan userId saat ini jika tidak diberikan
+      final currentUserId = userId ?? _firebaseAuth.currentUser?.uid;
+      
+      // Hapus push token jika userId tersedia
+      if (currentUserId != null) {
+        try {
+          await removePushToken(currentUserId);
+        } catch (tokenError) {
+          // Log error tapi jangan gagalkan proses logout
+          print('Error removing push token: $tokenError');
+        }
+      }
+      
+      // Lakukan logout dari Firebase Auth
+      await _firebaseAuth.signOut();
+      print('User signed out successfully');
+    } catch (e) {
+      print('Error during logout: $e');
+      // Masih throw exception agar bisa ditangani di bloc
+      throw Exception('Logout failed: $e');
+    }
   }
 
   @override

@@ -293,6 +293,7 @@ class ProfileScreen extends StatelessWidget {
   void _showLogoutDialog(BuildContext context) {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
@@ -315,12 +316,73 @@ class ProfileScreen extends StatelessWidget {
           ),
           ElevatedButton(
             onPressed: () {
-              context.read<AuthBloc>().add(LogoutRequested());
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(
-                  builder: (context) => const LoginScreen(),
-                ),
+              // Tutup dialog konfirmasi
+              Navigator.pop(context);
+
+              // Tangkap konteks navigasi global yang aman
+              final scaffoldContext = Navigator.of(context).context;
+
+              // Dapatkan current user ID untuk dihapus token-nya
+              String? userId;
+              if (context.read<AuthBloc>().state is AuthAuthenticated) {
+                final state =
+                    context.read<AuthBloc>().state as AuthAuthenticated;
+                userId = state.user.id;
+              }
+
+              // Tampilkan loading dialog
+              BuildContext? dialogContext;
+              showDialog(
+                context: scaffoldContext,
+                barrierDismissible: false,
+                builder: (context) {
+                  dialogContext = context;
+                  return WillPopScope(
+                    onWillPop: () async => false,
+                    child: AlertDialog(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(height: 16),
+                          const CircularProgressIndicator(
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(kbpBlue900),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'Sedang keluar...',
+                            style: semiBoldTextStyle(size: 16),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               );
+
+              // Pendekatan baru: Langsung lakukan logout dan kelola navigasi secara mandiri
+              // daripada bergantung pada listener
+              context.read<AuthBloc>().add(LogoutRequested());
+
+              // Gunakan delay singkat untuk memberi waktu proses logout
+              Future.delayed(const Duration(seconds: 2), () {
+                // Tutup dialog loading jika masih terbuka
+                if (dialogContext != null && Navigator.canPop(dialogContext!)) {
+                  Navigator.pop(dialogContext!);
+                }
+
+                // Fallback jika global context tidak tersedia
+                Navigator.of(scaffoldContext).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                    builder: (context) => const LoginScreen(),
+                  ),
+                  (route) => false,
+                );
+              });
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: dangerR500,

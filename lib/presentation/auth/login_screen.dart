@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
 import 'package:livetrackingapp/presentation/auth/profile_setup_screen.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
@@ -17,6 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _passwordFocusNode = FocusNode();
 
   bool _isPasswordVisible = false;
   bool _rememberMe = false;
@@ -25,6 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
   }
 
@@ -45,11 +46,68 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         } else if (state is AuthError) {
-          showCustomSnackbar(
+          String title = 'Login Gagal';
+          IconData iconData = Icons.error_outline;
+          Color iconColor = dangerR500;
+
+          switch (state.code) {
+            case 'user-not-found':
+              title = 'Email Tidak Terdaftar';
+              break;
+            case 'wrong-password':
+              title = 'Password Salah';
+              FocusScope.of(context).requestFocus(_passwordFocusNode);
+              break;
+            case 'invalid-email':
+              title = 'Format Email Tidak Valid';
+              break;
+            case 'user-disabled':
+              title = 'Akun Dinonaktifkan';
+              break;
+            case 'too-many-requests':
+              title = 'Terlalu Banyak Percobaan';
+              iconData = Icons.timer_outlined;
+              iconColor = warningY500;
+              break;
+            case 'network-error':
+              title = 'Gangguan Koneksi';
+              iconData = Icons.wifi_off_outlined;
+              iconColor = warningY500;
+              break;
+          }
+
+          showDialog(
             context: context,
-            title: 'Login Gagal',
-            subtitle: state.message,
-            type: SnackbarType.danger,
+            builder: (context) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              title: Row(
+                children: [
+                  Icon(iconData, color: iconColor, size: 24),
+                  SizedBox(width: 12),
+                  Flexible(
+                    child: Text(
+                      title,
+                      style: semiBoldTextStyle(size: 18, color: neutral900),
+                    ),
+                  ),
+                ],
+              ),
+              content: Text(
+                state.message,
+                style: regularTextStyle(size: 14, color: neutral700),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(
+                    'Tutup',
+                    style: mediumTextStyle(size: 14, color: neutral700),
+                  ),
+                ),
+              ],
+            ),
           );
         }
       },
@@ -216,6 +274,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   const SizedBox(height: 8),
                                   TextFormField(
                                     controller: _passwordController,
+                                    focusNode: _passwordFocusNode,
                                     obscureText: !_isPasswordVisible,
                                     decoration: InputDecoration(
                                       hintText: 'Masukkan password Anda',
@@ -302,6 +361,44 @@ class _LoginScreenState extends State<LoginScreen> {
                                         size: 14, color: kbpBlue900),
                                   ),
                                 ),
+                              ),
+
+                              // Error Message
+                              BlocBuilder<AuthBloc, AuthState>(
+                                builder: (context, state) {
+                                  if (state is AuthError) {
+                                    return Container(
+                                      margin:
+                                          EdgeInsets.only(top: 16, bottom: 8),
+                                      padding: EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: dangerR50,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: dangerR200),
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Icon(
+                                            _getErrorIcon(state.code),
+                                            color: dangerR500,
+                                            size: 18,
+                                          ),
+                                          SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              _getErrorMessage(state.code),
+                                              style: regularTextStyle(
+                                                  size: 13, color: dangerR300),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }
+                                  return SizedBox.shrink();
+                                },
                               ),
 
                               // Login Button
@@ -413,5 +510,43 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
     );
+  }
+
+  IconData _getErrorIcon(String code) {
+    switch (code) {
+      case 'user-not-found':
+        return Icons.person_off_outlined;
+      case 'wrong-password':
+        return Icons.lock_open;
+      case 'invalid-email':
+        return Icons.alternate_email;
+      case 'user-disabled':
+        return Icons.person_off;
+      case 'too-many-requests':
+        return Icons.timer_outlined;
+      case 'network-error':
+        return Icons.wifi_off_outlined;
+      default:
+        return Icons.error_outline;
+    }
+  }
+
+  String _getErrorMessage(String code) {
+    switch (code) {
+      case 'user-not-found':
+        return 'Email tidak terdaftar. Hubungi admin untuk mendaftar.';
+      case 'wrong-password':
+        return 'Password yang Anda masukkan salah. Silakan coba lagi.';
+      case 'invalid-email':
+        return 'Format email tidak valid. Harap periksa kembali.';
+      case 'user-disabled':
+        return 'Akun Anda dinonaktifkan. Hubungi admin.';
+      case 'too-many-requests':
+        return 'Terlalu banyak percobaan gagal. Coba lagi nanti.';
+      case 'network-error':
+        return 'Gagal terhubung ke server. Periksa koneksi internet Anda.';
+      default:
+        return 'Terjadi kesalahan saat login. Silakan coba lagi.';
+    }
   }
 }
