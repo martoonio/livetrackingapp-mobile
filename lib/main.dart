@@ -11,8 +11,12 @@ import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:livetrackingapp/data/repositories/report_repositoryImpl.dart';
+import 'package:livetrackingapp/data/repositories/survey_repositoryImpl.dart';
+import 'package:livetrackingapp/data/source/firebase_survey_datasource.dart';
 import 'package:livetrackingapp/domain/repositories/report_repository.dart';
+import 'package:livetrackingapp/domain/repositories/survey_repository.dart';
 import 'package:livetrackingapp/domain/usecases/report_usecase.dart';
+import 'package:livetrackingapp/domain/usecases/survey_usecase.dart';
 import 'package:livetrackingapp/firebase_options.dart';
 import 'package:livetrackingapp/main_nav_screen.dart';
 import 'package:livetrackingapp/notification_utils.dart';
@@ -20,6 +24,7 @@ import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/auth/login_screen.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
+import 'package:livetrackingapp/presentation/survey/bloc/survey_bloc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:livetrackingapp/data/repositories/route_repositoryImpl.dart';
 import 'data/repositories/auth_repositoryImpl.dart';
@@ -65,13 +70,57 @@ void setupLocator() {
   getIt.registerLazySingleton<CreateReportUseCase>(
     () => CreateReportUseCase(getIt<ReportRepository>()),
   );
-  
+
   getIt.registerLazySingleton<SyncOfflineReportsUseCase>(
     () => SyncOfflineReportsUseCase(getIt<ReportRepository>()),
   );
-  
+
   getIt.registerLazySingleton<GetOfflineReportsUseCase>(
     () => GetOfflineReportsUseCase(getIt<ReportRepository>()),
+  );
+
+  getIt.registerLazySingleton<FirebaseSurveyDataSource>(
+    () => FirebaseSurveyDataSource(),
+  );
+
+  // Register Survey Repository
+  getIt.registerLazySingleton<SurveyRepository>(
+    () => SurveyRepositoryImpl(dataSource: getIt<FirebaseSurveyDataSource>()),
+  );
+
+  // Register Survey UseCases
+  getIt.registerLazySingleton<GetActiveSurveysUseCase>(
+    () => GetActiveSurveysUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<GetSurveyDetailsUseCase>(
+    () => GetSurveyDetailsUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<SubmitSurveyResponseUseCase>(
+    () => SubmitSurveyResponseUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<GetUserSurveyResponseUseCase>(
+    () => GetUserSurveyResponseUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<GetAllSurveysUseCase>(
+    () => GetAllSurveysUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<CreateSurveyUseCase>(
+    () => CreateSurveyUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<UpdateSurveyUseCase>(
+    () => UpdateSurveyUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<DeleteSurveyUseCase>(
+    () => DeleteSurveyUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<GetSurveyResponsesUseCase>(
+    () => GetSurveyResponsesUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<GetSurveyResponsesSummaryUseCase>(
+    () => GetSurveyResponsesSummaryUseCase(getIt<SurveyRepository>()),
+  );
+  getIt.registerLazySingleton<UpdateSurveyStatusUseCase>(
+    () => UpdateSurveyStatusUseCase(getIt<SurveyRepository>()),
   );
 }
 
@@ -117,7 +166,8 @@ Future<void> initializeApp() async {
     try {
       // Enable persistence only after authentication
       FirebaseDatabase.instance.setPersistenceEnabled(true);
-      print('Database persistence enabled for user: ${FirebaseAuth.instance.currentUser?.uid}');
+      print(
+          'Database persistence enabled for user: ${FirebaseAuth.instance.currentUser?.uid}');
     } catch (e) {
       print('Error enabling persistence: $e');
     }
@@ -235,13 +285,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             }
           });
         }
-        
+
         // Sinkronisasi laporan offline saat aplikasi kembali aktif
         _syncOfflineReports(context);
       });
     }
   }
-  
+
   // Method untuk sinkronisasi laporan offline
   void _syncOfflineReports(BuildContext? context) {
     if (context != null) {
@@ -266,13 +316,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
     // Proses initialMessage jika ada
     if (widget.initialMessage != null) {
-      print('Processing initial message: ${widget.initialMessage?.notification?.title}');
+      print(
+          'Processing initial message: ${widget.initialMessage?.notification?.title}');
       _processNotificationMessage(widget.initialMessage!);
     }
 
     // Proses notifikasi tertunda jika ada
     if (_pendingNotification != null) {
-      print('Processing pending notification: ${_pendingNotification?.notification?.title}');
+      print(
+          'Processing pending notification: ${_pendingNotification?.notification?.title}');
       _processNotificationMessage(_pendingNotification!);
       _pendingNotification = null;
     }
@@ -290,8 +342,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
         // Retry setelah delay tambahan jika masih null
         Future.delayed(const Duration(seconds: 1), () {
-          if (navigatorKey.currentContext != null && _pendingNotification != null) {
-            handleNotificationClick(_pendingNotification!, navigatorKey.currentContext);
+          if (navigatorKey.currentContext != null &&
+              _pendingNotification != null) {
+            handleNotificationClick(
+                _pendingNotification!, navigatorKey.currentContext);
             _pendingNotification = null;
           }
         });
@@ -309,7 +363,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             repository: getIt<AuthRepository>(),
           )..add(CheckAuthStatus()),
         ),
-        
+
         // PatrolBloc - untuk fitur patroli
         BlocProvider<PatrolBloc>(
           create: (context) {
@@ -320,7 +374,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             return bloc;
           },
         ),
-        
+
         // AdminBloc - untuk fitur admin (satu instance saja)
         BlocProvider<AdminBloc>(
           create: (context) {
@@ -335,13 +389,30 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           },
           lazy: false, // Initialize immediately
         ),
-        
+
         // ReportBloc - untuk fitur pelaporan dengan dukungan offline
         BlocProvider<ReportBloc>(
           create: (context) => ReportBloc(
             createReportUseCase: getIt<CreateReportUseCase>(),
             syncOfflineReportsUseCase: getIt<SyncOfflineReportsUseCase>(),
             getOfflineReportsUseCase: getIt<GetOfflineReportsUseCase>(),
+          ),
+        ),
+
+        BlocProvider<SurveyBloc>(
+          create: (context) => SurveyBloc(
+            getActiveSurveysUseCase: getIt<GetActiveSurveysUseCase>(),
+            getSurveyDetailsUseCase: getIt<GetSurveyDetailsUseCase>(),
+            submitSurveyResponseUseCase: getIt<SubmitSurveyResponseUseCase>(),
+            getAllSurveysUseCase: getIt<GetAllSurveysUseCase>(),
+            createSurveyUseCase: getIt<CreateSurveyUseCase>(),
+            updateSurveyUseCase: getIt<UpdateSurveyUseCase>(),
+            deleteSurveyUseCase: getIt<DeleteSurveyUseCase>(),
+            getSurveyResponsesUseCase: getIt<GetSurveyResponsesUseCase>(),
+            getSurveyResponsesSummaryUseCase:
+                getIt<GetSurveyResponsesSummaryUseCase>(),
+            updateSurveyStatusUseCase: getIt<UpdateSurveyStatusUseCase>(),
+            getUserSurveyResponseUseCase: getIt<GetUserSurveyResponseUseCase>(),
           ),
         ),
       ],
@@ -354,11 +425,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             theme: ThemeData(
               scaffoldBackgroundColor: neutralWhite,
               primaryColor: kbpBlue900,
-              colorScheme: ColorScheme.fromSwatch().copyWith(primary: kbpBlue900),
+              colorScheme:
+                  ColorScheme.fromSwatch().copyWith(primary: kbpBlue900),
               fontFamily: 'Plus Jakarta Sans',
             ),
             home: (state is AuthAuthenticated)
-                ? MainNavigationScreen(userRole: widget.userRole ?? 'User')
+                ? MainNavigationScreen(userRole: widget.userRole ?? 'patrol')
                 : const LoginScreen(),
           );
         },
