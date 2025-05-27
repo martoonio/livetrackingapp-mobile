@@ -13,7 +13,6 @@ import 'package:flutter/services.dart';
 import 'dart:math' as Math;
 
 class AdminMapScreen extends StatefulWidget {
-  // --- FITUR BARU: PARAMETER UNTUK HIGHLIGHT LOKASI DARI NOTIFIKASI ---
   final String? highlightedTaskId;
   final double? highlightedLat;
   final double? highlightedLng;
@@ -24,7 +23,6 @@ class AdminMapScreen extends StatefulWidget {
     this.highlightedLat,
     this.highlightedLng,
   });
-  // --- AKHIR FITUR BARU ---
 
   @override
   State<AdminMapScreen> createState() => AdminMapScreenState();
@@ -37,7 +35,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
   final Map<String, PatrolTask> _activeTasks = {};
   final Map<String, List<LatLng>> _taskRoutes = {};
 
-  // Custom marker icons
   BitmapDescriptor? _defaultIcon;
 
   bool _isLoading = true;
@@ -47,7 +44,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
   Timer? _refreshTimer;
   DateTime _lastRefresh = DateTime.now();
 
-  // Filter options
   final Map<String, bool> _clusterFilters = {};
   bool _showAllClusters = true;
   final Map<String, String> _clusterNames = {};
@@ -59,22 +55,21 @@ class AdminMapScreenState extends State<AdminMapScreen> {
     _loadActiveTasks();
     _loadClusters();
 
-    // Set timer to refresh tasks every 30 seconds
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       _loadActiveTasks();
     });
 
-    // --- FITUR BARU: TANGANI HIGHLIGHT LOKASI DARI NOTIFIKASI SAAT INIT ---
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (widget.highlightedTaskId != null &&
-          widget.highlightedLat != null &&
-          widget.highlightedLng != null) {
-        _selectedTaskId = widget.highlightedTaskId; // Set selected task
-        _centerMapOnSpecificLocation(
-            LatLng(widget.highlightedLat!, widget.highlightedLng!));
-      }
-    });
-    // --- AKHIR FITUR BARU ---
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) {
+        if (widget.highlightedTaskId != null &&
+            widget.highlightedLat != null &&
+            widget.highlightedLng != null) {
+          _selectedTaskId = widget.highlightedTaskId;
+          _centerMapOnSpecificLocation(
+              LatLng(widget.highlightedLat!, widget.highlightedLng!));
+        }
+      },
+    );
   }
 
   @override
@@ -87,13 +82,10 @@ class AdminMapScreenState extends State<AdminMapScreen> {
     if (_mapController.isCompleted) {
       final GoogleMapController controller = await _mapController.future;
       controller.animateCamera(
-        CameraUpdate.newLatLngZoom(
-            location, 18.0), // Zoom ke lokasi dengan zoom level 18
+        CameraUpdate.newLatLngZoom(location, 18.0),
       );
     }
   }
-
-  // Tambahkan di _AdminMapScreenState
 
   Future<void> _loadClusters() async {
     try {
@@ -114,12 +106,10 @@ class AdminMapScreenState extends State<AdminMapScreen> {
         }
       });
 
-      // Update state dengan semua cluster di-check secara default
       setState(() {
         _clusterNames.clear();
         _clusterNames.addAll(newClusterNames);
 
-        // Init filter map untuk semua cluster
         _clusterFilters.clear();
         for (var clusterId in _clusterNames.keys) {
           _clusterFilters[clusterId] = true;
@@ -134,9 +124,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
 
   Future<void> _loadMarkerIcons() async {
     try {
-
-
-
       _defaultIcon = await _getBitmapDescriptorFromAssetBytes(
           'assets/markers/default_marker.png', 120);
     } catch (e) {
@@ -150,7 +137,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
       final ByteData data = await rootBundle.load(path);
       final Uint8List bytes = data.buffer.asUint8List();
 
-      // Resize the image to the desired size
       final ui.Codec codec =
           await ui.instantiateImageCodec(bytes, targetWidth: width);
       final ui.FrameInfo fi = await codec.getNextFrame();
@@ -169,8 +155,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
     }
   }
 
-  // Perbaiki bagian query ke Firebase, lebih spesifik untuk status "ongoing"
-
   Future<void> _loadActiveTasks() async {
     if (mounted) {
       setState(() {
@@ -187,20 +171,17 @@ class AdminMapScreenState extends State<AdminMapScreen> {
     try {
       _lastRefresh = DateTime.now();
 
-      // Query hanya tasks dengan status "ongoing"
       final snapshot = await FirebaseDatabase.instance
           .ref()
           .child('tasks')
           .orderByChild('status')
-          .equalTo('ongoing') // Fokus hanya pada status "ongoing"
+          .equalTo('ongoing')
           .get();
 
-      // Jika tidak ada task ongoing, coba cek status lain yang mungkin setara
       if (!snapshot.exists ||
           (snapshot.value as Map<dynamic, dynamic>).isEmpty) {
         print('No tasks with status "ongoing", trying alternative statuses');
 
-        // Coba cek task dengan status "in_progress"
         final inProgressSnapshot = await FirebaseDatabase.instance
             .ref()
             .child('tasks')
@@ -208,13 +189,11 @@ class AdminMapScreenState extends State<AdminMapScreen> {
             .equalTo('in_progress')
             .get();
 
-        // Process inProgressSnapshot jika ada
         if (inProgressSnapshot.exists && inProgressSnapshot.value != null) {
           await _processTaskSnapshot(inProgressSnapshot);
           return;
         }
 
-        // Jika semua query tidak menghasilkan data
         setState(() {
           _isLoading = false;
           _activeTasks.clear();
@@ -224,7 +203,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
         return;
       }
 
-      // Jika ada data, proses snapshot
       await _processTaskSnapshot(snapshot);
     } catch (e) {
       print('Error loading active tasks: $e');
@@ -236,7 +214,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
     }
   }
 
-// Metode helper untuk memproses task snapshot
   Future<void> _processTaskSnapshot(DataSnapshot snapshot) async {
     if (!snapshot.exists) {
       print('No tasks found');
@@ -249,12 +226,10 @@ class AdminMapScreenState extends State<AdminMapScreen> {
       return;
     }
 
-    // Process tasks
     final Map<dynamic, dynamic> allTasks =
         snapshot.value as Map<dynamic, dynamic>;
     final Map<String, PatrolTask> newActiveTasks = {};
 
-    // Extract all active tasks
     await Future.forEach(allTasks.entries,
         (MapEntry<dynamic, dynamic> entry) async {
       final taskId = entry.key.toString();
@@ -263,15 +238,12 @@ class AdminMapScreenState extends State<AdminMapScreen> {
       try {
         final task = _createPatrolTaskFromMap(taskId, taskData);
 
-        // Store the task
         newActiveTasks[taskId] = task;
 
-        // Fetch officer details if needed
-        if (task.officerName!.startsWith('Officer #')) {
+        if (task.officerName.startsWith('Officer #')) {
           await _fetchOfficerInfo(task);
         }
 
-        // Extract route path if available
         if (taskData['route_path'] != null && taskData['route_path'] is Map) {
           final routePath = _extractRoutePath(
               taskData['route_path'] as Map<dynamic, dynamic>);
@@ -305,12 +277,13 @@ class AdminMapScreenState extends State<AdminMapScreen> {
     return PatrolTask(
       taskId: taskId,
       userId: data['userId']?.toString() ?? '',
-      // vehicleId: data['vehicleId']?.toString() ?? '',
       status: data['status']?.toString() ?? 'unknown',
       assignedStartTime: _parseDateTime(data['assignedStartTime']),
       assignedEndTime: _parseDateTime(data['assignedEndTime']),
       startTime: _parseDateTime(data['startTime']),
       endTime: _parseDateTime(data['endTime']),
+      officerName: data['officerName']?.toString() ?? 'Unknown Officer',
+      clusterName: data['clusterName']?.toString() ?? 'Unknown Cluster',
       distance: data['distance'] != null
           ? (data['distance'] as num).toDouble()
           : null,
@@ -422,26 +395,22 @@ class AdminMapScreenState extends State<AdminMapScreen> {
             return;
           }
 
-          // --- FITUR BARU: MARKER MOCK LOCATION ---
           BitmapDescriptor markerIcon;
           if (task.mockLocationDetected == true) {
             markerIcon = BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueViolet); // Warna ungu untuk mock location
+                BitmapDescriptor.hueViolet);
           } else {
             markerIcon = _getMarkerIconForCluster(task.clusterId);
           }
-          // --- AKHIR FITUR BARU ---
 
           final marker = Marker(
             markerId: MarkerId(taskId),
             position: lastPosition,
             infoWindow: InfoWindow(
-              title:
-                  '${task.officerName}${task.timeliness != null ? " (${getTimelinessText(task.timeliness)})" : ""}',
-              snippet:
-                  'Tatar: ${_clusterNames[task.clusterId] ?? task.clusterId.substring(0, Math.min(8, task.clusterId.length))}, Jarak: ${((task.distance ?? 0) / 1000).toStringAsFixed(2)} km',
+              title: task.officerName,
+              snippet: _clusterNames[task.clusterId] ?? task.clusterName,
             ),
-            icon: markerIcon, // Gunakan markerIcon yang sudah ditentukan
+            icon: markerIcon,
             onTap: () {
               setState(() {
                 _selectedTaskId = taskId;
@@ -486,17 +455,15 @@ class AdminMapScreenState extends State<AdminMapScreen> {
 
     final GoogleMapController controller = await _mapController.future;
 
-    // If there's only one marker, center on it with closer zoom
     if (_markers.length == 1) {
       final position = _markers.first.position;
       controller.animateCamera(CameraUpdate.newLatLngZoom(
         position,
-        17.0, // Closer zoom for single marker
+        17.0,
       ));
       return;
     }
 
-    // For multiple markers, fit bounds
     final double minLat = _markers
         .map((m) => m.position.latitude)
         .reduce((a, b) => a < b ? a : b);
@@ -519,19 +486,16 @@ class AdminMapScreenState extends State<AdminMapScreen> {
     controller.animateCamera(update);
   }
 
-  // --- FITUR BARU: METODE PUBLIK UNTUK HIGHLIGHT LOKASI ---
   Future<void> highlightLocation(String taskId, double lat, double lng) async {
     setState(() {
-      _selectedTaskId = taskId; // Highlight the task
+      _selectedTaskId = taskId;
     });
-    _updateMapMarkers(); // Rebuild markers to apply highlight
-
+    _updateMapMarkers();
     if (_mapController.isCompleted) {
       final GoogleMapController controller = await _mapController.future;
       controller.animateCamera(
         CameraUpdate.newLatLngZoom(LatLng(lat, lng), 18.0), // Zoom ke lokasi
       );
-      // Tampilkan info window untuk marker yang bersangkutan jika ada
       Future.delayed(const Duration(milliseconds: 500), () {
         if (_markers.any((marker) => marker.markerId.value == taskId)) {
           controller.showMarkerInfoWindow(MarkerId(taskId));
@@ -539,7 +503,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
       });
     }
   }
-  // --- AKHIR FITUR BARU ---
 
   void _showTaskDetailsBottomSheet(PatrolTask task) {
     showModalBottomSheet(
@@ -567,19 +530,18 @@ class AdminMapScreenState extends State<AdminMapScreen> {
                       color: kbpBlue100,
                       borderRadius: BorderRadius.circular(24),
                     ),
-                    child: task.officerPhotoUrl!.isNotEmpty
+                    child: task.officerPhotoUrl.isNotEmpty
                         ? ClipRRect(
                             borderRadius: BorderRadius.circular(24),
                             child: Image.network(
-                              task.officerPhotoUrl!,
+                              task.officerPhotoUrl,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) =>
                                   Center(
                                 child: Text(
                                   task.officerName
-                                          ?.substring(0, 1)
-                                          .toUpperCase() ??
-                                      'P',
+                                          .substring(0, 1)
+                                          .toUpperCase(),
                                   style: boldTextStyle(
                                       size: 18, color: kbpBlue900),
                                 ),
@@ -588,8 +550,7 @@ class AdminMapScreenState extends State<AdminMapScreen> {
                           )
                         : Center(
                             child: Text(
-                              task.officerName?.substring(0, 1).toUpperCase() ??
-                                  'P',
+                              task.officerName.substring(0, 1).toUpperCase(),
                               style: boldTextStyle(size: 18, color: kbpBlue900),
                             ),
                           ),
@@ -604,12 +565,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
                           style: boldTextStyle(size: 16, color: kbpBlue900),
                           overflow: TextOverflow.ellipsis,
                         ),
-                        // Text(
-                        //   task.vehicleId.isEmpty
-                        //       ? 'Tanpa Kendaraan'
-                        //       : task.vehicleId,
-                        //   style: regularTextStyle(size: 14, color: kbpBlue700),
-                        // ),
                       ],
                     ),
                   ),
@@ -696,10 +651,11 @@ class AdminMapScreenState extends State<AdminMapScreen> {
                   ),
                   Expanded(
                     child: _infoItem(
-                      Icons.speed,
+                      Icons.home_work_outlined,
                       'Tatar',
-                      task.clusterId
-                          .substring(0, Math.min(8, task.clusterId.length)),
+                      _clusterNames[task.clusterId] ??
+                          task.clusterId
+                              .substring(0, Math.min(8, task.clusterId.length)),
                     ),
                   ),
                 ],
@@ -1045,17 +1001,15 @@ class AdminMapScreenState extends State<AdminMapScreen> {
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          // Fit bounds button
           FloatingActionButton(
             onPressed: _centerMapOnAllMarkers,
             backgroundColor: kbpBlue900,
             heroTag: 'fitBounds',
             mini: true,
-            child: const Icon(Icons.fit_screen),
             tooltip: 'Tampilkan Semua Petugas',
+            child: const Icon(Icons.fit_screen),
           ),
           const SizedBox(height: 12),
-          // My location button
           FloatingActionButton(
             onPressed: () async {
               if (!_mapController.isCompleted) return;
@@ -1069,8 +1023,8 @@ class AdminMapScreenState extends State<AdminMapScreen> {
             },
             backgroundColor: kbpBlue900,
             heroTag: 'myLocation',
-            child: const Icon(Icons.my_location),
             tooltip: 'Lokasi Saya',
+            child: const Icon(Icons.my_location),
           ),
         ],
       ),

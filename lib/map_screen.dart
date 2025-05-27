@@ -2970,7 +2970,6 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                   ),
 
-                  // Peringatan jika deteksi >= 3
                   if (detectionCount >= 3)
                     Container(
                       margin: const EdgeInsets.only(top: 16),
@@ -3003,7 +3002,6 @@ class _MapScreenState extends State<MapScreen> {
               ),
             ),
 
-            // Button action
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
               child: ElevatedButton(
@@ -3038,8 +3036,6 @@ class _MapScreenState extends State<MapScreen> {
     super.dispose();
   }
 
-  // Perbaikan tampilan MapScreen
-
   @override
   Widget build(BuildContext context) {
     return BlocListener<PatrolBloc, PatrolState>(
@@ -3055,9 +3051,9 @@ class _MapScreenState extends State<MapScreen> {
 
         if (state is PatrolLoaded) {
           if (state.isPatrolling) {
-            _enableWakelock(); // Aktifkan wakelock saat patroli aktif
+            _enableWakelock();
           } else {
-            _disableWakelock(); // Nonaktifkan wakelock saat patroli berhenti
+            _disableWakelock();
           }
         }
       },

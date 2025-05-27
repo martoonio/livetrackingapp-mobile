@@ -31,7 +31,14 @@ class PatrolTask {
   String? _vehicleName;
 
   String get officerName {
-    if (_officerName == null || _officerName == 'Loading...') {
+    if (_officerName == null ||
+        _officerName == 'Loading...' ||
+        _officerName!.isEmpty) {
+      // Gunakan officerId sebagai fallback, jika ada
+      if (officerId.isNotEmpty) {
+        return 'Officer #${officerId.substring(0, Math.min(5, officerId.length))}';
+      }
+      // Jika officerId kosong, baru gunakan userId
       return userId.isNotEmpty
           ? 'Officer #${userId.substring(0, Math.min(5, userId.length))}'
           : 'Unknown Officer';
@@ -263,13 +270,18 @@ class PatrolTask {
 
   Future<void> fetchOfficerName(DatabaseReference database) async {
     try {
-      if (clusterId.isEmpty || userId.isEmpty) {
+      // First check: mencoba dengan officerId jika tersedia
+      String userIdToSearch = officerId.isNotEmpty ? officerId : userId;
+
+      if (clusterId.isEmpty || userIdToSearch.isEmpty) {
         _officerName = 'Unknown Officer';
         return;
       }
 
-      print('Fetching officer name for userId: $userId in cluster: $clusterId');
+      print(
+          'Fetching officer name for userId: $userIdToSearch in cluster: $clusterId');
 
+      // Cek di path users/{clusterId}/officers
       final officersSnapshot =
           await database.child('users/$clusterId/officers').get();
 
@@ -281,7 +293,11 @@ class PatrolTask {
           print('Officers data is a List with ${officersList.length} entries');
 
           for (var officerData in officersList) {
-            if (officerData is Map && officerData['id'] == userId) {
+            // Cek ID yang sesuai
+            if (officerData is Map &&
+                (officerData['id'] == userIdToSearch ||
+                    officerData['id'] == userId ||
+                    officerData['id'] == officerId)) {
               _officerName =
                   officerData['name']?.toString() ?? 'Unknown Officer';
               _officerPhotoUrl = officerData['photo_url']?.toString();
@@ -290,17 +306,33 @@ class PatrolTask {
             }
           }
         } else if (data is Map<dynamic, dynamic>) {
-          if (data.containsKey(userId) && data[userId] is Map) {
-            final officerData = data[userId];
+          // Mencoba langsung dengan key userId
+          if (data.containsKey(userIdToSearch) && data[userIdToSearch] is Map) {
+            final officerData = data[userIdToSearch];
             _officerName = officerData['name']?.toString() ?? 'Unknown Officer';
             _officerPhotoUrl = officerData['photo_url']?.toString();
             print('Found officer directly by key: $_officerName');
             return;
           }
 
+          // Mencoba langsung dengan key officerId jika berbeda
+          if (officerId.isNotEmpty &&
+              data.containsKey(officerId) &&
+              data[officerId] is Map) {
+            final officerData = data[officerId];
+            _officerName = officerData['name']?.toString() ?? 'Unknown Officer';
+            _officerPhotoUrl = officerData['photo_url']?.toString();
+            print('Found officer directly by officerId: $_officerName');
+            return;
+          }
+
+          // Cari di semua entries dengan membandingkan ID
           for (var entry in data.entries) {
             final officerData = entry.value;
-            if (officerData is Map && officerData['id'] == userId) {
+            if (officerData is Map &&
+                (officerData['id'] == userIdToSearch ||
+                    officerData['id'] == userId ||
+                    officerData['id'] == officerId)) {
               _officerName =
                   officerData['name']?.toString() ?? 'Unknown Officer';
               _officerPhotoUrl = officerData['photo_url']?.toString();
@@ -311,7 +343,8 @@ class PatrolTask {
         }
       }
 
-      final userSnapshot = await database.child('users/$userId').get();
+      // Jika tidak ditemukan di officers, coba cari langsung di users/{userId}
+      final userSnapshot = await database.child('users/$userIdToSearch').get();
       if (userSnapshot.exists && userSnapshot.value != null) {
         final userData = userSnapshot.value;
         if (userData is Map<dynamic, dynamic>) {
@@ -323,14 +356,33 @@ class PatrolTask {
         }
       }
 
-      _officerName = userId.isNotEmpty
-          ? 'Officer #${userId.substring(0, Math.min(5, userId.length))}'
+      // Jika userId dan officerId berbeda, coba cek dengan officerId
+      if (officerId.isNotEmpty && officerId != userId) {
+        final officerSnapshot = await database.child('users/$officerId').get();
+        if (officerSnapshot.exists && officerSnapshot.value != null) {
+          final userData = officerSnapshot.value;
+          if (userData is Map<dynamic, dynamic>) {
+            _officerName = userData['name']?.toString() ?? 'Unknown Officer';
+            _officerPhotoUrl = userData['photo_url']?.toString() ??
+                userData['photoUrl']?.toString();
+            print('Found officer from direct officerId lookup: $_officerName');
+            return;
+          }
+        }
+      }
+
+      // Fallback jika semua pencarian gagal
+      _officerName = userIdToSearch.isNotEmpty
+          ? 'Officer #${userIdToSearch.substring(0, Math.min(5, userIdToSearch.length))}'
           : 'Unknown Officer';
     } catch (e, stack) {
       print('Error fetching officer name: $e');
       print('Stack trace: $stack');
-      _officerName = userId.isNotEmpty
-          ? 'Officer #${userId.substring(0, Math.min(5, userId.length))}'
+
+      // Pastikan untuk menggunakan officerId jika tersedia sebagai fallback
+      String userIdToSearch = officerId.isNotEmpty ? officerId : userId;
+      _officerName = userIdToSearch.isNotEmpty
+          ? 'Officer #${userIdToSearch.substring(0, Math.min(5, userIdToSearch.length))}'
           : 'Unknown Officer';
     }
   }

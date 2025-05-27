@@ -39,14 +39,11 @@ export 'package:livetrackingapp/main.dart' show navigatorKey;
 final getIt = GetIt.instance;
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 
-// Navigator key global untuk navigasi dari mana saja
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// Box untuk menyimpan data offline
 late Box offlineReportsBox;
 
 void setupLocator() {
-  // Register repositories
   getIt.registerLazySingleton<RouteRepository>(
     () => RouteRepositoryImpl(),
   );
@@ -57,7 +54,6 @@ void setupLocator() {
     ),
   );
 
-  // Register report repository dengan Hive storage
   getIt.registerLazySingleton<ReportRepository>(
     () => ReportRepositoryImpl(
       firebaseStorage: FirebaseStorage.instance,
@@ -66,7 +62,6 @@ void setupLocator() {
     ),
   );
 
-  // Register report use cases
   getIt.registerLazySingleton<CreateReportUseCase>(
     () => CreateReportUseCase(getIt<ReportRepository>()),
   );
@@ -83,12 +78,10 @@ void setupLocator() {
     () => FirebaseSurveyDataSource(),
   );
 
-  // Register Survey Repository
   getIt.registerLazySingleton<SurveyRepository>(
     () => SurveyRepositoryImpl(dataSource: getIt<FirebaseSurveyDataSource>()),
   );
 
-  // Register Survey UseCases
   getIt.registerLazySingleton<GetActiveSurveysUseCase>(
     () => GetActiveSurveysUseCase(getIt<SurveyRepository>()),
   );
@@ -132,7 +125,7 @@ Future<void> requestLocationPermission() async {
     print('Location permission denied');
   } else if (status.isPermanentlyDenied) {
     print('Location permission permanently denied');
-    await openAppSettings(); // Buka pengaturan aplikasi jika izin ditolak permanen
+    await openAppSettings();
   }
 }
 
@@ -144,27 +137,23 @@ Future<void> requestNotificationPermission() async {
     print('Notification permission denied');
   } else if (status.isPermanentlyDenied) {
     print('Notification permission permanently denied');
-    await openAppSettings(); // Buka pengaturan aplikasi jika izin ditolak permanen
+    await openAppSettings();
   }
 }
 
 Future<void> initializeApp() async {
-  // Initialize Firebase dengan platform-specific options
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Wait for auth state to be determined
   await Future.delayed(const Duration(seconds: 1));
 
   await initializeDateFormatting('id_ID', null);
 
-  // Initialize Hive dan box untuk offline reports
   await Hive.initFlutter();
   offlineReportsBox = await Hive.openBox('offline_reports');
   print('Initialized Hive box for offline reports');
 
   if (FirebaseAuth.instance.currentUser != null) {
     try {
-      // Enable persistence only after authentication
       FirebaseDatabase.instance.setPersistenceEnabled(true);
       print(
           'Database persistence enabled for user: ${FirebaseAuth.instance.currentUser?.uid}');
@@ -181,16 +170,15 @@ Future<String?> getUserRole() async {
   try {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      return null; // Pengguna belum login
+      return null;
     }
 
-    // Referensi ke path pengguna di Realtime Database
     final userRef = FirebaseDatabase.instance.ref('users/${user.uid}');
     final snapshot = await userRef.get();
 
     if (snapshot.exists) {
       final data = snapshot.value as Map<dynamic, dynamic>;
-      return data['role'] as String?; // Ambil nilai role
+      return data['role'] as String?;
     } else {
       print('User data not found in database');
       return null;
@@ -208,7 +196,6 @@ void main() async {
   await initNotification();
   setupLocator();
 
-  // Cek apakah aplikasi dibuka dari notifikasi saat tertutup
   RemoteMessage? initialMessage =
       await FirebaseMessaging.instance.getInitialMessage();
 
@@ -226,7 +213,6 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
-  bool _isAppReady = false;
   RemoteMessage? _pendingNotification;
 
   @override
@@ -235,13 +221,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
     WidgetsBinding.instance.addObserver(this);
 
-    // Tandai aplikasi siap setelah render pertama
     WidgetsBinding.instance.addPostFrameCallback((_) {
       setState(() {
-        _isAppReady = true;
       });
 
-      // Proses notifikasi tertunda setelah app siap
       _processNotifications();
     });
   }
@@ -252,7 +235,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // Tambahkan log untuk membantu debug
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     log('App lifecycle state changed: $state');
@@ -261,7 +243,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       log('App resumed, checking for pending notifications');
 
-      // Beri waktu lebih lama untuk context tersedia
       Future.delayed(const Duration(milliseconds: 1000), () {
         final context = navigatorKey.currentContext;
         log('Context after resume delay: ${context != null ? "available" : "still null"}');
@@ -273,7 +254,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         } else if (_pendingNotification != null) {
           log('Still no context after resume, scheduling another retry');
 
-          // Retry dengan interval lebih lama
           Future.delayed(const Duration(milliseconds: 2000), () {
             final retryContext = navigatorKey.currentContext;
             if (_pendingNotification != null && retryContext != null) {
@@ -286,7 +266,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           });
         }
 
-        // Sinkronisasi laporan offline saat aplikasi kembali aktif
         _syncOfflineReports(context);
       });
     }
@@ -296,7 +275,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void _syncOfflineReports(BuildContext? context) {
     if (context != null) {
       try {
-        // Periksa apakah ada laporan offline yang perlu disinkronkan
         getIt<GetOfflineReportsUseCase>().call().then((reports) {
           if (reports.isNotEmpty) {
             print('Found ${reports.length} offline reports to sync');
@@ -309,19 +287,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
   }
 
-  // Proses notifikasi tertunda dan initialMessage
   void _processNotifications() async {
-    // Beri waktu tambahan untuk memastikan MaterialApp selesai diinisialisasi
     await Future.delayed(const Duration(milliseconds: 1000));
 
-    // Proses initialMessage jika ada
     if (widget.initialMessage != null) {
       print(
           'Processing initial message: ${widget.initialMessage?.notification?.title}');
       _processNotificationMessage(widget.initialMessage!);
     }
 
-    // Proses notifikasi tertunda jika ada
     if (_pendingNotification != null) {
       print(
           'Processing pending notification: ${_pendingNotification?.notification?.title}');
@@ -330,9 +304,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
   }
 
-  // Helper untuk memproses pesan notifikasi
   void _processNotificationMessage(RemoteMessage message) {
-    // Tunggu sedikit untuk memastikan navigatorKey.currentContext tersedia
     Future.delayed(const Duration(milliseconds: 500), () {
       if (navigatorKey.currentContext != null) {
         handleNotificationClick(message, navigatorKey.currentContext);
@@ -340,7 +312,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         print('Navigator context still null, saving notification for later');
         _pendingNotification = message;
 
-        // Retry setelah delay tambahan jika masih null
         Future.delayed(const Duration(seconds: 1), () {
           if (navigatorKey.currentContext != null &&
               _pendingNotification != null) {
@@ -357,14 +328,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return MultiBlocProvider(
       providers: [
-        // AuthBloc - untuk otentikasi
         BlocProvider<AuthBloc>(
           create: (context) => AuthBloc(
             repository: getIt<AuthRepository>(),
           )..add(CheckAuthStatus()),
         ),
 
-        // PatrolBloc - untuk fitur patroli
         BlocProvider<PatrolBloc>(
           create: (context) {
             final bloc = PatrolBloc(
@@ -375,22 +344,19 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           },
         ),
 
-        // AdminBloc - untuk fitur admin (satu instance saja)
         BlocProvider<AdminBloc>(
           create: (context) {
             final bloc = AdminBloc(
               repository: getIt<RouteRepository>(),
             );
-            // Load semua data yang diperlukan
-            bloc.add(LoadAllClusters());
-            bloc.add(LoadAllTasks());
-            bloc.add(LoadOfficersAndVehicles());
+            bloc.add(const LoadAllClusters());
+            bloc.add(const LoadAllTasks());
+            bloc.add(const LoadOfficersAndVehicles());
             return bloc;
           },
-          lazy: false, // Initialize immediately
+          lazy: false,
         ),
 
-        // ReportBloc - untuk fitur pelaporan dengan dukungan offline
         BlocProvider<ReportBloc>(
           create: (context) => ReportBloc(
             createReportUseCase: getIt<CreateReportUseCase>(),
@@ -418,9 +384,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       ],
       child: BlocBuilder<AuthBloc, AuthState>(
         builder: (context, state) {
-          print('Current auth state: $state'); // Debug print
+          print('Current auth state: $state');
           return MaterialApp(
-            navigatorKey: navigatorKey, // Tambahkan navigator key di sini
+            navigatorKey: navigatorKey,
             title: 'Live Tracking App',
             theme: ThemeData(
               scaffoldBackgroundColor: neutralWhite,

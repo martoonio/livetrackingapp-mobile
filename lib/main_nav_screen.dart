@@ -32,8 +32,6 @@ class MainNavigationScreen extends StatefulWidget {
 class MainNavigationScreenState extends State<MainNavigationScreen>
     with SingleTickerProviderStateMixin {
   int _selectedIndex = 0;
-  // ignore: unused_field
-  int _previousIndex = 0;
   late final List<Widget> _pages;
   late final PageController _pageController;
 
@@ -46,27 +44,32 @@ class MainNavigationScreenState extends State<MainNavigationScreen>
     super.initState();
     _selectedIndex = widget.initialTabIndex;
 
-    // Inisialisasi pages dengan GlobalKey unik
     if (widget.userRole == 'commandCenter') {
       _pages = [
-        AdminMapScreen( //
+        AdminMapScreen(
           key: _adminMapScreenKey,
           highlightedTaskId: widget.highlightedTaskId,
           highlightedLat: widget.highlightedLat,
           highlightedLng: widget.highlightedLng,
         ),
-        AdminDashboardScreen(key: _getKeyForIndex(1)), //
-        ManageClustersScreen(key: _getKeyForIndex(2)), //
-        // Halaman Survei untuk CommandCenter
-        ManageSurveysScreen(key: _getKeyForIndex(3)), // [INFO: Kerangka kode ManageSurveysScreen telah diberikan sebelumnya]
-        ProfileScreen(key: _getKeyForIndex(4)), //
+        AdminDashboardScreen(key: _getKeyForIndex(1)),
+        ManageClustersScreen(key: _getKeyForIndex(2)),
+        ManageSurveysScreen(
+          key: _getKeyForIndex(
+            3,
+          ),
+        ),
+        ProfileScreen(key: _getKeyForIndex(4)),
       ];
-    } else { // Untuk role 'patrol' atau role lainnya
+    } else {
       _pages = [
-        HomeScreen(key: _getKeyForIndex(0)), //
-        // Halaman Survei untuk Patrol
-        SurveyListScreen(key: _getKeyForIndex(1)), // [INFO: Kerangka kode SurveyListScreen telah diberikan sebelumnya]
-        ProfileScreen(key: _getKeyForIndex(2)), //
+        HomeScreen(key: _getKeyForIndex(0)),
+        SurveyListScreen(
+          key: _getKeyForIndex(
+            1,
+          ),
+        ),
+        ProfileScreen(key: _getKeyForIndex(2)),
       ];
     }
 
@@ -102,21 +105,21 @@ class MainNavigationScreenState extends State<MainNavigationScreen>
     if (widget.userRole == 'commandCenter') {
       navBarItems = [
         const NavBarItem(
-          activeIcon: Icons.map, // Ganti ikon Home menjadi Map untuk Admin
+          activeIcon: Icons.map,
           inactiveIcon: Icons.map_outlined,
-          label: 'Peta', // Label diubah menjadi Peta
+          label: 'Peta',
         ),
         const NavBarItem(
-          activeIcon: Icons.task_alt, // Ikon yang lebih relevan untuk Task/Dashboard
+          activeIcon: Icons.task_alt,
           inactiveIcon: Icons.task_alt_outlined,
-          label: 'Tugas', // Label diubah menjadi Tugas
+          label: 'Tugas',
         ),
         const NavBarItem(
           activeIcon: Icons.location_city,
           inactiveIcon: Icons.location_city_outlined,
           label: 'Tatar',
         ),
-        const NavBarItem( // Item Navigasi Survei
+        const NavBarItem(
           activeIcon: Icons.poll,
           inactiveIcon: Icons.poll_outlined,
           label: 'Survei',
@@ -127,14 +130,14 @@ class MainNavigationScreenState extends State<MainNavigationScreen>
           label: 'Profil',
         ),
       ];
-    } else { // Untuk role 'patrol'
+    } else {
       navBarItems = [
         const NavBarItem(
           activeIcon: Icons.home,
           inactiveIcon: Icons.home_outlined,
           label: 'Home',
         ),
-        const NavBarItem( // Item Navigasi Survei
+        const NavBarItem(
           activeIcon: Icons.poll,
           inactiveIcon: Icons.poll_outlined,
           label: 'Survei',
@@ -154,12 +157,11 @@ class MainNavigationScreenState extends State<MainNavigationScreen>
         children: _pages,
         onPageChanged: (index) {
           setState(() {
-            _previousIndex = _selectedIndex;
             _selectedIndex = index;
           });
         },
       ),
-      bottomNavigationBar: CustomNavBar( //
+      bottomNavigationBar: CustomNavBar(
         items: navBarItems,
         initialIndex: _selectedIndex,
         onItemSelected: (index) {
@@ -174,40 +176,41 @@ class MainNavigationScreenState extends State<MainNavigationScreen>
   }
 
   void _refreshCurrentPage(int index) {
-    setState(() {
-      _pageKeys[index] = GlobalKey();
+    setState(
+      () {
+        _pageKeys[index] = GlobalKey();
 
-      if (widget.userRole == 'commandCenter') {
-        switch (index) {
-          case 0:
-            _pages[0] = AdminMapScreen(key: _adminMapScreenKey); //
-            break;
-          case 1:
-            _pages[1] = AdminDashboardScreen(key: _pageKeys[index]); //
-            break;
-          case 2:
-            _pages[2] = ManageClustersScreen(key: _pageKeys[index]); //
-            break;
-          case 3: // Index baru untuk Survei (ManageSurveysScreen)
-            _pages[3] = ManageSurveysScreen(key: _pageKeys[index]); // [INFO: Kerangka kode ManageSurveysScreen telah diberikan sebelumnya]
-            break;
-          case 4: // Index untuk Profile menjadi 4
-            _pages[4] = ProfileScreen(key: _pageKeys[index]); //
-            break;
+        if (widget.userRole == 'commandCenter') {
+          switch (index) {
+            case 0:
+              _pages[0] = AdminMapScreen(key: _adminMapScreenKey);
+              break;
+            case 1:
+              _pages[1] = AdminDashboardScreen(key: _pageKeys[index]);
+              break;
+            case 2:
+              _pages[2] = ManageClustersScreen(key: _pageKeys[index]);
+              break;
+            case 3:
+              break;
+            case 4:
+              _pages[4] = ProfileScreen(key: _pageKeys[index]);
+              break;
+          }
+        } else {
+          switch (index) {
+            case 0:
+              _pages[0] = HomeScreen(key: _pageKeys[index]);
+              break;
+            case 1:
+              _pages[1] = SurveyListScreen(key: _pageKeys[index]);
+              break;
+            case 2:
+              _pages[2] = ProfileScreen(key: _pageKeys[index]);
+              break;
+          }
         }
-      } else { // Untuk role 'patrol'
-        switch (index) {
-          case 0:
-            _pages[0] = HomeScreen(key: _pageKeys[index]); //
-            break;
-          case 1: // Index baru untuk Survei (SurveyListScreen)
-            _pages[1] = SurveyListScreen(key: _pageKeys[index]); // [INFO: Kerangka kode SurveyListScreen telah diberikan sebelumnya]
-            break;
-          case 2: // Index untuk Profile menjadi 2
-            _pages[2] = ProfileScreen(key: _pageKeys[index]); //
-            break;
-        }
-      }
-    });
+      },
+    );
   }
 }
