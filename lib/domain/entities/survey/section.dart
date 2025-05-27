@@ -15,23 +15,25 @@ class Section {
     required this.questions,
   });
 
+  // Perbaikan pada method fromMap
   factory Section.fromMap(Map<String, dynamic> map, String id) {
-    var questionList = <Question>[];
-    if (map['questions'] != null) {
-      final questionsMap = map['questions'] as Map<String, dynamic>;
-      questionList = questionsMap.entries.map((entry) {
+    List<Question> questions = [];
+    
+    if (map['questions'] != null && map['questions'] is Map<String, dynamic>) {
+      questions = (map['questions'] as Map<String, dynamic>).entries.map((entry) {
         return Question.fromMap(entry.value as Map<String, dynamic>, entry.key);
       }).toList();
+      
       // Urutkan pertanyaan berdasarkan order
-      questionList.sort((a, b) => a.order.compareTo(b.order));
+      questions.sort((a, b) => a.order.compareTo(b.order));
     }
 
     return Section(
       sectionId: id,
       title: map['title'] ?? '',
       description: map['description'],
-      order: map['order'] ?? 0,
-      questions: questionList,
+      order: map['order'] != null ? (map['order'] as num).toInt() : 0,
+      questions: questions,
     );
   }
 

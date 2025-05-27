@@ -438,102 +438,121 @@ class FirebaseSurveyDataSource {
 
   Future<Map<String, dynamic>> getSurveyResponsesSummary(
       String surveyId) async {
-    // Implementasi ini akan cukup kompleks dan bergantung pada bagaimana Anda ingin
-    // meringkas data (misalnya, agregasi untuk skala Likert, hitungan untuk pilihan ganda).
-    // Untuk contoh sederhana, kita bisa mengembalikan jumlah respons.
     try {
       final responses = await getSurveyResponses(surveyId);
       final summary = <String, dynamic>{};
       summary['totalResponses'] = responses.length;
 
-      // Contoh agregasi untuk pertanyaan spesifik (misal, questionId1 adalah likert)
-      // Anda perlu detail struktur pertanyaan untuk melakukan ini dengan benar.
       final surveyDetail = await getSurveyDetails(surveyId);
       if (surveyDetail == null) return summary;
 
       for (var section in surveyDetail.sections) {
         for (var question in section.questions) {
           final questionId = question.questionId;
+          // Ensure questionData is initialized for every question in the survey
+          final questionSummary = <String, dynamic>{
+            'type': questionTypeToString(question.type), // MODIFIED LINE
+            'text': question.text,
+            'responses': 0, // Initialize responses count
+          };
+
           if (question.type == QuestionType.likertScale) {
-            List<int> likertValues = [];
-            for (var response in responses) {
-              final answer = response.answers
-                  .firstWhereOrNull((a) => a.questionId == questionId);
-              if (answer != null && answer.answerValue is int) {
-                likertValues.add(answer.answerValue as int);
-              } else if (answer != null && answer.answerValue is String) {
-                // Coba parse jika String
-                final parsedValue = int.tryParse(answer.answerValue as String);
-                if (parsedValue != null) {
-                  likertValues.add(parsedValue);
-                }
-              }
+            questionSummary['min'] = question.likertScaleMin ?? 1;
+            questionSummary['max'] = question.likertScaleMax ?? 5;
+            questionSummary['minLabel'] = question.likertMinLabel ?? '';
+            questionSummary['maxLabel'] = question.likertMaxLabel ?? '';
+            questionSummary['distribution'] = <String, int>{};
+            for (int i = (question.likertScaleMin ?? 1);
+                i <= (question.likertScaleMax ?? 5);
+                i++) {
+              questionSummary['distribution'][i.toString()] = 0;
             }
-            if (likertValues.isNotEmpty) {
-              summary[questionId] = {
-                'type': 'likert',
-                'average':
-                    likertValues.reduce((a, b) => a + b) / likertValues.length,
-                'min': question.likertScaleMin,
-                'max': question.likertScaleMax,
-                'minLabel': question.likertMinLabel,
-                'maxLabel': question.likertMaxLabel,
-                'responses': likertValues.length,
-                // Anda bisa menambahkan distribusi jawaban di sini
-              };
-            }
+            questionSummary['total'] = 0; // For calculating average later
           } else if (question.type == QuestionType.multipleChoice ||
               question.type == QuestionType.checkboxes) {
-            Map<String, int> optionCounts = {};
+            questionSummary['options'] = question.options ?? [];
+            questionSummary['counts'] = <String, int>{};
             if (question.options != null) {
-              for (var option in question.options!) {
-                optionCounts[option] = 0;
+              for (final option in question.options!) {
+                questionSummary['counts'][option] = 0;
               }
             }
-            for (var response in responses) {
-              final answer = response.answers
-                  .firstWhereOrNull((a) => a.questionId == questionId);
-              if (answer != null) {
-                if (question.type == QuestionType.multipleChoice &&
-                    answer.answerValue is String) {
-                  optionCounts[answer.answerValue as String] =
-                      (optionCounts[answer.answerValue as String] ?? 0) + 1;
-                } else if (question.type == QuestionType.checkboxes &&
-                    answer.answerValue is List) {
-                  for (var selectedOption in answer.answerValue as List) {
-                    if (selectedOption is String) {
-                      optionCounts[selectedOption] =
-                          (optionCounts[selectedOption] ?? 0) + 1;
-                    }
-                  }
-                }
-              }
-            }
-            summary[questionId] = {
-              'type': questionTypeToString(question.type),
-              'options': question.options,
-              'counts': optionCounts,
-              'responses': responses
-                  .length, // Jumlah total responden untuk pertanyaan ini
-            };
           } else if (question.type == QuestionType.shortAnswer ||
               question.type == QuestionType.longAnswer) {
-            List<String> textAnswers = [];
-            for (var response in responses) {
-              final answer = response.answers
-                  .firstWhereOrNull((a) => a.questionId == questionId);
-              if (answer != null && answer.answerValue is String) {
-                textAnswers.add(answer.answerValue as String);
+            questionSummary['answers'] = <String>[];
+          }
+          summary[questionId] = questionSummary;
+        }
+      }
+
+      // Populate summary data from responses
+      for (var response in responses) {
+        for (var answer in response.answers) {
+          final questionId = answer.questionId;
+          final questionData = summary[questionId];
+
+          if (questionData == null || answer.answerValue == null) continue;
+
+          questionData['responses'] = (questionData['responses'] ?? 0) + 1;
+          final QuestionType currentQuestionType =
+              stringToQuestionType(questionData['type']);
+
+          if (currentQuestionType == QuestionType.likertScale) {
+            final int value = answer.answerValue is int
+                ? answer.answerValue
+                : int.tryParse(answer.answerValue.toString()) ?? 0;
+
+            if (value >= (questionData['min'] ?? 1) &&
+                value <= (questionData['max'] ?? 5)) {
+              questionData['total'] = (questionData['total'] ?? 0) + value;
+              final String valueKey = value.toString();
+              questionData['distribution'][valueKey] =
+                  (questionData['distribution'][valueKey] ?? 0) + 1;
+            }
+          } else if (currentQuestionType == QuestionType.multipleChoice) {
+            final String option = answer.answerValue.toString();
+            if (questionData['counts'].containsKey(option)) {
+              questionData['counts'][option] =
+                  (questionData['counts'][option] ?? 0) + 1;
+            }
+          } else if (currentQuestionType == QuestionType.checkboxes) {
+            if (answer.answerValue is List) {
+              for (final option in answer.answerValue) {
+                if (questionData['counts'].containsKey(option.toString())) {
+                  questionData['counts'][option.toString()] =
+                      (questionData['counts'][option.toString()] ?? 0) + 1;
+                }
+              }
+            } else if (answer.answerValue is String) {
+              if (questionData['counts']
+                  .containsKey(answer.answerValue.toString())) {
+                questionData['counts'][answer.answerValue.toString()] =
+                    (questionData['counts'][answer.answerValue.toString()] ??
+                            0) +
+                        1;
               }
             }
-            summary[questionId] = {
-              'type': questionTypeToString(question.type),
-              'answers': textAnswers,
-              'responses': textAnswers.length,
-            };
+          } else if (currentQuestionType == QuestionType.shortAnswer ||
+              currentQuestionType == QuestionType.longAnswer) {
+            questionData['answers'].add(answer.answerValue.toString());
           }
         }
       }
+
+      // Calculate average for likert scale after processing all responses
+      summary.forEach((key, value) {
+        if (value is Map &&
+            stringToQuestionType(value['type']) == QuestionType.likertScale) {
+          final questionData = value;
+          if (questionData['responses'] > 0) {
+            questionData['average'] =
+                (questionData['total'] ?? 0) / questionData['responses'];
+          } else {
+            questionData['average'] = 0.0;
+          }
+        }
+      });
+
       return summary;
     } catch (e) {
       print("Error fetching survey responses summary for $surveyId: $e");

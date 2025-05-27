@@ -8,7 +8,6 @@ import 'package:intl/intl.dart';
 import 'package:livetrackingapp/presentation/survey/screens/create_edit_survey_screen.dart';
 import 'package:livetrackingapp/presentation/survey/screens/survey_results_screen.dart';
 
-
 class ManageSurveysScreen extends StatefulWidget {
   const ManageSurveysScreen({super.key});
 
@@ -29,7 +28,9 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
   }
 
   Future<void> _refreshSurveys(String commandCenterId) async {
-     context.read<SurveyBloc>().add(LoadAllCommandCenterSurveys(commandCenterId: commandCenterId));
+    context
+        .read<SurveyBloc>()
+        .add(LoadAllCommandCenterSurveys(commandCenterId: commandCenterId));
   }
 
   void _showDeleteConfirmationDialog(BuildContext context, Survey survey) {
@@ -38,7 +39,8 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
       builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('Konfirmasi Hapus'),
-          content: Text('Apakah Anda yakin ingin menghapus survei "${survey.title}"? Tindakan ini tidak dapat diurungkan.'),
+          content: Text(
+              'Apakah Anda yakin ingin menghapus survei "${survey.title}"? Tindakan ini tidak dapat diurungkan.'),
           actions: <Widget>[
             TextButton(
               child: Text('Batal', style: TextStyle(color: neutral700)),
@@ -49,7 +51,9 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
             TextButton(
               child: Text('Hapus', style: TextStyle(color: dangerR500)),
               onPressed: () {
-                context.read<SurveyBloc>().add(DeleteSurveyById(surveyId: survey.surveyId));
+                context
+                    .read<SurveyBloc>()
+                    .add(DeleteSurveyById(surveyId: survey.surveyId));
                 Navigator.of(dialogContext).pop();
               },
             ),
@@ -59,20 +63,17 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
     );
   }
 
-
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthBloc>().state;
-     final String commandCenterId = (authState is AuthAuthenticated) ? authState.user.id : '';
-
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manajemen Survei'),
         backgroundColor: kbpBlue900,
         foregroundColor: Colors.white,
-        automaticallyImplyLeading: false, // Sesuaikan jika ini bukan root admin
-         actions: [
+        automaticallyImplyLeading: false,
+        actions: [
           IconButton(
             icon: Icon(Icons.refresh),
             onPressed: () {
@@ -92,19 +93,20 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
                 subtitle: state.message,
                 type: SnackbarType.danger);
           } else if (state is SurveyOperationSuccess) {
-             showCustomSnackbar(
+            showCustomSnackbar(
                 context: context,
                 title: 'Sukses',
                 subtitle: state.message,
                 type: SnackbarType.success);
             // Reload list after success
             if (authState is AuthAuthenticated) {
-                 _refreshSurveys(authState.user.id);
+              _refreshSurveys(authState.user.id);
             }
           }
         },
         builder: (context, state) {
-          if (state is SurveyLoading && !(state is CommandCenterSurveysLoaded)) {
+          if (state is SurveyLoading &&
+              !(state is CommandCenterSurveysLoaded)) {
             return const Center(child: CircularProgressIndicator());
           } else if (state is CommandCenterSurveysLoaded) {
             if (state.surveys.isEmpty) {
@@ -112,16 +114,18 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
                 child: EmptyState(
                   icon: Icons.ballot_outlined,
                   title: 'Belum Ada Survei',
-                  subtitle: 'Anda belum membuat survei apapun. Mulai buat survei baru untuk pengguna.',
+                  subtitle:
+                      'Anda belum membuat survei apapun. Mulai buat survei baru untuk pengguna.',
                   buttonText: 'Buat Survei Baru',
                   onButtonPressed: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const CreateEditSurveyScreen()),
+                      MaterialPageRoute(
+                          builder: (_) => const CreateEditSurveyScreen()),
                     ).then((_) {
-                         if (authState is AuthAuthenticated) {
-                            _refreshSurveys(authState.user.id);
-                        }
+                      if (authState is AuthAuthenticated) {
+                        _refreshSurveys(authState.user.id);
+                      }
                     });
                   },
                 ),
@@ -145,8 +149,8 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
             context,
             MaterialPageRoute(builder: (_) => const CreateEditSurveyScreen()),
           ).then((_) {
-              if (authState is AuthAuthenticated) {
-                _refreshSurveys(authState.user.id);
+            if (authState is AuthAuthenticated) {
+              _refreshSurveys(authState.user.id);
             }
           });
         },
@@ -159,7 +163,7 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
   }
 
   Widget _buildSurveyManagementCard(BuildContext context, Survey survey) {
-     final dateFormat = DateFormat('dd MMM yyyy, HH:mm', 'id_ID');
+    final dateFormat = DateFormat('dd MMM yyyy, HH:mm', 'id_ID');
     return Card(
       elevation: 2,
       margin: const EdgeInsets.only(bottom: 16),
@@ -172,11 +176,14 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Expanded(child: Text(survey.title, style: boldTextStyle(size: 18, color: kbpBlue900))),
+                Expanded(
+                    child: Text(survey.title,
+                        style: boldTextStyle(size: 18, color: kbpBlue900))),
                 Switch(
                   value: survey.isActive,
                   onChanged: (bool value) {
-                    context.read<SurveyBloc>().add(ToggleSurveyStatus(surveyId: survey.surveyId, isActive: value));
+                    context.read<SurveyBloc>().add(ToggleSurveyStatus(
+                        surveyId: survey.surveyId, isActive: value));
                   },
                   activeColor: kbpGreen500,
                   inactiveThumbColor: neutral500,
@@ -184,9 +191,10 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
               ],
             ),
             const SizedBox(height: 4),
-             Text(
+            Text(
               survey.isActive ? 'Status: Aktif' : 'Status: Tidak Aktif',
-              style: regularTextStyle(size: 12, color: survey.isActive ? kbpGreen700 : neutral600),
+              style: regularTextStyle(
+                  size: 12, color: survey.isActive ? kbpGreen700 : neutral600),
             ),
             const SizedBox(height: 8),
             if (survey.description != null && survey.description!.isNotEmpty)
@@ -197,28 +205,30 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
             const SizedBox(height: 12),
-             Row(
+            Row(
+              children: [
+                Icon(Icons.calendar_today_outlined,
+                    size: 16, color: neutral600),
+                const SizedBox(width: 4),
+                Text(
+                  'Dibuat: ${dateFormat.format(survey.createdAt)}',
+                  style: regularTextStyle(size: 12, color: neutral600),
+                ),
+              ],
+            ),
+            if (survey.targetAudience != null &&
+                survey.targetAudience!.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Row(
                 children: [
-                  Icon(Icons.calendar_today_outlined, size: 16, color: neutral600),
+                  Icon(Icons.people_alt_outlined, size: 16, color: neutral600),
                   const SizedBox(width: 4),
                   Text(
-                    'Dibuat: ${dateFormat.format(survey.createdAt)}',
+                    'Target: ${survey.targetAudience!.join(', ')}',
                     style: regularTextStyle(size: 12, color: neutral600),
                   ),
                 ],
               ),
-            if (survey.targetAudience != null && survey.targetAudience!.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Row(
-                    children: [
-                    Icon(Icons.people_alt_outlined, size: 16, color: neutral600),
-                    const SizedBox(width: 4),
-                    Text(
-                        'Target: ${survey.targetAudience!.join(', ')}',
-                        style: regularTextStyle(size: 12, color: neutral600),
-                    ),
-                    ],
-                ),
             ],
             const Divider(height: 24),
             Row(
@@ -226,39 +236,45 @@ class _ManageSurveysScreenState extends State<ManageSurveysScreen> {
               children: [
                 TextButton.icon(
                   icon: Icon(Icons.bar_chart, size: 18, color: kbpGreen700),
-                  label: Text('Hasil', style: mediumTextStyle(color: kbpGreen700)),
+                  label:
+                      Text('Hasil', style: mediumTextStyle(color: kbpGreen700)),
                   onPressed: () {
-                     Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => SurveyResultsScreen(surveyId: survey.surveyId),
-                        ),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            SurveyResultsScreen(surveyId: survey.surveyId),
+                      ),
                     );
                   },
                 ),
                 const SizedBox(width: 8),
                 TextButton.icon(
                   icon: Icon(Icons.edit_outlined, size: 18, color: kbpBlue700),
-                  label: Text('Edit', style: mediumTextStyle(color: kbpBlue700)),
+                  label:
+                      Text('Edit', style: mediumTextStyle(color: kbpBlue700)),
                   onPressed: () {
-                     Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => CreateEditSurveyScreen(surveyToEdit: survey),
-                        ),
-                    ).then((_){
-                        final authState = context.read<AuthBloc>().state;
-                        if (authState is AuthAuthenticated) {
-                            _refreshSurveys(authState.user.id);
-                        }
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            CreateEditSurveyScreen(surveyToEdit: survey),
+                      ),
+                    ).then((_) {
+                      final authState = context.read<AuthBloc>().state;
+                      if (authState is AuthAuthenticated) {
+                        _refreshSurveys(authState.user.id);
+                      }
                     });
                   },
                 ),
-                 const SizedBox(width: 8),
+                const SizedBox(width: 8),
                 TextButton.icon(
                   icon: Icon(Icons.delete_outline, size: 18, color: dangerR500),
-                  label: Text('Hapus', style: mediumTextStyle(color: dangerR500)),
-                  onPressed: () => _showDeleteConfirmationDialog(context, survey),
+                  label:
+                      Text('Hapus', style: mediumTextStyle(color: dangerR500)),
+                  onPressed: () =>
+                      _showDeleteConfirmationDialog(context, survey),
                 ),
               ],
             )

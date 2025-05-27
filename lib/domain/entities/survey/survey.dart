@@ -25,17 +25,16 @@ class Survey {
   });
 
   factory Survey.fromMap(Map<String, dynamic> map, String id) {
-    List<String>? targetAudience;
-
-    // Handle berbagai format targetAudience
-    if (map['targetAudience'] is List) {
-      targetAudience = List<String>.from(map['targetAudience']);
-    } else if (map['targetAudience'] is Map) {
-      // Jika targetAudience adalah Map (dari rule baru)
-      targetAudience =
-          (map['targetAudience'] as Map).keys.map((k) => k.toString()).toList();
-    } else {
-      targetAudience = null;
+    List<Section> sections = [];
+    
+    if (map['sections'] != null && map['sections'] is Map<String, dynamic>) {
+      // Konversi dari Map ke List
+      sections = (map['sections'] as Map<String, dynamic>).entries.map((entry) {
+        return Section.fromMap(entry.value as Map<String, dynamic>, entry.key);
+      }).toList();
+      
+      // Urutkan berdasarkan property order
+      sections.sort((a, b) => a.order.compareTo(b.order));
     }
 
     return Survey(
@@ -49,14 +48,11 @@ class Survey {
       updatedAt: map['updatedAt'] != null
           ? DateTime.parse(map['updatedAt'])
           : DateTime.now(),
-      sections:
-          (map['sections'] as Map<String, dynamic>?)?.entries.map((entry) {
-                return Section.fromMap(
-                    entry.value as Map<String, dynamic>, entry.key);
-              }).toList() ??
-              [],
+      sections: sections,
       isActive: map['isActive'] ?? false,
-      targetAudience: targetAudience,
+      targetAudience: map['targetAudience'] is List
+          ? List<String>.from(map['targetAudience'])
+          : null,
     );
   }
 

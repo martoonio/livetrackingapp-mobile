@@ -310,12 +310,29 @@ class _CreateEditSurveyScreenState extends State<CreateEditSurveyScreen> {
         );
       }).toList();
 
-      // Prepare data for repository
       final sectionsAndQuestionsData = <String, List<Map<String, dynamic>>>{};
       for (var section in sections) {
-        sectionsAndQuestionsData[section.sectionId] = section.questions
-            .map((q) => q.toMap()..['questionId'] = q.questionId)
-            .toList();
+        // Create a list to hold questions for each section
+        final questionsList = <Map<String, dynamic>>[];
+        
+        // Add section data
+        questionsList.add({
+          'title': section.title,
+          'description': section.description ?? '',
+          'order': section.order,
+          'isSectionData': true,  // Flag to identify section data
+        });
+        
+        // Add questions data
+        for (var q in section.questions) {
+          final questionMap = q.toMap();
+          questionMap['questionId'] = q.questionId;
+          questionMap['order'] = q.order;
+          questionsList.add(questionMap);
+        }
+        
+        // Store the list in the map
+        sectionsAndQuestionsData[section.sectionId] = questionsList;
       }
 
       // Create survey object
@@ -397,19 +414,43 @@ class _CreateEditSurveyScreenState extends State<CreateEditSurveyScreen> {
               children: [
                 _buildSurveyInfoCard(),
                 const SizedBox(height: 24),
-                Text(
-                  'Survey Sections & Questions',
-                  style: boldTextStyle(size: 18, color: kbpBlue800),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Survey Sections & Questions',
+                        style: boldTextStyle(size: 18, color: kbpBlue800),
+                      ),
+                    ),
+                    if (_sectionsData.isNotEmpty)
+                      Text(
+                        'Drag to reorder',
+                        style: regularTextStyle(size: 12, color: neutral600),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 16),
 
-                // Sections list
+                // Sections list with reordering
                 if (_sectionsData.isEmpty) _buildEmptySectionsPlaceholder(),
 
-                ..._sectionsData.asMap().entries.map((entry) {
-                  final index = entry.key;
-                  return _buildSectionCard(index);
-                }),
+                // Ganti ListView dengan ReorderableListView untuk section
+                if (_sectionsData.isNotEmpty)
+                  ReorderableListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    onReorder: _onReorderSection,
+                    itemCount: _sectionsData.length,
+                    itemBuilder: (context, index) {
+                      // Gunakan Key unik untuk setiap section
+                      return KeyedSubtree(
+                        key: ValueKey(
+                            'section_${_sectionsData[index].sectionId}'),
+                        child: _buildSectionCard(index),
+                      );
+                    },
+                  ),
 
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
@@ -578,20 +619,63 @@ class _CreateEditSurveyScreenState extends State<CreateEditSurveyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Section Header
+            // Section Header with drag handle
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Section ${sectionIndex + 1}',
-                  style: semiBoldTextStyle(size: 16, color: kbpBlue700),
-                ),
-                if (_sectionsData.length > 1)
-                  IconButton(
-                    icon: Icon(Icons.delete, color: dangerR400),
-                    onPressed: () => _removeSection(sectionIndex),
-                    tooltip: 'Remove Section',
+                Expanded(
+                  child: Row(
+                    children: [
+                      // Drag handle icon
+                      Icon(
+                        Icons.drag_handle,
+                        size: 20,
+                        color: neutral500,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Section ${sectionIndex + 1}',
+                        style: semiBoldTextStyle(size: 16, color: kbpBlue700),
+                      ),
+                    ],
                   ),
+                ),
+                // Section reorder and delete buttons
+                Row(
+                  children: [
+                    // Move Up button
+                    if (sectionIndex > 0)
+                      IconButton(
+                        icon: Icon(Icons.arrow_upward,
+                            size: 20, color: kbpBlue600),
+                        onPressed: () => _moveSectionUp(sectionIndex),
+                        tooltip: 'Move Up',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    const SizedBox(width: 8),
+                    // Move Down button
+                    if (sectionIndex < _sectionsData.length - 1)
+                      IconButton(
+                        icon: Icon(Icons.arrow_downward,
+                            size: 20, color: kbpBlue600),
+                        onPressed: () => _moveSectionDown(sectionIndex),
+                        tooltip: 'Move Down',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    const SizedBox(width: 12),
+                    // Delete button
+                    if (_sectionsData.length > 1)
+                      IconButton(
+                        icon: Icon(Icons.delete, size: 20, color: dangerR400),
+                        onPressed: () => _removeSection(sectionIndex),
+                        tooltip: 'Remove Section',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                  ],
+                ),
               ],
             ),
             const Divider(height: 20),
@@ -615,20 +699,42 @@ class _CreateEditSurveyScreenState extends State<CreateEditSurveyScreen> {
             ),
             const SizedBox(height: 20),
 
-            // Questions Header
-            Text(
-              'Questions for Section ${sectionIndex + 1}',
-              style: mediumTextStyle(color: kbpBlue800),
+            // Questions Header with reorder indicator
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Questions for Section ${sectionIndex + 1}',
+                    style: mediumTextStyle(color: kbpBlue800),
+                  ),
+                ),
+                if (questions.isNotEmpty)
+                  Text(
+                    'Drag to reorder',
+                    style: regularTextStyle(size: 12, color: neutral600),
+                  ),
+              ],
             ),
             const SizedBox(height: 10),
 
-            // Questions List
+            // Questions List with reordering
             if (questions.isEmpty) _buildEmptyQuestionsPlaceholder(),
 
-            ...questions.asMap().entries.map((entry) {
-              final questionIndex = entry.key;
-              return _buildQuestionCard(sectionIndex, questionIndex);
-            }),
+            if (questions.isNotEmpty)
+              ReorderableListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                onReorder: (oldIndex, newIndex) =>
+                    _onReorderQuestion(sectionIndex, oldIndex, newIndex),
+                itemCount: questions.length,
+                itemBuilder: (context, questionIndex) {
+                  return KeyedSubtree(
+                    key: ValueKey(
+                        'question_${questions[questionIndex].questionId}'),
+                    child: _buildQuestionCard(sectionIndex, questionIndex),
+                  );
+                },
+              ),
 
             // Add Question Button
             const SizedBox(height: 16),
@@ -676,22 +782,66 @@ class _CreateEditSurveyScreenState extends State<CreateEditSurveyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Question Header
+            // Question Header with drag handle
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Question ${questionIndex + 1}',
-                  style: mediumTextStyle(size: 14, color: kbpBlue700),
-                ),
-                if (_sectionsData[sectionIndex].questions.length > 1)
-                  IconButton(
-                    icon: Icon(Icons.delete, size: 20, color: dangerR300),
-                    onPressed: () =>
-                        _removeQuestion(sectionIndex, questionIndex),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
+                Expanded(
+                  child: Row(
+                    children: [
+                      // Drag handle icon
+                      Icon(
+                        Icons.drag_handle,
+                        size: 18,
+                        color: neutral400,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Question ${questionIndex + 1}',
+                        style: mediumTextStyle(size: 14, color: kbpBlue700),
+                      ),
+                    ],
                   ),
+                ),
+                // Question reorder and delete buttons
+                Row(
+                  children: [
+                    // Move Up button
+                    if (questionIndex > 0)
+                      IconButton(
+                        icon: Icon(Icons.arrow_upward,
+                            size: 18, color: kbpBlue600),
+                        onPressed: () =>
+                            _moveQuestionUp(sectionIndex, questionIndex),
+                        tooltip: 'Move Up',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    const SizedBox(width: 4),
+                    // Move Down button
+                    if (questionIndex <
+                        _sectionsData[sectionIndex].questions.length - 1)
+                      IconButton(
+                        icon: Icon(Icons.arrow_downward,
+                            size: 18, color: kbpBlue600),
+                        onPressed: () =>
+                            _moveQuestionDown(sectionIndex, questionIndex),
+                        tooltip: 'Move Down',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    const SizedBox(width: 8),
+                    // Delete button
+                    if (_sectionsData[sectionIndex].questions.length > 1)
+                      IconButton(
+                        icon: Icon(Icons.delete, size: 18, color: dangerR300),
+                        onPressed: () =>
+                            _removeQuestion(sectionIndex, questionIndex),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                  ],
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -942,6 +1092,109 @@ class _CreateEditSurveyScreenState extends State<CreateEditSurveyScreen> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       prefixIcon: icon != null ? Icon(icon, color: kbpBlue700) : null,
     );
+  }
+
+  // Fungsi untuk menangani reordering section
+  void _onReorderSection(int oldIndex, int newIndex) {
+    setState(() {
+      if (oldIndex < newIndex) {
+        // Jika memindahkan ke bawah, sesuaikan index karena
+        // item yang dipindahkan akan dihapus terlebih dahulu
+        newIndex -= 1;
+      }
+      final item = _sectionsData.removeAt(oldIndex);
+      _sectionsData.insert(newIndex, item);
+
+      // Update order untuk semua section
+      for (int i = 0; i < _sectionsData.length; i++) {
+        _sectionsData[i].order = i;
+      }
+    });
+  }
+
+  // Fungsi untuk menangani reordering pertanyaan dalam section
+  void _onReorderQuestion(int sectionIndex, int oldIndex, int newIndex) {
+    if (sectionIndex < 0 || sectionIndex >= _sectionsData.length) return;
+
+    setState(() {
+      final section = _sectionsData[sectionIndex];
+      if (oldIndex < newIndex) {
+        newIndex -= 1;
+      }
+      final item = section.questions.removeAt(oldIndex);
+      section.questions.insert(newIndex, item);
+
+      // Update order untuk semua pertanyaan
+      for (int i = 0; i < section.questions.length; i++) {
+        section.questions[i].order = i;
+      }
+    });
+  }
+
+  // 3. Tambahkan metode untuk section reordering
+  void _moveSectionUp(int index) {
+    if (index <= 0 || index >= _sectionsData.length) return;
+    setState(() {
+      final section = _sectionsData.removeAt(index);
+      _sectionsData.insert(index - 1, section);
+
+      // Update order untuk semua section
+      for (int i = 0; i < _sectionsData.length; i++) {
+        _sectionsData[i].order = i;
+      }
+    });
+  }
+
+  void _moveSectionDown(int index) {
+    if (index < 0 || index >= _sectionsData.length - 1) return;
+    setState(() {
+      final section = _sectionsData.removeAt(index);
+      _sectionsData.insert(index + 1, section);
+
+      // Update order untuk semua section
+      for (int i = 0; i < _sectionsData.length; i++) {
+        _sectionsData[i].order = i;
+      }
+    });
+  }
+
+// 4. Tambahkan metode untuk question reordering
+  void _moveQuestionUp(int sectionIndex, int questionIndex) {
+    if (sectionIndex < 0 ||
+        sectionIndex >= _sectionsData.length ||
+        questionIndex <= 0 ||
+        questionIndex >= _sectionsData[sectionIndex].questions.length) {
+      return;
+    }
+    setState(() {
+      final section = _sectionsData[sectionIndex];
+      final question = section.questions.removeAt(questionIndex);
+      section.questions.insert(questionIndex - 1, question);
+
+      // Update order untuk semua pertanyaan
+      for (int i = 0; i < section.questions.length; i++) {
+        section.questions[i].order = i;
+      }
+    });
+  }
+
+  void _moveQuestionDown(int sectionIndex, int questionIndex) {
+    if (sectionIndex < 0 ||
+        sectionIndex >= _sectionsData.length ||
+        questionIndex < 0 ||
+        questionIndex >= _sectionsData[sectionIndex].questions.length - 1) {
+      return;
+    }
+    setState(() {
+      final section = _sectionsData[sectionIndex];
+      final question = section.questions.removeAt(questionIndex);
+      section.questions.insert(questionIndex + 1, question);
+
+      // Update order untuk semua pertanyaan
+      for (int i = 0; i < section.questions.length; i++) {
+        section.questions[i].order = i;
+      }
+    });
   }
 }
 
