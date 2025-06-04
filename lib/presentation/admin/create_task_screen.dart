@@ -66,6 +66,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
   DateTime _multiAssignedStartTime = DateTime.now();
   DateTime _multiAssignedEndTime = DateTime.now().add(const Duration(hours: 8));
 
+  // TAMBAHAN: State untuk tracking progress
   int _totalTasksToCreate = 0;
   int _tasksCreated = 0;
   bool _showingProgressDialog = false;
@@ -145,17 +146,217 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
     }
   }
 
-  @override
-  void dispose() {
-    _mapController?.dispose();
-    _tabController.dispose();
+  // TAMBAHAN: Method untuk menampilkan progress dialog
+  void _showProgressDialog() {
+    if (_showingProgressDialog) return;
 
-    // TAMBAHAN: Hide progress dialog jika masih tampil
-    if (_showingProgressDialog) {
-      _hideProgressDialog();
+    _showingProgressDialog = true;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black87,
+      builder: (BuildContext context) {
+        return WillPopScope(
+          onWillPop: () async => false, // Mencegah back button
+          child: Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: Colors.white,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Icon
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: kbpBlue100,
+                      borderRadius: BorderRadius.circular(40),
+                    ),
+                    child: const Icon(
+                      Icons.task_alt_rounded,
+                      size: 40,
+                      color: kbpBlue900,
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Title
+                  Text(
+                    'Membuat Tugas Patroli',
+                    style: boldTextStyle(size: 20, color: neutral900),
+                    textAlign: TextAlign.center,
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // Subtitle
+                  Text(
+                    'Sedang memproses $_totalTasksToCreate tugas...',
+                    style: regularTextStyle(size: 14, color: neutral600),
+                    textAlign: TextAlign.center,
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Progress indicator dengan persentase
+                  ValueListenableBuilder<int>(
+                    valueListenable: ValueNotifier(_tasksCreated),
+                    builder: (context, value, child) {
+                      double progress = _totalTasksToCreate > 0
+                          ? value / _totalTasksToCreate
+                          : 0.0;
+                      int percentage = (progress * 100).round();
+
+                      return Column(
+                        children: [
+                          // Progress bar
+                          Container(
+                            width: double.infinity,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: neutral200,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Stack(
+                              children: [
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 300),
+                                  width: MediaQuery.of(context).size.width *
+                                      0.6 *
+                                      progress,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [kbpBlue600, kbpBlue900],
+                                      begin: Alignment.centerLeft,
+                                      end: Alignment.centerRight,
+                                    ),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          // Progress text
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '$value dari $_totalTasksToCreate tugas',
+                                style: mediumTextStyle(
+                                    size: 12, color: neutral600),
+                              ),
+                              Text(
+                                '$percentage%',
+                                style:
+                                    boldTextStyle(size: 12, color: kbpBlue900),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Warning message
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: warningY50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: warningY200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          color: warningY500,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Mohon Tunggu',
+                                style: semiBoldTextStyle(
+                                    size: 12, color: warningY500),
+                              ),
+                              Text(
+                                'Jangan meninggalkan aplikasi atau menekan tombol kembali selama proses berlangsung',
+                                style: regularTextStyle(
+                                    size: 11, color: warningY400),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Status text
+                  ValueListenableBuilder<String>(
+                    valueListenable: ValueNotifier(_getCurrentStatusText()),
+                    builder: (context, status, child) {
+                      return Text(
+                        status,
+                        style: regularTextStyle(size: 12, color: neutral500),
+                        textAlign: TextAlign.center,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // TAMBAHAN: Method untuk mendapatkan status text saat ini
+  String _getCurrentStatusText() {
+    if (_tasksCreated == 0) {
+      return 'Mempersiapkan tugas...';
+    } else if (_tasksCreated < _totalTasksToCreate) {
+      return 'Membuat tugas ${_tasksCreated + 1} dari $_totalTasksToCreate...';
+    } else {
+      return 'Menyelesaikan proses...';
     }
+  }
 
-    super.dispose();
+  // TAMBAHAN: Method untuk update progress
+  void _updateProgress(int completed) {
+    setState(() {
+      _tasksCreated = completed;
+    });
+  }
+
+  // TAMBAHAN: Method untuk menutup progress dialog
+  void _hideProgressDialog() {
+    if (_showingProgressDialog) {
+      _showingProgressDialog = false;
+      if (Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+    }
   }
 
   // Cek apakah waktu yang dipilih sesuai dengan range shift
@@ -1617,219 +1818,36 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
     }
   }
 
-  void _showProgressDialog() {
-    if (_showingProgressDialog) return;
+  // TAMBAHAN: Method untuk menampilkan estimated time
+  String _getEstimatedTime() {
+    if (_totalTasksToCreate <= 0) return '';
 
-    _showingProgressDialog = true;
+    // Estimasi 500ms per task
+    int estimatedSeconds = (_totalTasksToCreate * 0.5).round();
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.black87,
-      builder: (BuildContext context) {
-        return WillPopScope(
-          onWillPop: () async => false, // Mencegah back button
-          child: Dialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                color: Colors.white,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Icon
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: kbpBlue100,
-                      borderRadius: BorderRadius.circular(40),
-                    ),
-                    child: const Icon(
-                      Icons.task_alt_rounded,
-                      size: 40,
-                      color: kbpBlue900,
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Title
-                  Text(
-                    'Membuat Tugas Patroli',
-                    style: boldTextStyle(size: 20, color: neutral900),
-                    textAlign: TextAlign.center,
-                  ),
-
-                  const SizedBox(height: 8),
-
-                  // Subtitle
-                  Text(
-                    'Sedang memproses $_totalTasksToCreate tugas...',
-                    style: regularTextStyle(size: 14, color: neutral600),
-                    textAlign: TextAlign.center,
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Progress indicator dengan persentase
-                  ValueListenableBuilder<int>(
-                    valueListenable: ValueNotifier(_tasksCreated),
-                    builder: (context, value, child) {
-                      double progress = _totalTasksToCreate > 0
-                          ? value / _totalTasksToCreate
-                          : 0.0;
-                      int percentage = (progress * 100).round();
-
-                      return Column(
-                        children: [
-                          // Progress bar
-                          Container(
-                            width: double.infinity,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: neutral200,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Stack(
-                              children: [
-                                AnimatedContainer(
-                                  duration: const Duration(milliseconds: 300),
-                                  width: MediaQuery.of(context).size.width *
-                                      0.6 *
-                                      progress,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [kbpBlue600, kbpBlue900],
-                                      begin: Alignment.centerLeft,
-                                      end: Alignment.centerRight,
-                                    ),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-
-                          const SizedBox(height: 12),
-
-                          // Progress text
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                '$value dari $_totalTasksToCreate tugas',
-                                style: mediumTextStyle(
-                                    size: 12, color: neutral600),
-                              ),
-                              Text(
-                                '$percentage%',
-                                style:
-                                    boldTextStyle(size: 12, color: kbpBlue900),
-                              ),
-                            ],
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Warning message
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: warningY50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: warningY200),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.warning_amber_rounded,
-                          color: warningY500,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Mohon Tunggu',
-                                style: semiBoldTextStyle(
-                                    size: 12, color: warningY400),
-                              ),
-                              Text(
-                                'Jangan meninggalkan aplikasi atau menekan tombol kembali selama proses berlangsung',
-                                style: regularTextStyle(
-                                    size: 11, color: warningY300),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Status text
-                  ValueListenableBuilder<String>(
-                    valueListenable: ValueNotifier(_getCurrentStatusText()),
-                    builder: (context, status, child) {
-                      return Text(
-                        status,
-                        style: regularTextStyle(size: 12, color: neutral500),
-                        textAlign: TextAlign.center,
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-// TAMBAHAN: Method untuk mendapatkan status text saat ini
-  String _getCurrentStatusText() {
-    if (_tasksCreated == 0) {
-      return 'Mempersiapkan tugas...';
-    } else if (_tasksCreated < _totalTasksToCreate) {
-      return 'Membuat tugas ${_tasksCreated + 1} dari $_totalTasksToCreate...';
+    if (estimatedSeconds < 60) {
+      return 'Estimasi waktu: ${estimatedSeconds}s';
     } else {
-      return 'Menyelesaikan proses...';
+      int minutes = (estimatedSeconds / 60).floor();
+      int seconds = estimatedSeconds % 60;
+      return 'Estimasi waktu: ${minutes}m ${seconds}s';
     }
   }
 
-// TAMBAHAN: Method untuk update progress
-  void _updateProgress(int completed) {
-    setState(() {
-      _tasksCreated = completed;
-    });
-  }
+  @override
+  void dispose() {
+    _mapController?.dispose();
+    _tabController.dispose();
 
-// TAMBAHAN: Method untuk menutup progress dialog
-  void _hideProgressDialog() {
+    // TAMBAHAN: Hide progress dialog jika masih tampil
     if (_showingProgressDialog) {
-      _showingProgressDialog = false;
-      if (Navigator.canPop(context)) {
-        Navigator.of(context).pop();
-      }
+      _hideProgressDialog();
     }
+
+    super.dispose();
   }
 
-// PERBAIKAN: Update method _assignMultipleTasks dengan progress tracking
+  // PERBAIKAN: Update method _assignMultipleTasks dengan progress tracking
   void _assignMultipleTasks() async {
     if (_stagedTasks.isEmpty) {
       showCustomSnackbar(
@@ -2021,17 +2039,20 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
         await Future.delayed(const Duration(milliseconds: 300));
 
         // Send notification for each task
-        // try {
-        //   await sendPushNotificationToOfficer(
-        //     officerId: assignedOfficerId,
-        //     title: 'Tugas Patroli Baru',
-        //     body: 'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(task.assignedStartTime!)}',
-        //     patrolTime: DateFormat('dd/MM/yyyy - HH:mm').format(task.assignedStartTime!),
-        //     taskId: null,
-        //   );
-        // } catch (e) {
-        //   print('Failed to send notification to officer $assignedOfficerId: $e');
-        // }
+        try {
+          await sendPushNotificationToOfficer(
+            officerId: assignedOfficerId,
+            title: 'Tugas Patroli Baru',
+            body:
+                'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(task.assignedStartTime!)}',
+            patrolTime: DateFormat('dd/MM/yyyy - HH:mm')
+                .format(task.assignedStartTime!),
+            taskId: null,
+          );
+        } catch (e) {
+          print(
+              'Failed to send notification to officer $assignedOfficerId: $e');
+        }
 
         // TAMBAHAN: Delay kecil setelah notification
         await Future.delayed(const Duration(milliseconds: 200));
@@ -2316,20 +2337,12 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
                 officers = adminState.officers;
                 vehicles = adminState.vehicles;
               } else if (adminState is AdminLoaded) {
-                officers = _getOfficersFromClusters(adminState.clusters);
-                vehicles = adminState.vehicles;
-              }
-            }
-
-            // Get coordinates for the selected cluster for Single Tab
-            if (_selectedClusterId != null) {
-              final selectedCluster = clusters.firstWhere(
-                (cluster) => cluster.id == _selectedClusterId,
-                orElse: () => User(id: '', email: '', name: '', role: ''),
-              );
-              if (selectedCluster.id.isNotEmpty &&
-                  selectedCluster.clusterCoordinates != null) {
-                selectedClusterCoordinates = selectedCluster.clusterCoordinates;
+                selectedClusterCoordinates = clusters
+                    .firstWhere(
+                      (cluster) => cluster.id == _selectedClusterId,
+                      orElse: () => User(id: '', email: '', name: '', role: ''),
+                    )
+                    .clusterCoordinates;
                 if (selectedClusterCoordinates != null &&
                     _selectedPoints.isEmpty) {
                   Future.microtask(() {
