@@ -66,6 +66,10 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
   DateTime _multiAssignedStartTime = DateTime.now();
   DateTime _multiAssignedEndTime = DateTime.now().add(const Duration(hours: 8));
 
+  int _totalTasksToCreate = 0;
+  int _tasksCreated = 0;
+  bool _showingProgressDialog = false;
+
   // Add a placeholder for the admin user ID.
   // In a real application, this should be retrieved from the authenticated user's session.
   final String _adminUserId = 'admin_user_id_placeholder';
@@ -88,13 +92,69 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
       Future.delayed(const Duration(milliseconds: 300), () {
         context.read<AdminBloc>().add(const LoadOfficersAndVehicles());
       });
+
+      if (widget.initialClusterId != null) {
+        Future.delayed(const Duration(milliseconds: 600), () {
+          _loadInitialClusterCoordinates();
+        });
+      }
     });
+  }
+
+  void _loadInitialClusterCoordinates() {
+    final adminState = context.read<AdminBloc>().state;
+    List<User> clusters = [];
+
+    if (adminState is AdminLoaded) {
+      clusters = adminState.clusters;
+    } else if (adminState is ClustersLoaded) {
+      clusters = adminState.clusters;
+    } else if (adminState is OfficersAndVehiclesLoaded) {
+      clusters = adminState.clusters;
+    }
+
+    if (clusters.isNotEmpty && widget.initialClusterId != null) {
+      final initialCluster = clusters.firstWhere(
+        (cluster) => cluster.id == widget.initialClusterId,
+        orElse: () => User(id: '', email: '', name: '', role: ''),
+      );
+
+      if (initialCluster.id.isNotEmpty) {
+        setState(() {
+          _selectedClusterName = initialCluster.name;
+          _multiSelectedClusterName = initialCluster.name;
+        });
+
+        // Load coordinates untuk single task
+        if (initialCluster.clusterCoordinates != null &&
+            initialCluster.clusterCoordinates!.isNotEmpty) {
+          print('DEBUG _loadInitialClusterCoordinates (Single):');
+          print('  - Loading initial coordinates for: ${initialCluster.name}');
+          _addClusterCoordinatesToMap(initialCluster.clusterCoordinates!);
+        }
+
+        // Load coordinates untuk multi task
+        if (initialCluster.clusterCoordinates != null &&
+            initialCluster.clusterCoordinates!.isNotEmpty) {
+          print('DEBUG _loadInitialClusterCoordinates (Multi):');
+          print(
+              '  - Loading initial coordinates for multi task: ${initialCluster.name}');
+          _addMultiClusterCoordinatesToMap(initialCluster.clusterCoordinates!);
+        }
+      }
+    }
   }
 
   @override
   void dispose() {
     _mapController?.dispose();
     _tabController.dispose();
+
+    // TAMBAHAN: Hide progress dialog jika masih tampil
+    if (_showingProgressDialog) {
+      _hideProgressDialog();
+    }
+
     super.dispose();
   }
 
@@ -1398,6 +1458,24 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
     );
   }
 
+  void _addMultiClusterCoordinatesToMap(List<List<double>> coordinates) {
+    setState(() {
+      _multiSelectedPoints.clear();
+
+      for (var coordinate in coordinates) {
+        if (coordinate.length >= 2) {
+          final point = LatLng(coordinate[0], coordinate[1]);
+          _multiSelectedPoints.add(point);
+        }
+      }
+
+      print('DEBUG _addMultiClusterCoordinatesToMap:');
+      print(
+          '  - Added ${_multiSelectedPoints.length} points to multi selection');
+      print('  - Points: $_multiSelectedPoints');
+    });
+  }
+
   // Multiple Task Assignment Logic
   void _addStagedTask() {
     if (!_multipleTaskFormKey.currentState!.validate()) {
@@ -1539,6 +1617,219 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
     }
   }
 
+  void _showProgressDialog() {
+    if (_showingProgressDialog) return;
+
+    _showingProgressDialog = true;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black87,
+      builder: (BuildContext context) {
+        return WillPopScope(
+          onWillPop: () async => false, // Mencegah back button
+          child: Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                color: Colors.white,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Icon
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      color: kbpBlue100,
+                      borderRadius: BorderRadius.circular(40),
+                    ),
+                    child: const Icon(
+                      Icons.task_alt_rounded,
+                      size: 40,
+                      color: kbpBlue900,
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Title
+                  Text(
+                    'Membuat Tugas Patroli',
+                    style: boldTextStyle(size: 20, color: neutral900),
+                    textAlign: TextAlign.center,
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // Subtitle
+                  Text(
+                    'Sedang memproses $_totalTasksToCreate tugas...',
+                    style: regularTextStyle(size: 14, color: neutral600),
+                    textAlign: TextAlign.center,
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Progress indicator dengan persentase
+                  ValueListenableBuilder<int>(
+                    valueListenable: ValueNotifier(_tasksCreated),
+                    builder: (context, value, child) {
+                      double progress = _totalTasksToCreate > 0
+                          ? value / _totalTasksToCreate
+                          : 0.0;
+                      int percentage = (progress * 100).round();
+
+                      return Column(
+                        children: [
+                          // Progress bar
+                          Container(
+                            width: double.infinity,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: neutral200,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Stack(
+                              children: [
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 300),
+                                  width: MediaQuery.of(context).size.width *
+                                      0.6 *
+                                      progress,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [kbpBlue600, kbpBlue900],
+                                      begin: Alignment.centerLeft,
+                                      end: Alignment.centerRight,
+                                    ),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          // Progress text
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '$value dari $_totalTasksToCreate tugas',
+                                style: mediumTextStyle(
+                                    size: 12, color: neutral600),
+                              ),
+                              Text(
+                                '$percentage%',
+                                style:
+                                    boldTextStyle(size: 12, color: kbpBlue900),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Warning message
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: warningY50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: warningY200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          color: warningY500,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Mohon Tunggu',
+                                style: semiBoldTextStyle(
+                                    size: 12, color: warningY400),
+                              ),
+                              Text(
+                                'Jangan meninggalkan aplikasi atau menekan tombol kembali selama proses berlangsung',
+                                style: regularTextStyle(
+                                    size: 11, color: warningY300),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Status text
+                  ValueListenableBuilder<String>(
+                    valueListenable: ValueNotifier(_getCurrentStatusText()),
+                    builder: (context, status, child) {
+                      return Text(
+                        status,
+                        style: regularTextStyle(size: 12, color: neutral500),
+                        textAlign: TextAlign.center,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+// TAMBAHAN: Method untuk mendapatkan status text saat ini
+  String _getCurrentStatusText() {
+    if (_tasksCreated == 0) {
+      return 'Mempersiapkan tugas...';
+    } else if (_tasksCreated < _totalTasksToCreate) {
+      return 'Membuat tugas ${_tasksCreated + 1} dari $_totalTasksToCreate...';
+    } else {
+      return 'Menyelesaikan proses...';
+    }
+  }
+
+// TAMBAHAN: Method untuk update progress
+  void _updateProgress(int completed) {
+    setState(() {
+      _tasksCreated = completed;
+    });
+  }
+
+// TAMBAHAN: Method untuk menutup progress dialog
+  void _hideProgressDialog() {
+    if (_showingProgressDialog) {
+      _showingProgressDialog = false;
+      if (Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
+// PERBAIKAN: Update method _assignMultipleTasks dengan progress tracking
   void _assignMultipleTasks() async {
     if (_stagedTasks.isEmpty) {
       showCustomSnackbar(
@@ -1581,6 +1872,20 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
       print('  - Start Date: $_multipleStartDate');
       print('  - End Date: $_multipleEndDate');
       print('  - Staged Tasks Count: ${_stagedTasks.length}');
+
+      // TAMBAHAN: Hitung total tasks yang akan dibuat
+      int totalDays =
+          _multipleEndDate!.difference(_multipleStartDate!).inDays + 1;
+      _totalTasksToCreate = totalDays * _stagedTasks.length;
+      _tasksCreated = 0;
+
+      print('  - Total tasks to create: $_totalTasksToCreate');
+
+      // TAMBAHAN: Tampilkan progress dialog
+      _showProgressDialog();
+
+      // TAMBAHAN: Delay kecil untuk memastikan dialog muncul
+      await Future.delayed(const Duration(milliseconds: 500));
 
       while (currentDate
           .isBefore(_multipleEndDate!.add(const Duration(days: 1)))) {
@@ -1681,17 +1986,23 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
 
       print('  - Total tasks to create: ${tasksToCreate.length}');
 
-      // Dispatch all tasks to the bloc
-      for (var task in tasksToCreate) {
+      // PERBAIKAN: Dispatch tasks dengan progress tracking
+      for (int i = 0; i < tasksToCreate.length; i++) {
+        final task = tasksToCreate[i];
         final String assignedOfficerId = task.officerId ?? task.userId ?? '';
 
         if (assignedOfficerId.isEmpty) {
           print('ERROR: Cannot create task without officer ID');
+          // TAMBAHAN: Update progress bahkan jika skip
+          _updateProgress(i + 1);
           continue;
         }
 
         print(
-            'Creating task: ${task.assignedStartTime} - ${task.assignedEndTime}');
+            'Creating task ${i + 1}/${tasksToCreate.length}: ${task.assignedStartTime} - ${task.assignedEndTime}');
+
+        // TAMBAHAN: Update progress dialog
+        _updateProgress(i + 1);
 
         context.read<AdminBloc>().add(
               CreateTask(
@@ -1706,22 +2017,31 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
               ),
             );
 
+        // TAMBAHAN: Delay kecil untuk UI update dan mencegah overload
+        await Future.delayed(const Duration(milliseconds: 300));
+
         // Send notification for each task
-        try {
-          await sendPushNotificationToOfficer(
-            officerId: assignedOfficerId,
-            title: 'Tugas Patroli Baru',
-            body:
-                'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(task.assignedStartTime!)}',
-            patrolTime: DateFormat('dd/MM/yyyy - HH:mm')
-                .format(task.assignedStartTime!),
-            taskId: null,
-          );
-        } catch (e) {
-          print(
-              'Failed to send notification to officer $assignedOfficerId: $e');
-        }
+        // try {
+        //   await sendPushNotificationToOfficer(
+        //     officerId: assignedOfficerId,
+        //     title: 'Tugas Patroli Baru',
+        //     body: 'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(task.assignedStartTime!)}',
+        //     patrolTime: DateFormat('dd/MM/yyyy - HH:mm').format(task.assignedStartTime!),
+        //     taskId: null,
+        //   );
+        // } catch (e) {
+        //   print('Failed to send notification to officer $assignedOfficerId: $e');
+        // }
+
+        // TAMBAHAN: Delay kecil setelah notification
+        await Future.delayed(const Duration(milliseconds: 200));
       }
+
+      // TAMBAHAN: Delay sebelum menutup dialog
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      // TAMBAHAN: Hide progress dialog
+      _hideProgressDialog();
 
       setState(() {
         _isAssigningMultiple = false;
@@ -1746,6 +2066,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
         Navigator.pop(context);
       }
     } catch (e) {
+      // TAMBAHAN: Hide progress dialog on error
+      _hideProgressDialog();
+
       setState(() {
         _isAssigningMultiple = false;
       });
@@ -1870,601 +2193,793 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Buat Tugas Patroli'),
-        backgroundColor: kbpBlue900,
-        foregroundColor: Colors.white,
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white.withOpacity(0.7),
-          indicatorColor: Colors.white,
-          tabs: const [
-            Tab(text: 'Single'),
-            Tab(text: 'Multiple'),
-          ],
+    return WillPopScope(
+      onWillPop: () async {
+        // TAMBAHAN: Cegah back button jika sedang processing
+        if (_isAssigningMultiple || _showingProgressDialog) {
+          showCustomSnackbar(
+            context: context,
+            title: 'Proses Sedang Berlangsung',
+            subtitle: 'Mohon tunggu hingga pembuatan tugas selesai',
+            type: SnackbarType.warning,
+          );
+          return false;
+        }
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Buat Tugas Patroli'),
+          backgroundColor: kbpBlue900,
+          foregroundColor: Colors.white,
+          bottom: TabBar(
+            controller: _tabController,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white.withOpacity(0.7),
+            indicatorColor: Colors.white,
+            tabs: const [
+              Tab(text: 'Single'),
+              Tab(text: 'Multiple'),
+            ],
+          ),
         ),
-      ),
-      body: BlocConsumer<AdminBloc, AdminState>(
-        listener: (context, state) {
-          if (state is CreateTaskSuccess) {
-            _createdTaskId = state.taskId;
-            // No need to show snackbar here, it's handled by _submitSingleTask or _assignMultipleTasks
-          } else if (state is CreateTaskError) {
-            showCustomSnackbar(
-              context: context,
-              title: 'Error',
-              subtitle: state.message,
-              type: SnackbarType.danger,
-            );
-            setState(() {
-              _isCreatingSingle = false;
-              _isAssigningMultiple = false;
-            });
-          }
-        },
-        builder: (context, state) {
-          if (state is AdminLoading ||
-              state is OfficersAndVehiclesLoading ||
-              state is ClustersLoading) {
-            return Center(
-              child: lottie.LottieBuilder.asset(
-                'assets/lottie/maps_loading.json',
-                width: 200,
-                height: 100,
-                fit: BoxFit.cover,
-              ),
-            );
-          }
-
-          if (state is AdminError ||
-              state is OfficersAndVehiclesError ||
-              state is ClustersError) {
-            final errorMessage = state is AdminError
-                ? state.message
-                : state is ClustersError
-                    ? state.message
-                    : (state as OfficersAndVehiclesError).message;
-
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, color: Colors.red, size: 48),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error: $errorMessage',
-                    style: const TextStyle(color: Colors.red),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () {
-                      context.read<AdminBloc>().add(const LoadAllClusters());
-                      context
-                          .read<AdminBloc>()
-                          .add(const LoadOfficersAndVehicles());
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kbpBlue900,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Coba Lagi'),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          List<Officer> officers = [];
-          List<String> vehicles = [];
-          List<User> clusters = [];
-          List<List<double>>? selectedClusterCoordinates;
-
-          if (state is OfficersAndVehiclesLoaded) {
-            officers = state.officers;
-            vehicles = state.vehicles;
-            clusters = state.clusters;
-          } else if (state is AdminLoaded) {
-            officers = _getOfficersFromClusters(state.clusters);
-            vehicles = state.vehicles;
-            clusters = state.clusters;
-          } else if (state is ClustersLoaded) {
-            clusters = state.clusters;
-
-            final adminState = context.read<AdminBloc>().state;
-            if (adminState is OfficersAndVehiclesLoaded) {
-              officers = adminState.officers;
-              vehicles = adminState.vehicles;
-            } else if (adminState is AdminLoaded) {
-              officers = _getOfficersFromClusters(adminState.clusters);
-              vehicles = adminState.vehicles;
+        body: BlocConsumer<AdminBloc, AdminState>(
+          listener: (context, state) {
+            if (state is CreateTaskSuccess) {
+              _createdTaskId = state.taskId;
+              // No need to show snackbar here, it's handled by _submitSingleTask or _assignMultipleTasks
+            } else if (state is CreateTaskError) {
+              showCustomSnackbar(
+                context: context,
+                title: 'Error',
+                subtitle: state.message,
+                type: SnackbarType.danger,
+              );
+              setState(() {
+                _isCreatingSingle = false;
+                _isAssigningMultiple = false;
+              });
             }
-          }
+          },
+          builder: (context, state) {
+            if (state is AdminLoading ||
+                state is OfficersAndVehiclesLoading ||
+                state is ClustersLoading) {
+              return Center(
+                child: lottie.LottieBuilder.asset(
+                  'assets/lottie/maps_loading.json',
+                  width: 200,
+                  height: 100,
+                  fit: BoxFit.cover,
+                ),
+              );
+            }
 
-          // Get coordinates for the selected cluster for Single Tab
-          if (_selectedClusterId != null) {
-            final selectedCluster = clusters.firstWhere(
-              (cluster) => cluster.id == _selectedClusterId,
-              orElse: () => User(id: '', email: '', name: '', role: ''),
-            );
-            if (selectedCluster.id.isNotEmpty &&
-                selectedCluster.clusterCoordinates != null) {
-              selectedClusterCoordinates = selectedCluster.clusterCoordinates;
-              if (selectedClusterCoordinates != null &&
-                  _selectedPoints.isEmpty) {
-                Future.microtask(() {
-                  _addClusterCoordinatesToMap(selectedClusterCoordinates!);
-                });
+            if (state is AdminError ||
+                state is OfficersAndVehiclesError ||
+                state is ClustersError) {
+              final errorMessage = state is AdminError
+                  ? state.message
+                  : state is ClustersError
+                      ? state.message
+                      : (state as OfficersAndVehiclesError).message;
+
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline,
+                        color: Colors.red, size: 48),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Error: $errorMessage',
+                      style: const TextStyle(color: Colors.red),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () {
+                        context.read<AdminBloc>().add(const LoadAllClusters());
+                        context
+                            .read<AdminBloc>()
+                            .add(const LoadOfficersAndVehicles());
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kbpBlue900,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Coba Lagi'),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            List<Officer> officers = [];
+            List<String> vehicles = [];
+            List<User> clusters = [];
+            List<List<double>>? selectedClusterCoordinates;
+
+            if (state is OfficersAndVehiclesLoaded) {
+              officers = state.officers;
+              vehicles = state.vehicles;
+              clusters = state.clusters;
+            } else if (state is AdminLoaded) {
+              officers = _getOfficersFromClusters(state.clusters);
+              vehicles = state.vehicles;
+              clusters = state.clusters;
+            } else if (state is ClustersLoaded) {
+              clusters = state.clusters;
+
+              final adminState = context.read<AdminBloc>().state;
+              if (adminState is OfficersAndVehiclesLoaded) {
+                officers = adminState.officers;
+                vehicles = adminState.vehicles;
+              } else if (adminState is AdminLoaded) {
+                officers = _getOfficersFromClusters(adminState.clusters);
+                vehicles = adminState.vehicles;
               }
             }
-          }
 
-          // Filter officers for Single Tab
-          List<Officer> filteredOfficersSingle = officers;
-          if (_selectedClusterId != null && _selectedClusterId!.isNotEmpty) {
-            filteredOfficersSingle = officers
-                .where((officer) => officer.clusterId == _selectedClusterId)
-                .toList();
-          }
+            // Get coordinates for the selected cluster for Single Tab
+            if (_selectedClusterId != null) {
+              final selectedCluster = clusters.firstWhere(
+                (cluster) => cluster.id == _selectedClusterId,
+                orElse: () => User(id: '', email: '', name: '', role: ''),
+              );
+              if (selectedCluster.id.isNotEmpty &&
+                  selectedCluster.clusterCoordinates != null) {
+                selectedClusterCoordinates = selectedCluster.clusterCoordinates;
+                if (selectedClusterCoordinates != null &&
+                    _selectedPoints.isEmpty) {
+                  Future.microtask(() {
+                    _addClusterCoordinatesToMap(selectedClusterCoordinates!);
+                  });
+                }
+              }
+            }
 
-          // Filter officers for Multiple Tab
-          List<Officer> filteredOfficersMulti = officers;
-          if (_multiSelectedClusterId != null &&
-              _multiSelectedClusterId!.isNotEmpty) {
-            filteredOfficersMulti = officers
-                .where(
-                    (officer) => officer.clusterId == _multiSelectedClusterId)
-                .toList();
-          }
+            // Filter officers for Single Tab
+            List<Officer> filteredOfficersSingle = officers;
+            if (_selectedClusterId != null && _selectedClusterId!.isNotEmpty) {
+              filteredOfficersSingle = officers
+                  .where((officer) => officer.clusterId == _selectedClusterId)
+                  .toList();
+            }
 
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              // Single Task Tab
-              Column(
-                children: [
-                  Expanded(
-                    child: _buildTaskForm(
-                      formKey: _singleFormKey,
-                      selectedClusterId: _selectedClusterId,
-                      onClusterChanged: (value) {
-                        setState(() {
-                          _selectedClusterId = value;
-                          if (value != null) {
-                            final selectedCluster = clusters.firstWhere(
-                              (cluster) => cluster.id == value,
-                              orElse: () =>
-                                  User(id: '', email: '', name: '', role: ''),
-                            );
-                            if (selectedCluster.id.isNotEmpty) {
-                              _selectedClusterName = selectedCluster.name;
+            // Filter officers for Multiple Tab
+            List<Officer> filteredOfficersMulti = officers;
+            if (_multiSelectedClusterId != null &&
+                _multiSelectedClusterId!.isNotEmpty) {
+              filteredOfficersMulti = officers
+                  .where(
+                      (officer) => officer.clusterId == _multiSelectedClusterId)
+                  .toList();
+            }
+
+            return TabBarView(
+              controller: _tabController,
+              children: [
+                // Single Task Tab
+                Column(
+                  children: [
+                    Expanded(
+                      child: _buildTaskForm(
+                        formKey: _singleFormKey,
+                        selectedClusterId: _selectedClusterId,
+                        onClusterChanged: (value) {
+                          setState(() {
+                            _selectedClusterId = value;
+                            if (value != null) {
+                              final selectedCluster = clusters.firstWhere(
+                                (cluster) => cluster.id == value,
+                                orElse: () =>
+                                    User(id: '', email: '', name: '', role: ''),
+                              );
+                              if (selectedCluster.id.isNotEmpty) {
+                                _selectedClusterName = selectedCluster.name;
+                              }
                             }
-                          }
-                          _selectedOfficerId = null;
-                          _selectedOfficer = null;
-                          _selectedPoints.clear();
-                          _markers.clear();
-                        });
-                      },
-                      selectedOfficerId: _selectedOfficerId,
-                      onOfficerChanged: (value) {
-                        setState(() {
-                          _selectedOfficerId = value;
-                          if (value != null) {
-                            _updateSelectedOfficer(
-                                value, filteredOfficersSingle);
-                          }
-                        });
-                      },
-                      assignedStartTime: _assignedStartTime,
-                      onStartTimeChanged: (newTime) {
-                        setState(() {
-                          _assignedStartTime = newTime;
-                          _updateEndTimeBasedOnStartTime(
-                              _assignedStartTime, _selectedOfficer, (endTime) {
-                            setState(() {
-                              _assignedEndTime = endTime;
+                            _selectedOfficerId = null;
+                            _selectedOfficer = null;
+                            _selectedPoints.clear();
+                            _markers.clear();
+                          });
+                        },
+                        selectedOfficerId: _selectedOfficerId,
+                        onOfficerChanged: (value) {
+                          setState(() {
+                            _selectedOfficerId = value;
+                            if (value != null) {
+                              _updateSelectedOfficer(
+                                  value, filteredOfficersSingle);
+                            }
+                          });
+                        },
+                        assignedStartTime: _assignedStartTime,
+                        onStartTimeChanged: (newTime) {
+                          setState(() {
+                            _assignedStartTime = newTime;
+                            _updateEndTimeBasedOnStartTime(
+                                _assignedStartTime, _selectedOfficer,
+                                (endTime) {
+                              setState(() {
+                                _assignedEndTime = endTime;
+                              });
                             });
                           });
-                        });
-                      },
-                      assignedEndTime: _assignedEndTime,
-                      onEndTimeChanged: (newTime) {
-                        setState(() {
-                          _assignedEndTime = newTime;
-                        });
-                      },
-                      selectedPoints: _selectedPoints,
-                      onMapTap: _handleMapTap,
-                      onRemoveLastPoint: () {
-                        setState(() {
-                          if (_selectedPoints.isNotEmpty) {
-                            _selectedPoints.removeLast();
-                            _updateMarkers();
-                          }
-                        });
-                      },
-                      onExpandMap: () {
-                        setState(() {
-                          _isMapExpanded = true;
-                        });
-                      },
-                      mapController: _mapController,
-                      markers: _markers,
-                      clusters: clusters,
-                      filteredOfficers: filteredOfficersSingle,
-                      addClusterCoordsToMap: _addClusterCoordinatesToMap,
-                      currentSelectedOfficer: _selectedOfficer,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16.0, vertical: 8.0),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _isCreatingSingle ? null : _submitSingleTask,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kbpBlue900,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          disabledBackgroundColor: neutral300,
-                        ),
-                        child: _isCreatingSingle
-                            ? Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                      strokeWidth: 3,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    'Membuat Tugas...',
-                                    style: boldTextStyle(
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : Text(
-                                'Buat Tugas Patroli',
-                                style: boldTextStyle(
-                                  color: Colors.white,
-                                  size: 16,
-                                ),
-                              ),
+                        },
+                        assignedEndTime: _assignedEndTime,
+                        onEndTimeChanged: (newTime) {
+                          setState(() {
+                            _assignedEndTime = newTime;
+                          });
+                        },
+                        selectedPoints: _selectedPoints,
+                        onMapTap: _handleMapTap,
+                        onRemoveLastPoint: () {
+                          setState(() {
+                            if (_selectedPoints.isNotEmpty) {
+                              _selectedPoints.removeLast();
+                              _updateMarkers();
+                            }
+                          });
+                        },
+                        onExpandMap: () {
+                          setState(() {
+                            _isMapExpanded = true;
+                          });
+                        },
+                        mapController: _mapController,
+                        markers: _markers,
+                        clusters: clusters,
+                        filteredOfficers: filteredOfficersSingle,
+                        addClusterCoordsToMap: _addClusterCoordinatesToMap,
+                        currentSelectedOfficer: _selectedOfficer,
                       ),
                     ),
-                  ),
-                ],
-              ),
-
-              // Multiple Task Tab
-              Column(
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(
-                              'Tambahkan Tugas ke Daftar',
-                              style: boldTextStyle(size: 18),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16.0, vertical: 8.0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed:
+                              _isCreatingSingle ? null : _submitSingleTask,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kbpBlue900,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                            const SizedBox(height: 16),
-                            _buildTaskForm(
-                              formKey: _multipleTaskFormKey,
-                              selectedClusterId: _multiSelectedClusterId,
-                              onClusterChanged: (value) {
-                                setState(() {
-                                  _multiSelectedClusterId = value;
-                                  if (value != null) {
-                                    final selectedCluster = clusters.firstWhere(
-                                      (cluster) => cluster.id == value,
-                                      orElse: () => User(
-                                          id: '',
-                                          email: '',
-                                          name: '',
-                                          role: ''),
-                                    );
-                                    if (selectedCluster.id.isNotEmpty) {
-                                      _multiSelectedClusterName =
-                                          selectedCluster.name;
-                                    }
-                                  }
-                                  _multiSelectedOfficerId = null;
-                                  _multiSelectedOfficer = null;
-                                  _multiSelectedPoints.clear();
-                                });
-                              },
-                              selectedOfficerId: _multiSelectedOfficerId,
-                              onOfficerChanged: (value) {
-                                setState(() {
-                                  _multiSelectedOfficerId = value;
-                                  if (value != null) {
-                                    _updateSelectedOfficer(
-                                        value, filteredOfficersMulti,
-                                        isMulti: true);
-                                  }
-                                });
-                              },
-                              assignedStartTime: _multiAssignedStartTime,
-                              onStartTimeChanged: (newTime) {
-                                setState(() {
-                                  _multiAssignedStartTime = newTime;
-                                  _updateEndTimeBasedOnStartTime(
-                                      _multiAssignedStartTime,
-                                      _multiSelectedOfficer, (endTime) {
-                                    setState(() {
-                                      _multiAssignedEndTime = endTime;
-                                    });
-                                  });
-                                });
-                              },
-                              assignedEndTime: _multiAssignedEndTime,
-                              onEndTimeChanged: (newTime) {
-                                setState(() {
-                                  _multiAssignedEndTime = newTime;
-                                });
-                              },
-                              selectedPoints: _multiSelectedPoints,
-                              onMapTap: (position) {
-                                setState(() {
-                                  _multiSelectedPoints.add(position);
-                                });
-                              },
-                              onRemoveLastPoint: () {
-                                setState(() {
-                                  if (_multiSelectedPoints.isNotEmpty) {
-                                    _multiSelectedPoints.removeLast();
-                                  }
-                                });
-                              },
-                              onExpandMap: () {
-                                // For multiple tab, we don't expand the map in the same way,
-                                // but we could open a dedicated map picker if needed.
-                                showCustomSnackbar(
-                                  context: context,
-                                  title: 'Info',
-                                  subtitle:
-                                      'Fitur perbesar peta tidak tersedia di mode multiple task. Silakan gunakan peta di bawah untuk memilih titik.',
-                                  type: SnackbarType.warning,
-                                );
-                              },
-                              mapController:
-                                  null, // No dedicated map controller for this small map
-                              markers: {}, // No markers for this small map
-                              clusters: clusters,
-                              filteredOfficers: filteredOfficersMulti,
-                              addClusterCoordsToMap: (coords) {
-                                setState(() {
-                                  _multiSelectedPoints.clear();
-                                  for (var coord in coords) {
-                                    _multiSelectedPoints
-                                        .add(LatLng(coord[0], coord[1]));
-                                  }
-                                });
-                              },
-                              currentSelectedOfficer: _multiSelectedOfficer,
-                            ),
-                            const SizedBox(height: 16),
-                            ElevatedButton.icon(
-                              onPressed: _addStagedTask,
-                              icon: const Icon(Icons.add, color: Colors.white),
-                              label: const Text('Tambahkan ke Daftar Tugas'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: kbpBlue700,
-                                foregroundColor: Colors.white,
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            Text(
-                              'Daftar Tugas yang Akan Ditetapkan',
-                              style: boldTextStyle(size: 18),
-                            ),
-                            const SizedBox(height: 16),
-                            _stagedTasks.isEmpty
-                                ? const Center(
-                                    child: Padding(
-                                      padding: EdgeInsets.all(16.0),
-                                      child: Text(
-                                        'Belum ada tugas dalam daftar.',
-                                        style: TextStyle(
-                                            fontStyle: FontStyle.italic,
-                                            color: neutral600),
+                            disabledBackgroundColor: neutral300,
+                          ),
+                          child: _isCreatingSingle
+                              ? Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 3,
                                       ),
                                     ),
-                                  )
-                                : ListView.builder(
-                                    shrinkWrap: true,
-                                    physics:
-                                        const NeverScrollableScrollPhysics(),
-                                    itemCount: _stagedTasks.length,
-                                    itemBuilder: (context, index) {
-                                      final task = _stagedTasks[index];
-
-                                      // PERBAIKAN: Gunakan userId atau officerId untuk mencari officer
-                                      final String officerIdToFind =
-                                          task.officerId ?? task.userId ?? '';
-
-                                      print('DEBUG ListView.builder:');
-                                      print(
-                                          '  - task.officerId: ${task.officerId}');
-                                      print('  - task.userId: ${task.userId}');
-                                      print(
-                                          '  - officerIdToFind: $officerIdToFind');
-                                      print(
-                                          '  - task.officerName: ${task.officerName}');
-
-                                      final officer = officers.firstWhere(
-                                        (o) => o.id == officerIdToFind,
-                                        orElse: () {
-                                          print(
-                                              '  - Officer not found in officers list');
-                                          return Officer(
-                                            id: officerIdToFind,
-                                            name: task.officerName ??
-                                                'Unknown Officer', // PERBAIKAN: Gunakan officerName dari task
-                                            type: OfficerType.organik,
-                                            shift: ShiftType.pagi,
-                                            clusterId: task.clusterId,
-                                          );
-                                        },
-                                      );
-
-                                      print(
-                                          '  - Final officer.name: ${officer.name}');
-
-                                      return Card(
-                                        margin:
-                                            const EdgeInsets.only(bottom: 8.0),
-                                        elevation: 2,
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(12.0),
-                                          child: Row(
-                                            children: [
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      '${task.clusterName ?? 'N/A'} - ${officer.name}',
-                                                      style: boldTextStyle(
-                                                          size: 16),
-                                                    ),
-                                                    Text(
-                                                      'Waktu: ${DateFormat('HH:mm').format(task.assignedStartTime!)} - ${DateFormat('HH:mm').format(task.assignedEndTime!)}',
-                                                      style: mediumTextStyle(
-                                                          size: 14,
-                                                          color: neutral700),
-                                                    ),
-                                                    Text(
-                                                      'Titik: ${task.assignedRoute!.length}',
-                                                      style: mediumTextStyle(
-                                                          size: 14,
-                                                          color: neutral700),
-                                                    ),
-                                                    // TAMBAHAN: Debug info
-                                                    if (officerIdToFind
-                                                        .isNotEmpty) ...[
-                                                      Text(
-                                                        'Officer ID: $officerIdToFind',
-                                                        style: TextStyle(
-                                                            fontSize: 10,
-                                                            color: neutral500),
-                                                      ),
-                                                    ],
-                                                  ],
-                                                ),
-                                              ),
-                                              IconButton(
-                                                icon: const Icon(Icons.delete,
-                                                    color: Colors.red),
-                                                onPressed: () =>
-                                                    _removeStagedTask(index),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                            const SizedBox(height: 24),
-                            Text(
-                              'Rentang Tanggal Penugasan',
-                              style: boldTextStyle(size: 18),
-                            ),
-                            const SizedBox(height: 16),
-                            GestureDetector(
-                              onTap: _pickDateRange,
-                              child: Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: kbpBlue900),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
+                                    const SizedBox(width: 12),
                                     Text(
-                                      _multipleStartDate == null
-                                          ? 'Pilih Rentang Tanggal (Maks 7 Hari)'
-                                          : '${DateFormat('dd/MM/yyyy').format(_multipleStartDate!)} - ${DateFormat('dd/MM/yyyy').format(_multipleEndDate!)}',
-                                      style: const TextStyle(fontSize: 16),
-                                    ),
-                                    const Icon(Icons.calendar_today,
-                                        color: kbpBlue900),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            ElevatedButton(
-                              onPressed: (_isAssigningMultiple ||
-                                      _stagedTasks.isEmpty ||
-                                      _multipleStartDate == null)
-                                  ? null
-                                  : _assignMultipleTasks,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: kbpBlue900,
-                                foregroundColor: Colors.white,
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                disabledBackgroundColor: neutral300,
-                              ),
-                              child: _isAssigningMultiple
-                                  ? Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        const SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(
-                                            color: Colors.white,
-                                            strokeWidth: 3,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Text(
-                                          'Menetapkan Tugas...',
-                                          style: boldTextStyle(
-                                            color: Colors.white,
-                                            size: 16,
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  : Text(
-                                      'Tetapkan Tugas Berulang',
+                                      'Membuat Tugas...',
                                       style: boldTextStyle(
                                         color: Colors.white,
                                         size: 16,
                                       ),
                                     ),
+                                  ],
+                                )
+                              : Text(
+                                  'Buat Tugas Patroli',
+                                  style: boldTextStyle(
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                // Multiple Task Tab
+                Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                'Tambahkan Tugas ke Daftar',
+                                style: boldTextStyle(size: 18),
+                              ),
+                              const SizedBox(height: 16),
+                              _buildTaskForm(
+                                formKey: _multipleTaskFormKey,
+                                selectedClusterId: _multiSelectedClusterId,
+                                onClusterChanged: (value) {
+                                  print(
+                                      'DEBUG onClusterChanged (Multi) - START:');
+                                  print(
+                                      '  - Old cluster: $_multiSelectedClusterId');
+                                  print('  - New cluster: $value');
+
+                                  setState(() {
+                                    _multiSelectedClusterId = value;
+
+                                    // Reset officer selection ketika cluster berubah
+                                    _multiSelectedOfficerId = null;
+                                    _multiSelectedOfficer = null;
+
+                                    if (value != null) {
+                                      final selectedCluster =
+                                          clusters.firstWhere(
+                                        (cluster) => cluster.id == value,
+                                        orElse: () => User(
+                                            id: '',
+                                            email: '',
+                                            name: '',
+                                            role: ''),
+                                      );
+
+                                      if (selectedCluster.id.isNotEmpty) {
+                                        _multiSelectedClusterName =
+                                            selectedCluster.name;
+
+                                        print(
+                                            'DEBUG onClusterChanged (Multi) - Cluster found:');
+                                        print(
+                                            '  - Cluster name: ${selectedCluster.name}');
+                                        print(
+                                            '  - Has coordinates: ${selectedCluster.clusterCoordinates != null}');
+                                        print(
+                                            '  - Coordinates count: ${selectedCluster.clusterCoordinates?.length ?? 0}');
+
+                                        // PERBAIKAN: Auto-load cluster coordinates untuk multi task
+                                        if (selectedCluster
+                                                    .clusterCoordinates !=
+                                                null &&
+                                            selectedCluster.clusterCoordinates!
+                                                .isNotEmpty) {
+                                          print('  - Loading coordinates...');
+
+                                          // Clear existing points first
+                                          _multiSelectedPoints.clear();
+
+                                          // Load new coordinates
+                                          for (var coordinate in selectedCluster
+                                              .clusterCoordinates!) {
+                                            if (coordinate.length >= 2) {
+                                              final point = LatLng(
+                                                  coordinate[0], coordinate[1]);
+                                              _multiSelectedPoints.add(point);
+                                            }
+                                          }
+
+                                          print(
+                                              '  - Added ${_multiSelectedPoints.length} points to multi selection');
+                                        } else {
+                                          print(
+                                              '  - No coordinates found, clearing points');
+                                          // Clear points jika cluster tidak memiliki coordinates
+                                          _multiSelectedPoints.clear();
+                                        }
+                                      } else {
+                                        print(
+                                            'DEBUG onClusterChanged (Multi) - Cluster not found');
+                                        _multiSelectedClusterName = null;
+                                        _multiSelectedPoints.clear();
+                                      }
+                                    } else {
+                                      print(
+                                          'DEBUG onClusterChanged (Multi) - Value is null');
+                                      _multiSelectedClusterName = null;
+                                      _multiSelectedPoints.clear();
+                                    }
+                                  });
+
+                                  print('DEBUG onClusterChanged (Multi) - END');
+                                  print(
+                                      '  - Final points count: ${_multiSelectedPoints.length}');
+                                },
+                                selectedOfficerId: _multiSelectedOfficerId,
+                                onOfficerChanged: (value) {
+                                  setState(() {
+                                    _multiSelectedOfficerId = value;
+                                    if (value != null) {
+                                      _updateSelectedOfficer(
+                                          value, filteredOfficersMulti,
+                                          isMulti: true);
+                                    }
+                                  });
+                                },
+                                assignedStartTime: _multiAssignedStartTime,
+                                onStartTimeChanged: (newTime) {
+                                  setState(() {
+                                    _multiAssignedStartTime = newTime;
+                                    _updateEndTimeBasedOnStartTime(
+                                        _multiAssignedStartTime,
+                                        _multiSelectedOfficer, (endTime) {
+                                      setState(() {
+                                        _multiAssignedEndTime = endTime;
+                                      });
+                                    });
+                                  });
+                                },
+                                assignedEndTime: _multiAssignedEndTime,
+                                onEndTimeChanged: (newTime) {
+                                  setState(() {
+                                    _multiAssignedEndTime = newTime;
+                                  });
+                                },
+                                selectedPoints: _multiSelectedPoints,
+                                onMapTap: (position) {
+                                  setState(() {
+                                    _multiSelectedPoints.add(position);
+                                  });
+                                },
+                                onRemoveLastPoint: () {
+                                  setState(() {
+                                    if (_multiSelectedPoints.isNotEmpty) {
+                                      _multiSelectedPoints.removeLast();
+                                    }
+                                  });
+                                },
+                                onExpandMap: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) =>
+                                        _buildMultiMapDialog(),
+                                  );
+                                },
+                                mapController: null,
+                                markers: {},
+                                clusters: clusters,
+                                filteredOfficers: filteredOfficersMulti,
+                                addClusterCoordsToMap:
+                                    _addMultiClusterCoordinatesToMap,
+                                currentSelectedOfficer: _multiSelectedOfficer,
+                              ),
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                onPressed: _addStagedTask,
+                                icon:
+                                    const Icon(Icons.add, color: Colors.white),
+                                label: const Text('Tambahkan ke Daftar Tugas'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: kbpBlue700,
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 24),
+                              Text(
+                                'Daftar Tugas yang Akan Ditetapkan',
+                                style: boldTextStyle(size: 18),
+                              ),
+                              const SizedBox(height: 16),
+                              _stagedTasks.isEmpty
+                                  ? const Center(
+                                      child: Padding(
+                                        padding: EdgeInsets.all(16.0),
+                                        child: Text(
+                                          'Belum ada tugas dalam daftar.',
+                                          style: TextStyle(
+                                              fontStyle: FontStyle.italic,
+                                              color: neutral600),
+                                        ),
+                                      ),
+                                    )
+                                  : ListView.builder(
+                                      shrinkWrap: true,
+                                      physics:
+                                          const NeverScrollableScrollPhysics(),
+                                      itemCount: _stagedTasks.length,
+                                      itemBuilder: (context, index) {
+                                        final task = _stagedTasks[index];
+
+                                        // PERBAIKAN: Gunakan userId atau officerId untuk mencari officer
+                                        final String officerIdToFind =
+                                            task.officerId ?? task.userId ?? '';
+
+                                        print('DEBUG ListView.builder:');
+                                        print(
+                                            '  - task.officerId: ${task.officerId}');
+                                        print(
+                                            '  - task.userId: ${task.userId}');
+                                        print(
+                                            '  - officerIdToFind: $officerIdToFind');
+                                        print(
+                                            '  - task.officerName: ${task.officerName}');
+
+                                        final officer = officers.firstWhere(
+                                          (o) => o.id == officerIdToFind,
+                                          orElse: () {
+                                            print(
+                                                '  - Officer not found in officers list');
+                                            return Officer(
+                                              id: officerIdToFind,
+                                              name: task.officerName ??
+                                                  'Unknown Officer', // PERBAIKAN: Gunakan officerName dari task
+                                              type: OfficerType.organik,
+                                              shift: ShiftType.pagi,
+                                              clusterId: task.clusterId,
+                                            );
+                                          },
+                                        );
+
+                                        print(
+                                            '  - Final officer.name: ${officer.name}');
+
+                                        return Card(
+                                          margin: const EdgeInsets.only(
+                                              bottom: 8.0),
+                                          elevation: 2,
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(12.0),
+                                            child: Row(
+                                              children: [
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        '${task.clusterName ?? 'N/A'} - ${officer.name}',
+                                                        style: boldTextStyle(
+                                                            size: 16),
+                                                      ),
+                                                      Text(
+                                                        'Waktu: ${DateFormat('HH:mm').format(task.assignedStartTime!)} - ${DateFormat('HH:mm').format(task.assignedEndTime!)}',
+                                                        style: mediumTextStyle(
+                                                            size: 14,
+                                                            color: neutral700),
+                                                      ),
+                                                      Text(
+                                                        'Titik: ${task.assignedRoute!.length}',
+                                                        style: mediumTextStyle(
+                                                            size: 14,
+                                                            color: neutral700),
+                                                      ),
+                                                      // TAMBAHAN: Debug info
+                                                      if (officerIdToFind
+                                                          .isNotEmpty) ...[
+                                                        Text(
+                                                          'Officer ID: $officerIdToFind',
+                                                          style: TextStyle(
+                                                              fontSize: 10,
+                                                              color:
+                                                                  neutral500),
+                                                        ),
+                                                      ],
+                                                    ],
+                                                  ),
+                                                ),
+                                                IconButton(
+                                                  icon: const Icon(Icons.delete,
+                                                      color: Colors.red),
+                                                  onPressed: () =>
+                                                      _removeStagedTask(index),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                              const SizedBox(height: 24),
+                              Text(
+                                'Rentang Tanggal Penugasan',
+                                style: boldTextStyle(size: 18),
+                              ),
+                              const SizedBox(height: 16),
+                              GestureDetector(
+                                onTap: _pickDateRange,
+                                child: Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: kbpBlue900),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        _multipleStartDate == null
+                                            ? 'Pilih Rentang Tanggal (Maks 7 Hari)'
+                                            : '${DateFormat('dd/MM/yyyy').format(_multipleStartDate!)} - ${DateFormat('dd/MM/yyyy').format(_multipleEndDate!)}',
+                                        style: const TextStyle(fontSize: 16),
+                                      ),
+                                      const Icon(Icons.calendar_today,
+                                          color: kbpBlue900),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 24),
+                              ElevatedButton(
+                                onPressed: (_isAssigningMultiple ||
+                                        _stagedTasks.isEmpty ||
+                                        _multipleStartDate == null ||
+                                        _showingProgressDialog) // TAMBAHAN: Disable jika progress dialog tampil
+                                    ? null
+                                    : _assignMultipleTasks,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: kbpBlue900,
+                                  foregroundColor: Colors.white,
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 16),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  disabledBackgroundColor: neutral300,
+                                ),
+                                child: _isAssigningMultiple ||
+                                        _showingProgressDialog
+                                    ? Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              color: Colors.white,
+                                              strokeWidth: 3,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Text(
+                                            _showingProgressDialog
+                                                ? 'Memproses Tugas...'
+                                                : 'Menetapkan Tugas...',
+                                            style: boldTextStyle(
+                                              color: Colors.white,
+                                              size: 16,
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : Text(
+                                        'Tetapkan Tugas Berulang',
+                                        style: boldTextStyle(
+                                          color: Colors.white,
+                                          size: 16,
+                                        ),
+                                      ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // TAMBAHAN: Dialog untuk expand map di multi task
+  Widget _buildMultiMapDialog() {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(16),
+      child: Container(
+        width: double.maxFinite,
+        height: MediaQuery.of(context).size.height * 0.8,
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: kbpBlue900,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(8),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Pilih Titik Patroli',
+                    style: boldTextStyle(color: Colors.white, size: 18),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+
+            // Map
+            Expanded(
+              child: Stack(
+                children: [
+                  GoogleMap(
+                    initialCameraPosition: const CameraPosition(
+                      target: LatLng(-6.200000, 106.816666), // Jakarta
+                      zoom: 11.0,
+                    ),
+                    markers: Set<Marker>.from(
+                      _multiSelectedPoints.asMap().entries.map((entry) {
+                        return Marker(
+                          markerId: MarkerId('multi_point_${entry.key}'),
+                          position: entry.value,
+                          infoWindow: InfoWindow(
+                            title: 'Titik ${entry.key + 1}',
+                            snippet: 'Tap untuk menghapus',
+                          ),
+                        );
+                      }),
+                    ),
+                    onMapCreated: (GoogleMapController controller) {
+                      // Auto fit bounds jika ada points
+                      if (_multiSelectedPoints.isNotEmpty) {
+                        Future.delayed(const Duration(milliseconds: 500), () {
+                          _fitMultiMapToBounds(controller);
+                        });
+                      }
+                    },
+                    onTap: (LatLng position) {
+                      // Check if tapping near existing point to remove it
+                      int indexToRemove = _findNearestMultiPointIndex(position);
+                      if (indexToRemove != -1) {
+                        setState(() {
+                          _multiSelectedPoints.removeAt(indexToRemove);
+                        });
+                      } else {
+                        // Add new point
+                        setState(() {
+                          _multiSelectedPoints.add(position);
+                        });
+                      }
+                    },
+                  ),
+
+                  // Info overlay
+                  Positioned(
+                    top: 16,
+                    left: 16,
+                    right: 16,
+                    child: Card(
+                      color: Colors.white.withOpacity(0.9),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Titik dipilih: ${_multiSelectedPoints.length}',
+                              style: boldTextStyle(size: 16),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Tap pada peta untuk menambah/menghapus titik',
+                              style:
+                                  TextStyle(fontSize: 12, color: Colors.grey),
                             ),
                           ],
                         ),
@@ -2473,11 +2988,111 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
                   ),
                 ],
               ),
-            ],
-          );
-        },
+            ),
+
+            // Actions
+            Container(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _multiSelectedPoints.isEmpty
+                          ? null
+                          : () {
+                              setState(() {
+                                if (_multiSelectedPoints.isNotEmpty) {
+                                  _multiSelectedPoints.removeLast();
+                                }
+                              });
+                            },
+                      icon: const Icon(Icons.undo, color: Colors.white),
+                      label: const Text('Hapus Terakhir'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kbpBlue700,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.grey,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                      },
+                      icon: const Icon(Icons.check, color: Colors.white),
+                      label: const Text('Selesai'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kbpBlue900,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+// TAMBAHAN: Helper methods untuk multi map
+  void _fitMultiMapToBounds(GoogleMapController controller) {
+    if (_multiSelectedPoints.isEmpty) return;
+
+    double minLat = _multiSelectedPoints.first.latitude;
+    double maxLat = _multiSelectedPoints.first.latitude;
+    double minLng = _multiSelectedPoints.first.longitude;
+    double maxLng = _multiSelectedPoints.first.longitude;
+
+    for (var point in _multiSelectedPoints) {
+      if (point.latitude < minLat) minLat = point.latitude;
+      if (point.latitude > maxLat) maxLat = point.latitude;
+      if (point.longitude < minLng) minLng = point.longitude;
+      if (point.longitude > maxLng) maxLng = point.longitude;
+    }
+
+    controller.animateCamera(CameraUpdate.newLatLngBounds(
+      LatLngBounds(
+        southwest: LatLng(minLat - 0.01, minLng - 0.01),
+        northeast: LatLng(maxLat + 0.01, maxLng + 0.01),
+      ),
+      50,
+    ));
+  }
+
+  int _findNearestMultiPointIndex(LatLng tapPosition) {
+    const double minDistance = 0.0001;
+
+    for (int i = 0; i < _multiSelectedPoints.length; i++) {
+      final point = _multiSelectedPoints[i];
+      final distance = _calculateDistance(tapPosition, point);
+
+      if (distance < minDistance) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+// TAMBAHAN: Helper method untuk mendapatkan display text shift
+  String getShiftDisplayText(ShiftType shift) {
+    switch (shift) {
+      case ShiftType.pagi:
+        return 'Pagi (07:00-15:00)';
+      case ShiftType.sore:
+        return 'Sore (15:00-23:00)';
+      case ShiftType.malam:
+        return 'Malam (23:00-07:00)';
+      case ShiftType.siang:
+        return 'Siang (07:00-19:00)';
+      case ShiftType.malamPanjang:
+        return 'Malam Panjang (19:00-07:00)';
+      default:
+        return 'Unknown Shift';
+    }
   }
 
   List<Officer> _getOfficersFromClusters(List<User> clusters) {

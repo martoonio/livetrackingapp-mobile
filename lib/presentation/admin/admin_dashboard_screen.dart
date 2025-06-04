@@ -542,7 +542,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           Text(
                             // PERBAIKAN: Safe substring untuk taskId
                             'Tugas #${_getSafeTaskIdPreview(task.taskId)}',
-                            style: boldTextStyle(size: 16),
+                            style: boldTextStyle(size: 12),
                           ),
                           const SizedBox(width: 8),
                           Container(
