@@ -384,7 +384,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             MaterialPageRoute(
                               builder: (_) => ClusterDetailScreen(
                                 clusterId: cluster.id,
-                                initialTab: 0, // Info tab
+                                initialTab: 0,
                               ),
                             ),
                           ).then((_) => _loadData());
@@ -419,133 +419,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             Container(
               color: neutral300,
               padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Petugas (${officers.length})',
-                        style: semiBoldTextStyle(size: 16),
-                      ),
-                      TextButton.icon(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ClusterDetailScreen(
-                                clusterId: cluster.id,
-                                initialTab: 1, // Officers tab
-                              ),
-                            ),
-                          ).then((_) => _loadData());
-                        },
-                        icon: const Icon(Icons.people, size: 16),
-                        label: const Text('Kelola Petugas'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: kbpBlue900,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  // Bagian officers.isEmpty ? ...
-                  officers.isEmpty
-                      ? const Text(
-                          'Belum ada petugas di cluster ini',
-                          style: TextStyle(
-                            fontStyle: FontStyle.italic,
-                            color: neutral600,
-                          ),
-                        )
-                      : SizedBox(
-                          height:
-                              70, // Sedikit ditinggikan untuk menampung badge
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: officers.length,
-                            itemBuilder: (context, idx) {
-                              final officer = officers[idx];
-                              return Padding(
-                                padding: const EdgeInsets.only(right: 12),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.start,
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 20,
-                                      backgroundColor: kbpBlue100,
-                                      backgroundImage: officer.photoUrl != null
-                                          ? NetworkImage(officer.photoUrl!)
-                                          : null,
-                                      child: officer.photoUrl == null
-                                          ? Text(
-                                              officer.name.isNotEmpty
-                                                  ? officer.name[0]
-                                                      .toUpperCase()
-                                                  : '?',
-                                              style: boldTextStyle(
-                                                  color: kbpBlue900, size: 14),
-                                            )
-                                          : null,
-                                    ),
-                                    8.width,
-                                    SizedBox(
-                                      width: 70, // Batasi lebar
-                                      child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            officer.name.length > 10
-                                                ? '${officer.name.substring(0, 10)}...'
-                                                : officer.name,
-                                            style: boldTextStyle(size: 12),
-                                            textAlign: TextAlign.center,
-                                          ),
-                                          Container(
-                                            margin:
-                                                const EdgeInsets.only(top: 2),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 4,
-                                              vertical: 1,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: officer.type ==
-                                                      OfficerType.organik
-                                                  ? successG50
-                                                  : warningY50,
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                            ),
-                                            child: Text(
-                                              officer.type ==
-                                                      OfficerType.organik
-                                                  ? 'Organik'
-                                                  : 'Outsource',
-                                              style: semiBoldTextStyle(
-                                                size: 10,
-                                                color: officer.type ==
-                                                        OfficerType.organik
-                                                    ? successG500
-                                                    : warningY500,
-                                              ),
-                                              textAlign: TextAlign.center,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                ],
-              ),
+              child: _buildOfficersSection(officers, cluster),
             ),
             // Bagian task
             Container(
@@ -565,9 +439,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const CreateTaskScreen(
-                                  // initialClusterId: cluster.id,
-                                  ),
+                              builder: (_) => const CreateTaskScreen(),
                             ),
                           ).then((_) => _loadData());
                         },
@@ -581,287 +453,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                   const SizedBox(height: 8),
                   activeTasks.isEmpty
-                      ? const Text(
-                          'Tidak ada tugas aktif untuk cluster ini',
-                          style: TextStyle(
-                            fontStyle: FontStyle.italic,
-                            color: neutral600,
-                          ),
-                        )
+                      ? _buildEmptyTasksState()
                       : ListView.builder(
                           physics: const NeverScrollableScrollPhysics(),
                           shrinkWrap: true,
                           itemCount: activeTasks.length,
                           itemBuilder: (context, taskIndex) {
                             final task = activeTasks[taskIndex];
-// Cari officer yang mengerjakan task ini
                             final assignedOfficer =
                                 _findOfficerByUserId(officers, task.userId) ??
                                     Officer(
                                       id: task.userId ?? '',
                                       name: task.userId != null
-                                          ? 'Petugas ${task.userId.substring(0, 4)}...'
+                                          ? 'Petugas ${task.userId!.substring(0, 4)}...'
                                           : 'Tidak diketahui',
                                       type: OfficerType.organik,
                                       shift: ShiftType.pagi,
                                       clusterId: cluster.id,
                                     );
 
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              elevation: 0,
-                              color: neutral200,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                side: const BorderSide(color: neutral300),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(12.0),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        // Status indicator
-                                        CircleAvatar(
-                                          backgroundColor:
-                                              _getStatusColor(task.status),
-                                          radius: 16,
-                                          child: const Icon(
-                                            Icons.task_alt,
-                                            color: Colors.white,
-                                            size: 16,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-
-                                        // Task ID
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Tugas #${task.taskId.substring(0, 8)}',
-                                                style: boldTextStyle(size: 16),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                'Status: ${_getStatusText(task.status)}',
-                                                style: TextStyle(
-                                                  color: _getStatusColor(
-                                                      task.status),
-                                                  fontWeight: FontWeight.w500,
-                                                  fontSize: 14,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-
-                                        // View action
-                                        // Ganti bagian IconButton arrow_forward_ios dengan menu PopupMenuButton
-
-// Menu aksi (3 titik)
-                                        PopupMenuButton<String>(
-                                          icon: const Icon(
-                                            Icons.more_vert,
-                                            size: 20,
-                                            color: kbpBlue900,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                          ),
-                                          elevation: 3,
-                                          position: PopupMenuPosition.under,
-                                          tooltip: 'Opsi Tugas',
-                                          color: Colors.white,
-                                          onSelected: (value) {
-                                            if (value == 'view') {
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      PatrolHistoryScreen(
-                                                    task: task,
-                                                  ),
-                                                ),
-                                              );
-                                            } else if (value == 'cancel') {
-                                              _showCancelConfirmationDialog(
-                                                  context, task, cluster);
-                                            }
-                                          },
-                                          itemBuilder: (BuildContext context) =>
-                                              [
-                                            // Lihat Detail Option
-                                            PopupMenuItem<String>(
-                                              value: 'view',
-                                              child: Row(
-                                                children: [
-                                                  const Icon(
-                                                    Icons.visibility_outlined,
-                                                    color: kbpBlue900,
-                                                    size: 18,
-                                                  ),
-                                                  const SizedBox(width: 12),
-                                                  Text(
-                                                    'Lihat Detail',
-                                                    style: mediumTextStyle(
-                                                        color: neutral800),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-
-                                            // Cancel Option - hanya tampilkan jika memenuhi syarat
-                                            if (_canCancelTask(task))
-                                              PopupMenuItem<String>(
-                                                value: 'cancel',
-                                                child: Row(
-                                                  children: [
-                                                    const Icon(
-                                                      Icons.cancel_outlined,
-                                                      color: dangerR500,
-                                                      size: 18,
-                                                    ),
-                                                    const SizedBox(width: 12),
-                                                    Text(
-                                                      'Batalkan Tugas',
-                                                      style: mediumTextStyle(
-                                                          color: dangerR500),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-
-                                    const Divider(height: 16),
-
-                                    // Officer info section with shift and type
-                                    Row(
-                                      children: [
-                                        // Officer avatar
-                                        CircleAvatar(
-                                          radius: 16,
-                                          backgroundColor: kbpBlue100,
-                                          backgroundImage:
-                                              assignedOfficer.photoUrl != null
-                                                  ? NetworkImage(
-                                                      assignedOfficer.photoUrl!)
-                                                  : null,
-                                          child:
-                                              assignedOfficer.photoUrl == null
-                                                  ? const Icon(Icons.person,
-                                                      color: kbpBlue900,
-                                                      size: 16)
-                                                  : null,
-                                        ),
-                                        const SizedBox(width: 12),
-
-                                        // Officer details with type and shift badges
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                assignedOfficer.name,
-                                                style:
-                                                    mediumTextStyle(size: 14),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Wrap(
-                                                spacing: 8,
-                                                children: [
-                                                  // Tipe badge
-                                                  Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2,
-                                                    ),
-                                                    decoration: BoxDecoration(
-                                                      color: assignedOfficer
-                                                                  .type ==
-                                                              OfficerType
-                                                                  .organik
-                                                          ? successG50
-                                                          : warningY50,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              4),
-                                                    ),
-                                                    child: Text(
-                                                      assignedOfficer
-                                                          .typeDisplay,
-                                                      style: mediumTextStyle(
-                                                        size: 10,
-                                                        color: assignedOfficer
-                                                                    .type ==
-                                                                OfficerType
-                                                                    .organik
-                                                            ? successG500
-                                                            : warningY500,
-                                                      ),
-                                                    ),
-                                                  ),
-
-                                                  // Shift badge
-                                                  Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 2,
-                                                    ),
-                                                    decoration: BoxDecoration(
-                                                      color: kbpBlue50,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              4),
-                                                    ),
-                                                    child: Text(
-                                                      getShortShiftText(
-                                                          assignedOfficer
-                                                              .shift),
-                                                      style: mediumTextStyle(
-                                                          size: 10,
-                                                          color: kbpBlue700),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-
-                                        // Show task start time
-                                        Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.end,
-                                          children: [
-                                            Text(
-                                              'Mulai:',
-                                              style: regularTextStyle(
-                                                  size: 12, color: neutral600),
-                                            ),
-                                            Text(
-                                              formatDateFromString(
-                                                  task.startTime.toString()),
-                                              style: mediumTextStyle(size: 12),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
+                            return _buildEnhancedTaskCard(
+                                task, assignedOfficer);
                           },
                         ),
                 ],
@@ -873,8 +485,740 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // Tambahkan method _showCancelConfirmationDialog
+  // NEW: Enhanced task card dengan assigned start/end time
+  Widget _buildEnhancedTaskCard(PatrolTask task, Officer assignedOfficer) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 1,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: neutral200),
+      ),
+      child: Column(
+        children: [
+          // Header dengan status dan ID
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: Row(
+              children: [
+                // Status indicator dengan animasi
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        _getStatusColor(task.status),
+                        _getStatusColor(task.status).withOpacity(0.7),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _getStatusColor(task.status).withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.task_alt_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
 
+                // Task info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'Tugas #${task.taskId.substring(0, 8)}',
+                            style: boldTextStyle(size: 16),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                                  _getStatusColor(task.status).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: _getStatusColor(task.status)
+                                    .withOpacity(0.3),
+                              ),
+                            ),
+                            child: Text(
+                              _getStatusText(task.status),
+                              style: TextStyle(
+                                color: _getStatusColor(task.status),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      // const SizedBox(height: 4),
+                      Text(
+                        assignedOfficer.name,
+                        style: mediumTextStyle(size: 14, color: neutral600),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Menu aksi
+                PopupMenuButton<String>(
+                  icon: const Icon(
+                    Icons.more_vert,
+                    size: 20,
+                    color: neutral600,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 8,
+                  position: PopupMenuPosition.under,
+                  tooltip: 'Opsi Tugas',
+                  color: Colors.white,
+                  onSelected: (value) {
+                    if (value == 'view') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PatrolHistoryScreen(task: task),
+                        ),
+                      );
+                    } else if (value == 'cancel') {
+                      _showCancelConfirmationDialog(
+                          context,
+                          task,
+                          User(
+                              id: '',
+                              email: '',
+                              name: '',
+                              role: '')); // Dummy user
+                    }
+                  },
+                  itemBuilder: (BuildContext context) => [
+                    PopupMenuItem<String>(
+                      value: 'view',
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.visibility_outlined,
+                            color: kbpBlue600,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Lihat Detail',
+                            style: mediumTextStyle(color: neutral800),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_canCancelTask(task))
+                      PopupMenuItem<String>(
+                        value: 'cancel',
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.cancel_outlined,
+                              color: dangerR500,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Batalkan Tugas',
+                              style: mediumTextStyle(color: dangerR500),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          8.height,
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        // Type badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: assignedOfficer.type == OfficerType.organik
+                                ? successG50
+                                : warningY50,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            assignedOfficer.type == OfficerType.organik
+                                ? 'Organik'
+                                : 'Outsource',
+                            style: mediumTextStyle(
+                              size: 10,
+                              color: assignedOfficer.type == OfficerType.organik
+                                  ? successG300
+                                  : warningY300,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+
+                        // Shift badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: kbpBlue50,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            getShortShiftText(assignedOfficer.shift),
+                            style: mediumTextStyle(
+                              size: 10,
+                              color: kbpBlue600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // Task timing status
+              _buildTimingStatus(task),
+            ],
+          ).paddingSymmetric(horizontal: 16),
+          8.height,
+          // NEW: Assigned Time Section
+          if (task.assignedStartTime != null) _buildAssignedTimeSection(task),
+          16.height,
+        ],
+      ),
+    );
+  }
+
+  // NEW: Assigned time section dengan visual timeline
+  Widget _buildAssignedTimeSection(PatrolTask task) {
+    final now = DateTime.now();
+    final assignedStart = task.assignedStartTime!;
+    final assignedEnd = task.assignedEndTime;
+    final actualStart = task.startTime;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            kbpBlue50,
+            kbpBlue50.withOpacity(0.3),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: kbpBlue200.withOpacity(0.5)),
+      ),
+      child: Column(
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: kbpBlue100,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(
+                  Icons.schedule_rounded,
+                  color: kbpBlue700,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Jadwal Patroli',
+                style: semiBoldTextStyle(size: 14, color: kbpBlue800),
+              ),
+              const Spacer(),
+              _buildTaskStatusBadge(task, now),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Timeline
+          Row(
+            children: [
+              Expanded(
+                child: _buildTimelineItem(
+                  time: formatTimeFromString(assignedStart.toString()),
+                  label: 'Mulai',
+                  date: formatDateFromString(assignedStart.toString()),
+                  isActive: actualStart != null,
+                  isPassed: now.isAfter(assignedStart),
+                  color: actualStart != null
+                      ? successG500
+                      : now.isAfter(assignedStart)
+                          ? dangerR500
+                          : kbpBlue600,
+                ),
+              ),
+
+              // Connector
+              Container(
+                height: 2,
+                width: 30,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [kbpBlue300, kbpBlue500],
+                  ),
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+
+              Expanded(
+                child: _buildTimelineItem(
+                  time: assignedEnd != null
+                      ? formatTimeFromString(assignedEnd.toString())
+                      : "--/--",
+                  label: 'Selesai',
+                  date: assignedEnd != null
+                      ? formatDateFromString(assignedEnd.toString())
+                      : '--/--',
+                  isActive: task.endTime != null,
+                  isPassed:
+                      assignedEnd != null ? now.isAfter(assignedEnd) : false,
+                  color: task.endTime != null
+                      ? successG500
+                      : (assignedEnd != null && now.isAfter(assignedEnd))
+                          ? dangerR500
+                          : neutral500,
+                ),
+              ),
+            ],
+          ),
+
+          // Progress indicator jika task sedang berjalan
+          if (actualStart != null && task.endTime == null) ...[
+            const SizedBox(height: 8),
+            _buildProgressIndicator(
+                assignedStart, assignedEnd, actualStart, now),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // NEW: Timeline item untuk assigned times
+  Widget _buildTimelineItem({
+    required String time,
+    required String label,
+    required String date,
+    required bool isActive,
+    required bool isPassed,
+    required Color color,
+  }) {
+    return Column(
+      children: [
+        // Dot indicator
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: isActive
+                ? color
+                : (isPassed ? color.withOpacity(0.3) : neutral300),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: color,
+              width: isActive ? 2 : 1,
+            ),
+            boxShadow: isActive
+                ? [
+                    BoxShadow(
+                      color: color.withOpacity(0.3),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+        ),
+        const SizedBox(height: 4),
+
+        // Time
+        Text(
+          time,
+          style: boldTextStyle(
+            size: 14,
+            color: isActive
+                ? color
+                : (isPassed ? color.withOpacity(0.7) : neutral500),
+          ),
+        ),
+
+        // Label
+        Text(
+          label,
+          style: mediumTextStyle(
+            size: 11,
+            color: isActive ? color.withOpacity(0.8) : neutral500,
+          ),
+        ),
+
+        // Date
+        Text(
+          date,
+          style: regularTextStyle(
+            size: 10,
+            color: neutral600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // NEW: Task status badge
+  Widget _buildTaskStatusBadge(PatrolTask task, DateTime now) {
+    String status;
+    Color color;
+    IconData icon;
+
+    if (task.startTime != null && task.endTime != null) {
+      status = 'Selesai';
+      color = successG500;
+      icon = Icons.check_circle;
+    } else if (task.startTime != null) {
+      status = 'Berlangsung';
+      color = warningY500;
+      icon = Icons.play_circle;
+    } else if (task.assignedStartTime != null &&
+        now.isAfter(task.assignedStartTime!)) {
+      status = 'Terlambat';
+      color = dangerR500;
+      icon = Icons.schedule_outlined;
+    } else {
+      status = 'Menunggu';
+      color = kbpBlue500;
+      icon = Icons.pending_outlined;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 12),
+          const SizedBox(width: 4),
+          Text(
+            status,
+            style: mediumTextStyle(size: 10, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // NEW: Progress indicator untuk task yang sedang berjalan
+  Widget _buildProgressIndicator(DateTime assignedStart, DateTime? assignedEnd,
+      DateTime actualStart, DateTime now) {
+    if (assignedEnd == null) return const SizedBox.shrink();
+
+    final totalDuration = assignedEnd.difference(assignedStart).inMinutes;
+    final elapsedDuration = now.difference(actualStart).inMinutes;
+    final progress = (elapsedDuration / totalDuration).clamp(0.0, 1.0);
+
+    return Column(
+      children: [
+        const Divider(height: 1, color: kbpBlue200),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Icon(Icons.timer_outlined, color: kbpBlue600, size: 14),
+            const SizedBox(width: 6),
+            Text(
+              'Progress: ${(progress * 100).toInt()}%',
+              style: mediumTextStyle(size: 12, color: kbpBlue700),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: LinearProgressIndicator(
+                value: progress,
+                backgroundColor: kbpBlue100,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  progress > 1.0 ? dangerR500 : kbpBlue600,
+                ),
+                minHeight: 4,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // NEW: Timing status indicator
+  Widget _buildTimingStatus(PatrolTask task) {
+    final now = DateTime.now();
+    final assignedStart = task.assignedStartTime;
+
+    if (assignedStart == null) {
+      return const SizedBox.shrink();
+    }
+
+    String statusText;
+    Color statusColor;
+    IconData statusIcon;
+
+    if (task.startTime != null) {
+      final difference = task.startTime!.difference(assignedStart);
+      if (difference.inMinutes > 5) {
+        final hours = difference.inHours;
+        final minutes = difference.inMinutes % 60;
+        statusText = hours > 0 ? '+${hours}j ${minutes}m' : '+${minutes}m';
+        statusColor = dangerR500;
+        statusIcon = Icons.schedule_outlined;
+      } else if (difference.inMinutes < -5) {
+        final hours = difference.inHours.abs();
+        final minutes = (difference.inMinutes % 60).abs();
+        statusText = hours > 0 ? '-${hours}j ${minutes}m' : '-${minutes}m';
+        statusColor = kbpBlue500;
+        statusIcon = Icons.fast_forward;
+      } else {
+        statusText = 'On Time';
+        statusColor = successG500;
+        statusIcon = Icons.check_circle_outline;
+      }
+    } else if (now.isAfter(assignedStart.add(const Duration(minutes: 5)))) {
+      final difference = now.difference(assignedStart);
+      final hours = difference.inHours;
+      final minutes = difference.inMinutes % 60;
+      statusText =
+          hours > 0 ? 'Late ${hours}j ${minutes}m' : 'Late ${minutes}m';
+      statusColor = dangerR500;
+      statusIcon = Icons.warning_outlined;
+    } else {
+      final difference = assignedStart.difference(now);
+      final hours = difference.inHours;
+      final minutes = difference.inMinutes % 60;
+      statusText = hours > 0 ? '${hours}j ${minutes}m' : '${minutes}m';
+      statusColor = kbpBlue500;
+      statusIcon = Icons.access_time;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: statusColor.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: statusColor.withOpacity(0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(statusIcon, color: statusColor, size: 10),
+              const SizedBox(width: 2),
+              Text(
+                statusText,
+                style: mediumTextStyle(size: 9, color: statusColor),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // NEW: Empty tasks state
+  Widget _buildEmptyTasksState() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: neutral300,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: neutral200),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.assignment_outlined,
+            size: 48,
+            color: neutral400,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Tidak ada tugas aktif',
+            style: mediumTextStyle(size: 14, color: neutral600),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Buat tugas baru untuk cluster ini',
+            style: regularTextStyle(size: 12, color: neutral500),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // NEW: Officers section (extracted for better organization)
+  Widget _buildOfficersSection(List<Officer> officers, User cluster) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Petugas (${officers.length})',
+              style: semiBoldTextStyle(size: 16),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ClusterDetailScreen(
+                      clusterId: cluster.id,
+                      initialTab: 1,
+                    ),
+                  ),
+                ).then((_) => _loadData());
+              },
+              icon: const Icon(Icons.people, size: 16),
+              label: const Text('Kelola Petugas'),
+              style: TextButton.styleFrom(
+                foregroundColor: kbpBlue900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        officers.isEmpty
+            ? const Text(
+                'Belum ada petugas di cluster ini',
+                style: TextStyle(
+                  fontStyle: FontStyle.italic,
+                  color: neutral600,
+                ),
+              )
+            : SizedBox(
+                height: 70,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: officers.length,
+                  itemBuilder: (context, idx) {
+                    final officer = officers[idx];
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 20,
+                            backgroundColor: kbpBlue100,
+                            backgroundImage: officer.photoUrl != null
+                                ? NetworkImage(officer.photoUrl!)
+                                : null,
+                            child: officer.photoUrl == null
+                                ? Text(
+                                    officer.name.isNotEmpty
+                                        ? officer.name[0].toUpperCase()
+                                        : '?',
+                                    style: boldTextStyle(
+                                        color: kbpBlue900, size: 14),
+                                  )
+                                : null,
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 70,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  officer.name.length > 10
+                                      ? '${officer.name.substring(0, 10)}...'
+                                      : officer.name,
+                                  style: boldTextStyle(size: 12),
+                                ),
+                                Container(
+                                  margin: const EdgeInsets.only(top: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: officer.type == OfficerType.organik
+                                        ? successG50
+                                        : warningY50,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    officer.type == OfficerType.organik
+                                        ? 'Organik'
+                                        : 'Outsource',
+                                    style: semiBoldTextStyle(
+                                      size: 10,
+                                      color: officer.type == OfficerType.organik
+                                          ? successG500
+                                          : warningY500,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+      ],
+    );
+  }
+
+  // Helper methods tetap sama seperti sebelumnya...
   void _showCancelConfirmationDialog(
       BuildContext context, PatrolTask task, User cluster) {
     showDialog(

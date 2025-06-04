@@ -8,6 +8,7 @@ import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/cluster/cluster_patrol_history_screen.dart';
 import 'package:livetrackingapp/presentation/cluster/edit_map_screen.dart';
+import 'package:livetrackingapp/presentation/cluster/edit_validation_radius_dialog.dart';
 import 'package:livetrackingapp/presentation/cluster/officer_management_screen.dart';
 import 'package:livetrackingapp/presentation/component/map_section.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
@@ -47,6 +48,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
   bool _isHistoryLoading = true;
   String? _errorMessage;
 
+  double? _checkpointValidationRadius;
+
   bool _isHistoryLoadingProcessing = false; // Tambahkan flag ini
 
 // Pada metode initState, tambahkan:
@@ -59,6 +62,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
       initialIndex: widget.initialTab,
     );
     _loadClusterDetails();
+    _loadCheckValidationRadius();
 
     // Tambahkan listener untuk mendeteksi perubahan tab
     _tabController.addListener(() {
@@ -211,6 +215,8 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     super.dispose();
   }
 
+  void _loadCheckValidationRadius() {}
+
   void _loadClusterDetails() {
     context.read<AdminBloc>().add(
           GetClusterDetail(widget.clusterId),
@@ -267,7 +273,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
             } else if (state is ClusterDetailLoaded) {
               _cluster = state.cluster;
               _setupMarkersFromCluster(state.cluster);
-      
+
               return TabBarView(
                 controller: _tabController,
                 children: [
@@ -602,6 +608,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildValidationRadiusCard(cluster),
           Card(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -1089,6 +1096,34 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     }
   }
 
+  Future<void> _loadClusterValidationRadius(String clusterId) async {
+    try {
+      if (clusterId.isEmpty) {
+        print('ClusterId is empty, using default radius');
+        _checkpointValidationRadius = 50.0;
+        return;
+      }
+
+      final snapshot = await FirebaseDatabase.instance
+          .ref('users')
+          .child(clusterId)
+          .child('checkpoint_validation_radius')
+          .get();
+
+      if (snapshot.exists && snapshot.value != null) {
+        _checkpointValidationRadius = (snapshot.value as num).toDouble();
+        print(
+            'Loaded cluster validation radius: ${_checkpointValidationRadius}m');
+      } else {
+        _checkpointValidationRadius = 50.0; // Default fallback
+        print('No cluster validation radius found, using default: 50m');
+      }
+    } catch (e) {
+      print('Error loading cluster validation radius: $e');
+      _checkpointValidationRadius = 50.0; // Default fallback
+    }
+  }
+
   Widget _buildMapTab(User cluster) {
     return Stack(
       children: [
@@ -1429,6 +1464,193 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
             borderRadius: BorderRadius.circular(8),
           ),
         ),
+      ),
+    );
+  }
+
+  // Di dalam method _buildClusterInfo() atau _buildOfficersTab(), tambahkan:
+  Widget _buildValidationRadiusCard(User cluster) {
+    // PERBAIKAN: Gunakan checkpoint_validation_radius dari database
+    final double currentRadius = _checkpointValidationRadius ?? 50.0;
+
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: kbpBlue100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.gps_fixed,
+                    color: kbpBlue900,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Radius Validasi Checkpoint',
+                        style: semiBoldTextStyle(size: 16),
+                      ),
+                      Text(
+                        'Mengatur toleransi jarak untuk validasi checkpoint',
+                        style: regularTextStyle(size: 12, color: neutral600),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit, color: kbpBlue700),
+                  onPressed: () => _showEditRadiusDialog(cluster),
+                  tooltip: 'Edit Radius',
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Current radius display
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [kbpBlue50, kbpBlue100],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: kbpBlue200),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    '${currentRadius.toInt()}',
+                    style: boldTextStyle(size: 32, color: kbpBlue900),
+                  ),
+                  Text(
+                    'METER',
+                    style: semiBoldTextStyle(size: 14, color: kbpBlue700),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Petugas harus berada dalam radius ini dari checkpoint untuk dianggap valid',
+                    style: regularTextStyle(size: 12, color: kbpBlue600),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // Info cards
+            Row(
+              children: [
+                Expanded(
+                  child: _buildRadiusInfoItem(
+                    icon: Icons.check_circle,
+                    label: 'Status',
+                    value: currentRadius == 50.0 ? 'Default' : 'Custom',
+                    color: currentRadius == 50.0 ? warningY500 : successG500,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildRadiusInfoItem(
+                    icon: Icons.route,
+                    label: 'Titik Checkpoint',
+                    value: '${cluster.clusterCoordinates?.length ?? 0}',
+                    color: kbpBlue700,
+                  ),
+                ),
+              ],
+            ),
+
+            // TAMBAHAN BARU: Info tentang penggunaan radius
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: infoB50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: infoB200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: infoB300, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Radius ini akan digunakan untuk semua perhitungan validasi checkpoint pada tatar ini.',
+                      style: regularTextStyle(size: 11, color: infoB500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRadiusInfoItem({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: neutral200),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: boldTextStyle(size: 16, color: color),
+          ),
+          Text(
+            label,
+            style: regularTextStyle(size: 11, color: neutral600),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditRadiusDialog(User cluster) {
+    showDialog(
+      context: context,
+      builder: (context) => EditValidationRadiusDialog(
+        clusterId: widget.clusterId,
+        clusterName: cluster.name,
+        currentRadius: cluster.checkpointValidationRadius ?? 50.0,
+        onSuccess: () {
+          // Refresh data setelah update
+          context.read<AdminBloc>().add(GetClusterDetail(widget.clusterId));
+          _loadCheckValidationRadius();
+        },
       ),
     );
   }

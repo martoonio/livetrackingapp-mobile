@@ -34,15 +34,12 @@ class ReportRepositoryImpl implements ReportRepository {
         return;
       }
 
-      print('Starting report creation: ${report.id}');
-
       // Buat daftar untuk menyimpan URL foto yang diupload
       final List<String> uploadedPhotoUrls = [];
 
       // Cek apakah ada beberapa foto (dipisahkan oleh koma)
       final photoPaths = report.photoUrl.split(',');
 
-      print('Found ${photoPaths.length} photos to upload');
 
       // Upload setiap foto ke Firebase Storage
       for (int i = 0; i < photoPaths.length; i++) {
@@ -52,7 +49,6 @@ class ReportRepositoryImpl implements ReportRepository {
 
           // Cek apakah file ada sebelum upload
           if (!await photoFile.exists()) {
-            print('File not found: $photoPath');
             continue;
           }
 
@@ -60,7 +56,6 @@ class ReportRepositoryImpl implements ReportRepository {
               firebaseStorage.ref().child('reports/${report.id}/photo_$i.jpg');
 
           // Tampilkan log untuk membantu debug
-          print('Uploading file: $photoPath');
 
           // Upload foto dengan tracking progress
           try {
@@ -72,8 +67,6 @@ class ReportRepositoryImpl implements ReportRepository {
             // Tambahkan listener untuk memantau progress
             uploadTask.snapshotEvents.listen((TaskSnapshot snapshot) {
               final progress = snapshot.bytesTransferred / snapshot.totalBytes;
-              print(
-                  'Upload progress for photo $i: ${(progress * 100).toStringAsFixed(1)}%');
             });
 
             // Tunggu hingga upload selesai
@@ -82,9 +75,7 @@ class ReportRepositoryImpl implements ReportRepository {
             // Dapatkan URL download
             final downloadUrl = await photoRef.getDownloadURL();
             uploadedPhotoUrls.add(downloadUrl);
-            print('Photo $i uploaded successfully: $downloadUrl');
           } catch (uploadError) {
-            print('Error uploading photo $i: $uploadError');
             // Lanjutkan ke foto berikutnya daripada menggagalkan seluruh proses
           }
         }
@@ -94,8 +85,6 @@ class ReportRepositoryImpl implements ReportRepository {
       final finalPhotoUrl =
           uploadedPhotoUrls.isNotEmpty ? uploadedPhotoUrls.join(',') : '';
 
-      print('Final photo URL: $finalPhotoUrl');
-      print('All photos uploaded successfully, saving report data to database');
 
       // Format timestamp dengan benar
       final formattedTimestamp = report.timestamp.toIso8601String();
@@ -122,19 +111,16 @@ class ReportRepositoryImpl implements ReportRepository {
       // Gunakan transaction untuk memastikan penulisan berhasil
       await databaseReference.child('reports').child(report.id).set(reportData);
 
-      print('Report created successfully with ID: ${report.id}');
 
       // Verifikasi report sudah tersimpan
       final snapshot =
           await databaseReference.child('reports').child(report.id).get();
       if (snapshot.exists) {
-        print('Report verification successful - data exists in database');
       } else {
         throw Exception(
             'Report verification failed - data not found in database');
       }
     } catch (e) {
-      print('Error in createReport: $e');
       throw Exception('Failed to create report: $e');
     }
   }
@@ -142,7 +128,6 @@ class ReportRepositoryImpl implements ReportRepository {
   @override
   Future<void> saveOfflineReport(Report report) async {
     try {
-      print('Saving offline report: ${report.id}');
 
       // Simpan report ke box Hive
       await _offlineReportsBox.put(
@@ -154,9 +139,7 @@ class ReportRepositoryImpl implements ReportRepository {
         },
       );
 
-      print('Report saved to offline storage: ${report.id}');
     } catch (e) {
-      print('Error saving offline report: $e');
       throw Exception('Failed to save offline report: $e');
     }
   }
@@ -186,7 +169,6 @@ class ReportRepositoryImpl implements ReportRepository {
 
       return reports;
     } catch (e) {
-      print('Error getting offline reports: $e');
       return [];
     }
   }
@@ -195,17 +177,14 @@ class ReportRepositoryImpl implements ReportRepository {
   Future<void> syncOfflineReports() async {
     try {
       if (!await _isConnected()) {
-        print('Cannot sync reports: Device is offline');
         return;
       }
 
       final reports = await getOfflineReports();
       if (reports.isEmpty) {
-        print('No offline reports to sync');
         return;
       }
 
-      print('Found ${reports.length} offline reports to sync');
 
       for (final report in reports) {
         try {
@@ -216,16 +195,12 @@ class ReportRepositoryImpl implements ReportRepository {
           // Hapus dari penyimpanan offline setelah berhasil disinkronkan
           await deleteOfflineReport(report.id);
 
-          print('Synced and deleted offline report: ${report.id}');
         } catch (e) {
-          print('Error syncing report ${report.id}: $e');
           // Lanjutkan ke report berikutnya jika gagal
         }
       }
 
-      print('Finished syncing offline reports');
     } catch (e) {
-      print('Error syncing offline reports: $e');
       throw Exception('Failed to sync offline reports: $e');
     }
   }
@@ -234,9 +209,7 @@ class ReportRepositoryImpl implements ReportRepository {
   Future<void> deleteOfflineReport(String id) async {
     try {
       await _offlineReportsBox.delete('report_$id');
-      print('Deleted offline report: $id');
     } catch (e) {
-      print('Error deleting offline report: $e');
       throw Exception('Failed to delete offline report: $e');
     }
   }

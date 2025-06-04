@@ -30,6 +30,9 @@ class PatrolTask {
   String? _clusterName;
   String? _vehicleName;
 
+  // TAMBAHAN BARU: Radius validasi untuk task ini
+  final double? checkpointValidationRadius;
+
   String get officerName {
     if (_officerName == null ||
         _officerName == 'Loading...' ||
@@ -118,12 +121,16 @@ class PatrolTask {
     this.initialReportTime,
     this.mockLocationDetected,
     this.mockLocationCount,
+    this.checkpointValidationRadius, // TAMBAHAN BARU
   }) {
     _officerName = officerName;
     _clusterName = clusterName;
     _vehicleName = vehicleName;
     _officerPhotoUrl = officerPhotoUrl;
   }
+
+  // Getter untuk mendapatkan radius dengan default value
+  double get validationRadius => checkpointValidationRadius ?? 50.0;
 
   factory PatrolTask.fromJson(Map<String, dynamic> json) {
     return PatrolTask(
@@ -180,6 +187,11 @@ class PatrolTask {
       initialReportTime: _parseDateTime(json['initialReportTime']),
       mockLocationDetected: json['mockLocationDetected'] as bool?,
       mockLocationCount: json['mockLocationCount'] as int?,
+      checkpointValidationRadius: json['checkpointValidationRadius'] != null
+          ? (json['checkpointValidationRadius'] as num).toDouble()
+          : (json['checkpoint_validation_radius'] != null
+              ? (json['checkpoint_validation_radius'] as num).toDouble()
+              : null), // TAMBAHAN BARU
     );
   }
 
@@ -211,6 +223,7 @@ class PatrolTask {
       'initialReportTime': initialReportTime?.toIso8601String(),
       'mockLocationDetected': mockLocationDetected,
       'mockLocationCount': mockLocationCount,
+      'checkpointValidationRadius': checkpointValidationRadius, // TAMBAHAN BARU
     };
   }
 
@@ -221,7 +234,6 @@ class PatrolTask {
       try {
         return DateTime.parse(value);
       } catch (e) {
-        print('Error parsing date: $value - $e');
         return null;
       }
     } else if (value is int) {
@@ -251,7 +263,6 @@ class PatrolTask {
         }).toList();
       }).toList();
     } catch (e) {
-      print('Error parsing route coordinates: $e');
       return [];
     }
   }
@@ -264,7 +275,6 @@ class PatrolTask {
         // fetchVehicleName(database),
       ]);
     } catch (e) {
-      print('Error fetching related data: $e');
     }
   }
 
@@ -278,8 +288,6 @@ class PatrolTask {
         return;
       }
 
-      print(
-          'Fetching officer name for userId: $userIdToSearch in cluster: $clusterId');
 
       // Cek di path users/{clusterId}/officers
       final officersSnapshot =
@@ -290,7 +298,6 @@ class PatrolTask {
 
         if (data is List) {
           final officersList = List.from(data.where((item) => item != null));
-          print('Officers data is a List with ${officersList.length} entries');
 
           for (var officerData in officersList) {
             // Cek ID yang sesuai
@@ -301,7 +308,6 @@ class PatrolTask {
               _officerName =
                   officerData['name']?.toString() ?? 'Unknown Officer';
               _officerPhotoUrl = officerData['photo_url']?.toString();
-              print('Found officer in array: $_officerName');
               return;
             }
           }
@@ -311,7 +317,6 @@ class PatrolTask {
             final officerData = data[userIdToSearch];
             _officerName = officerData['name']?.toString() ?? 'Unknown Officer';
             _officerPhotoUrl = officerData['photo_url']?.toString();
-            print('Found officer directly by key: $_officerName');
             return;
           }
 
@@ -322,7 +327,6 @@ class PatrolTask {
             final officerData = data[officerId];
             _officerName = officerData['name']?.toString() ?? 'Unknown Officer';
             _officerPhotoUrl = officerData['photo_url']?.toString();
-            print('Found officer directly by officerId: $_officerName');
             return;
           }
 
@@ -336,7 +340,6 @@ class PatrolTask {
               _officerName =
                   officerData['name']?.toString() ?? 'Unknown Officer';
               _officerPhotoUrl = officerData['photo_url']?.toString();
-              print('Found officer by ID property: $_officerName');
               return;
             }
           }
@@ -351,7 +354,6 @@ class PatrolTask {
           _officerName = userData['name']?.toString() ?? 'Unknown Officer';
           _officerPhotoUrl = userData['photo_url']?.toString() ??
               userData['photoUrl']?.toString();
-          print('Found officer from direct user lookup: $_officerName');
           return;
         }
       }
@@ -365,7 +367,6 @@ class PatrolTask {
             _officerName = userData['name']?.toString() ?? 'Unknown Officer';
             _officerPhotoUrl = userData['photo_url']?.toString() ??
                 userData['photoUrl']?.toString();
-            print('Found officer from direct officerId lookup: $_officerName');
             return;
           }
         }
@@ -376,8 +377,6 @@ class PatrolTask {
           ? 'Officer #${userIdToSearch.substring(0, Math.min(5, userIdToSearch.length))}'
           : 'Unknown Officer';
     } catch (e, stack) {
-      print('Error fetching officer name: $e');
-      print('Stack trace: $stack');
 
       // Pastikan untuk menggunakan officerId jika tersedia sebagai fallback
       String userIdToSearch = officerId.isNotEmpty ? officerId : userId;
@@ -394,14 +393,12 @@ class PatrolTask {
         return;
       }
 
-      print('Fetching cluster name for ID: $clusterId');
 
       final userSnapshot = await database.child('users').child(clusterId).get();
 
       if (userSnapshot.exists) {
         final userData = userSnapshot.value as Map<dynamic, dynamic>;
         _clusterName = userData['name']?.toString() ?? 'Unknown Tatar';
-        print('Found cluster name in users/$clusterId: $_clusterName');
         return;
       }
 
@@ -411,15 +408,12 @@ class PatrolTask {
       if (clusterSnapshot.exists) {
         final clusterData = clusterSnapshot.value as Map<dynamic, dynamic>;
         _clusterName = clusterData['name']?.toString() ?? 'Unknown Tatar';
-        print('Found cluster name in clusters/$clusterId: $_clusterName');
         return;
       }
 
       _clusterName =
           'Tatar #${clusterId.substring(0, Math.min(5, clusterId.length))}';
-      print('Could not find cluster name, using default: $_clusterName');
     } catch (e) {
-      print('Error fetching cluster name: $e');
 
       _clusterName = clusterId.isNotEmpty
           ? 'Tatar #${clusterId.substring(0, Math.min(5, clusterId.length))}'
@@ -477,60 +471,59 @@ class PatrolTask {
         );
       }).toList();
     } catch (e) {
-      print('Error converting route path: $e');
       return [];
     }
   }
 
-  bool validateAllCheckpointsVisited(
-      List<LatLng> routePointsVisited, double requiredRadius) {
-    if (assignedRoute == null || assignedRoute!.isEmpty) {
-      return true; // Tidak ada checkpoint untuk diperiksa
-    }
+//   bool validateAllCheckpointsVisited(
+//       List<LatLng> routePointsVisited, double requiredRadius) {
+//     if (assignedRoute == null || assignedRoute!.isEmpty) {
+//       return true; // Tidak ada checkpoint untuk diperiksa
+//     }
 
-    final missedCheckpoints =
-        getMissedCheckpoints(routePointsVisited, requiredRadius);
-    return missedCheckpoints.isEmpty;
-  }
+//     final missedCheckpoints =
+//         getMissedCheckpoints(routePointsVisited, requiredRadius);
+//     return missedCheckpoints.isEmpty;
+//   }
 
-// Mendapatkan daftar checkpoint yang terlewat (tidak dikunjungi)
-  List<List<double>> getMissedCheckpoints(
-      List<LatLng> routePointsVisited, double requiredRadius) {
-    if (assignedRoute == null || assignedRoute!.isEmpty) {
-      return []; // Tidak ada checkpoint untuk diperiksa
-    }
+// // Mendapatkan daftar checkpoint yang terlewat (tidak dikunjungi)
+//   List<List<double>> getMissedCheckpoints(
+//       List<LatLng> routePointsVisited, double requiredRadius) {
+//     if (assignedRoute == null || assignedRoute!.isEmpty) {
+//       return []; // Tidak ada checkpoint untuk diperiksa
+//     }
 
-    List<List<double>> missedCheckpoints = [];
+//     List<List<double>> missedCheckpoints = [];
 
-    // Periksa setiap titik yang ditugaskan
-    for (var checkpoint in assignedRoute!) {
-      bool checkpointVisited = false;
+//     // Periksa setiap titik yang ditugaskan
+//     for (var checkpoint in assignedRoute!) {
+//       bool checkpointVisited = false;
 
-      // Periksa semua poin yang dikunjungi
-      for (var visitedPoint in routePointsVisited) {
-        // Hitung jarak antara titik yang dikunjungi dan checkpoint
-        final distance = Geolocator.distanceBetween(
-          checkpoint[0], // latitude checkpoint
-          checkpoint[1], // longitude checkpoint
-          visitedPoint.latitude,
-          visitedPoint.longitude,
-        );
+//       // Periksa semua poin yang dikunjungi
+//       for (var visitedPoint in routePointsVisited) {
+//         // Hitung jarak antara titik yang dikunjungi dan checkpoint
+//         final distance = Geolocator.distanceBetween(
+//           checkpoint[0], // latitude checkpoint
+//           checkpoint[1], // longitude checkpoint
+//           visitedPoint.latitude,
+//           visitedPoint.longitude,
+//         );
 
-        // Jika jarak kurang dari radius yang ditentukan, checkpoint telah dikunjungi
-        if (distance <= requiredRadius) {
-          checkpointVisited = true;
-          break;
-        }
-      }
+//         // Jika jarak kurang dari radius yang ditentukan, checkpoint telah dikunjungi
+//         if (distance <= requiredRadius) {
+//           checkpointVisited = true;
+//           break;
+//         }
+//       }
 
-      // Jika checkpoint tidak dikunjungi, tambahkan ke daftar
-      if (!checkpointVisited) {
-        missedCheckpoints.add(checkpoint);
-      }
-    }
+//       // Jika checkpoint tidak dikunjungi, tambahkan ke daftar
+//       if (!checkpointVisited) {
+//         missedCheckpoints.add(checkpoint);
+//       }
+//     }
 
-    return missedCheckpoints;
-  }
+//     return missedCheckpoints;
+//   }
 
 // Konversi route path ke list LatLng untuk mempermudah pengecekan
   List<LatLng> getRouteAsLatLngList() {
@@ -557,7 +550,6 @@ class PatrolTask {
 
       return result;
     } catch (e) {
-      print('Error converting route path to LatLng list: $e');
       return [];
     }
   }
@@ -582,7 +574,6 @@ class PatrolTask {
 
       return total;
     } catch (e) {
-      print('Error calculating distance: $e');
       return distance ?? 0.0;
     }
   }
@@ -620,6 +611,7 @@ class PatrolTask {
     DateTime? initialReportTime,
     bool? mockLocationDetected,
     int? mockLocationCount,
+    double? checkpointValidationRadius, // TAMBAHAN BARU
   }) {
     return PatrolTask(
       taskId: taskId ?? this.taskId,
@@ -655,7 +647,66 @@ class PatrolTask {
       initialReportTime: initialReportTime ?? this.initialReportTime,
       mockLocationDetected: mockLocationDetected ?? this.mockLocationDetected,
       mockLocationCount: mockLocationCount ?? this.mockLocationCount,
+      checkpointValidationRadius: checkpointValidationRadius ??
+          this.checkpointValidationRadius, // TAMBAHAN BARU
     );
+  }
+
+  // Update method untuk validasi checkpoint dengan radius kustom
+  bool validateAllCheckpointsVisited(List<LatLng> routePointsVisited,
+      {double? customRadius}) {
+    if (assignedRoute == null || assignedRoute!.isEmpty) {
+      return true; // Tidak ada checkpoint untuk diperiksa
+    }
+
+    // Gunakan radius kustom jika disediakan, atau radius dari task, atau default 50m
+    final double radiusToUse = customRadius ?? validationRadius;
+
+    final missedCheckpoints =
+        getMissedCheckpoints(routePointsVisited, radiusToUse);
+    return missedCheckpoints.isEmpty;
+  }
+
+  // Update method untuk mendapatkan checkpoint yang terlewat dengan radius kustom
+  List<List<double>> getMissedCheckpoints(List<LatLng> routePointsVisited,
+      [double? customRadius]) {
+    if (assignedRoute == null || assignedRoute!.isEmpty) {
+      return []; // Tidak ada checkpoint untuk diperiksa
+    }
+
+    // Gunakan radius kustom jika disediakan, atau radius dari task, atau default 50m
+    final double radiusToUse = customRadius ?? validationRadius;
+
+    List<List<double>> missedCheckpoints = [];
+
+    // Periksa setiap titik yang ditugaskan
+    for (var checkpoint in assignedRoute!) {
+      bool checkpointVisited = false;
+
+      // Periksa semua poin yang dikunjungi
+      for (var visitedPoint in routePointsVisited) {
+        // Hitung jarak antara titik yang dikunjungi dan checkpoint
+        final distance = Geolocator.distanceBetween(
+          checkpoint[0], // latitude checkpoint
+          checkpoint[1], // longitude checkpoint
+          visitedPoint.latitude,
+          visitedPoint.longitude,
+        );
+
+        // Jika jarak kurang dari radius yang ditentukan, checkpoint telah dikunjungi
+        if (distance <= radiusToUse) {
+          checkpointVisited = true;
+          break;
+        }
+      }
+
+      // Jika checkpoint tidak dikunjungi, tambahkan ke daftar
+      if (!checkpointVisited) {
+        missedCheckpoints.add(checkpoint);
+      }
+    }
+
+    return missedCheckpoints;
   }
 
   @override

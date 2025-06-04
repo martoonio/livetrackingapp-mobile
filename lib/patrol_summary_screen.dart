@@ -43,6 +43,9 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
   bool _isLoadingReports = true;
   Map<String, Marker> _reportMarkers = {};
 
+  // Tambahkan variabel untuk radius validasi
+  double? _clusterValidationRadius;
+
   static const _defaultCenter = LatLng(-6.927727934898599, 107.76911107969532);
 
   @override
@@ -51,8 +54,30 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
     _initializeMap();
     _loadOfficerName();
     _loadPatrolReports();
-    print('route path isinya apa? ${widget.routePath}');
-    print('init final foto isinya apa? ${widget.task.finalReportPhotoUrl}');
+    _loadClusterValidationRadius(); // Tambahan
+  }
+
+  Future<void> _loadClusterValidationRadius() async {
+    try {
+      if (widget.task.clusterId.isNotEmpty) {
+        final clusterSnapshot = await FirebaseDatabase.instance
+            .ref('users/${widget.task.clusterId}')
+            .get();
+
+        if (clusterSnapshot.exists) {
+          final clusterData = clusterSnapshot.value as Map<dynamic, dynamic>;
+          setState(() {
+            _clusterValidationRadius = clusterData['checkpoint_validation_radius'] != null
+                ? (clusterData['checkpoint_validation_radius'] as num).toDouble()
+                : 50.0;
+          });
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _clusterValidationRadius = 50.0;
+      });
+    }
   }
 
   Future<String?> _getUserRole() async {
@@ -70,11 +95,9 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         final data = snapshot.value as Map<dynamic, dynamic>;
         return data['role'] as String?; // Ambil nilai role
       } else {
-        print('User data not found in database');
         return null;
       }
     } catch (e) {
-      print('Error fetching user role: $e');
       return null;
     }
   }
@@ -93,7 +116,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
   }
 
   void _onMapCreated(GoogleMapController controller) async {
-    print('Map created, initializing camera...');
     setState(() {
       mapController = controller;
     });
@@ -117,9 +139,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
 
   void _prepareRouteAndMarkers() {
     try {
-      print('=== Route Data Debug ===');
-      print('Assigned Route: ${widget.task.assignedRoute}');
-      print('Route Path: ${widget.routePath}');
 
       // Add assigned route markers and polyline
       if (widget.task.assignedRoute != null) {
@@ -129,17 +148,13 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
 
       // Add actual route path and markers
       if (widget.routePath.isNotEmpty) {
-        print('Processing route path with ${widget.routePath.length} points');
         _addActualRoutePath();
         _addStartEndMarkers();
       } else {
-        print('Route path is empty!');
       }
 
       setState(() {}); // Update UI
     } catch (e, stackTrace) {
-      print('Error preparing route and markers: $e');
-      print('Stack trace: $stackTrace');
     }
   }
 
@@ -179,13 +194,10 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
 
   void _addActualRoutePath() {
     try {
-      print('=== Adding Actual Route Path ===');
       final actualPoints = widget.routePath.map((coord) {
-        print('Processing coordinate: $coord');
         return LatLng(coord[0], coord[1]);
       }).toList();
 
-      print('Created ${actualPoints.length} LatLng points');
 
       _polylines.add(
         Polyline(
@@ -197,22 +209,16 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         ),
       );
 
-      print('Added polyline to set. Total polylines: ${_polylines.length}');
     } catch (e) {
-      print('Error in _addActualRoutePath: $e');
     }
   }
 
   void _addStartEndMarkers() {
     try {
       if (widget.routePath.isEmpty) {
-        print('Route path empty, skipping start/end markers');
         return;
       }
 
-      print('=== Adding Start/End Markers ===');
-      print('First point: ${widget.routePath.first}');
-      print('Last point: ${widget.routePath.last}');
 
       // Start marker
       _markers.add(
@@ -238,33 +244,26 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         ),
       );
 
-      print('Added start and end markers. Total markers: ${_markers.length}');
     } catch (e) {
-      print('Error in _addStartEndMarkers: $e');
     }
   }
 
   void _fitMapToRoute() {
     try {
       if (mapController == null) {
-        print('Map controller not ready');
         return;
       }
 
       final bounds = _calculateBounds();
-      print('Fitting map to bounds: $bounds');
 
       mapController!
           .animateCamera(
         CameraUpdate.newLatLngBounds(bounds, 100.0),
       )
           .then((_) {
-        print('Camera updated to show full route');
       }).catchError((e) {
-        print('Error updating camera: $e');
       });
     } catch (e) {
-      print('Error in _fitMapToRoute: $e');
     }
   }
 
@@ -297,7 +296,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
     }
 
     if (!hasPoints) {
-      print('No points found, using default bounds');
       return LatLngBounds(
         southwest: LatLng(
             _defaultCenter.latitude - 0.02, _defaultCenter.longitude - 0.02),
@@ -378,7 +376,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         });
       }
     } catch (e) {
-      print('Error loading patrol reports: $e');
     } finally {
       setState(() {
         _isLoadingReports = false;
@@ -1039,10 +1036,14 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
                 // Reports section
                 _buildReportsSection(),
 
+                // Validation radius card (tambahan baru)
+                if (_clusterValidationRadius != null)
+                  _buildValidationRadiusCard(),
+
                 // Tampilkan foto final report jika ada
                 if (widget.finalReportPhotoUrl != null)
                   _buildFinalReportPhotoCard(),
-                8.height,
+                const SizedBox(height: 8),
 
                 if (widget.task.initialReportPhotoUrl != null)
                   _buildInitialReportSection(),
@@ -1053,17 +1054,10 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Officer info card
                       _buildOfficerInfoCard(),
-
                       const SizedBox(height: 16),
-
-                      // Time info card
                       _buildTimeInfoCard(),
-
                       const SizedBox(height: 16),
-
-                      // Distance info card
                       _buildDistanceInfoCard(),
                     ],
                   ),
@@ -1119,6 +1113,82 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // Tambah method untuk build validation radius card
+  Widget _buildValidationRadiusCard() {
+    final radiusUsed = _clusterValidationRadius ?? 50.0;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.gps_fixed, color: kbpBlue900),
+                const SizedBox(width: 8),
+                Text(
+                  'Radius Validasi Checkpoint',
+                  style: semiBoldTextStyle(size: 16),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [kbpBlue50, kbpBlue100],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: kbpBlue200),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        '${radiusUsed.toInt()}',
+                        style: boldTextStyle(size: 28, color: kbpBlue900),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'meter',
+                        style: mediumTextStyle(size: 14, color: kbpBlue700),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Toleransi jarak untuk validasi checkpoint pada patroli ini',
+                    style: regularTextStyle(size: 12, color: kbpBlue600),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1294,7 +1364,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         width: double.infinity,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
-          print('Error loading image: $error');
           return Container(
             height: 200,
             color: neutral200,
@@ -1328,7 +1397,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         width: double.infinity,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
-          print('Error loading local image: $error');
           return Container(
             height: 200,
             color: neutral200,
@@ -1566,7 +1634,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         width: double.infinity,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
-          print('Error loading image: $error');
           return Container(
             height: 200,
             color: neutral200,
@@ -1600,7 +1667,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         width: double.infinity,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
-          print('Error loading local image: $error');
           return Container(
             height: 200,
             color: neutral200,

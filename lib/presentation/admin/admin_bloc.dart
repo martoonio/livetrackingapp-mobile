@@ -340,7 +340,6 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
         clusters: clusters,
       ));
     } catch (e) {
-      print('Error loading all tasks: $e');
       emit(AdminError(e.toString()));
     }
   }
@@ -409,7 +408,6 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
       emit(OfficersAndVehiclesLoaded(
           officers: allOfficers, vehicles: vehicles, clusters: clusters));
     } catch (e) {
-      print('Error loading officers and vehicles: $e');
       emit(
           OfficersAndVehiclesError('Failed to load officers and vehicles: $e'));
     }
@@ -558,7 +556,6 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
       // Emit state ClusterDetailLoaded yang digunakan oleh OfficerManagementScreen
       emit(ClusterDetailLoaded(cluster));
     } catch (e) {
-      print('Error adding officer to cluster: $e');
       emit(ClusterDetailsError(
           'Failed to add officer to cluster: $e')); // Ubah jenis error state
     }
@@ -582,7 +579,6 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
       // Emit state yang sesuai
       emit(ClusterDetailLoaded(cluster));
     } catch (e) {
-      print('Error updating officer in cluster: $e');
       emit(ClusterDetailsError('Failed to update officer in cluster: $e'));
     }
   }
@@ -605,7 +601,6 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
       // Emit state yang sesuai
       emit(ClusterDetailLoaded(cluster));
     } catch (e) {
-      print('Error removing officer from cluster: $e');
       emit(ClusterDetailsError('Failed to remove officer from cluster: $e'));
     }
   }

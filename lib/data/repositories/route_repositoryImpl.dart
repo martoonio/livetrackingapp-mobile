@@ -23,7 +23,7 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<PatrolTask?> getCurrentTask(String userId) async {
     try {
-      print('Getting current task for user: $userId'); // Debug print
+      // Debug print
 
       final snapshot = await _database
           .child('tasks')
@@ -32,7 +32,6 @@ class RouteRepositoryImpl implements RouteRepository {
           .get();
 
       if (!snapshot.exists) {
-        print('No tasks found for user $userId');
         return null;
       }
 
@@ -51,26 +50,16 @@ class RouteRepositoryImpl implements RouteRepository {
             }
           }
         } else {
-          print('Unexpected data type: ${snapshot.value.runtimeType}');
           return null;
         }
       } catch (e) {
-        print('Error parsing tasks data: $e');
-        print('Value type: ${snapshot.value.runtimeType}');
-        print('Value: ${snapshot.value}');
         return null;
       }
-
-      print('Found tasks: ${tasks.length}');
 
       // Debugging
       tasks.forEach((key, value) {
         if (value is Map) {
-          print(
-              'Task ID: $key, Status: ${value['status']}, UserId: ${value['userId']}');
-        } else {
-          print('Task ID: $key, Value type: ${value.runtimeType}');
-        }
+        } else {}
       });
 
       // Perbaikan: Mencari tugas dengan status active, ongoing, atau in_progress
@@ -90,19 +79,14 @@ class RouteRepositoryImpl implements RouteRepository {
         );
 
         if (activeTaskEntry.key != null) {
-          print(
-              'Found active task with ID: ${activeTaskEntry.key}, status: ${(activeTaskEntry.value as Map)['status']}');
         } else {
-          print('No active task found using firstWhere');
           return null;
         }
       } catch (e) {
-        print('Error finding active task: $e');
         activeTaskEntry = null;
       }
 
       if (activeTaskEntry == null || activeTaskEntry.key == null) {
-        print('No active/ongoing task found for user $userId');
         return null;
       }
 
@@ -134,16 +118,12 @@ class RouteRepositoryImpl implements RouteRepository {
                   officerName = officerData[officerId]['name']?.toString();
                   officerPhotoUrl =
                       officerData[officerId]['photoUrl']?.toString();
-                  print(
-                      'Found officer name: $officerName, photo: $officerPhotoUrl');
                 }
               }
             }
           }
         }
-      } catch (e) {
-        print('Error getting officer name: $e');
-      }
+      } catch (e) {}
 
       final task = _convertToPatrolTask({
         ...taskData,
@@ -167,8 +147,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return task;
     } catch (e, stackTrace) {
-      print('Error in getCurrentTask: $e');
-      print('Stack trace: $stackTrace');
       return null;
     }
   }
@@ -192,7 +170,6 @@ class RouteRepositoryImpl implements RouteRepository {
         });
       }
     } catch (e) {
-      print('Error updating task status: $e');
       throw e;
     }
   }
@@ -204,18 +181,10 @@ class RouteRepositoryImpl implements RouteRepository {
     DateTime timestamp,
   ) async {
     try {
-      print('=== UPDATE PATROL LOCATION ===');
-      print('TaskID: $taskId');
-      print('Coordinates: $coordinates');
-      print('Timestamp: $timestamp');
-
       // Skip auth check to avoid permission issues
       final user = _auth.currentUser;
       if (user == null) {
-        print('Warning: No authenticated user, but continuing');
-      } else {
-        print('Authenticated as: ${user.uid}');
-      }
+      } else {}
 
       final taskRef = _database.child('tasks').child(taskId);
 
@@ -231,27 +200,17 @@ class RouteRepositoryImpl implements RouteRepository {
       // Try direct path first for better performance
       try {
         await taskRef.child('route_path').child(timestampKey).set(locationData);
-        print('route_path updated successfully');
       } catch (e) {
-        print('Error with direct route_path update: $e');
-
         // Try alternative approach with update()
         final updates = {
           'route_path/$timestampKey': locationData,
         };
         await taskRef.update(updates);
-        print('route_path updated with alternative method');
       }
 
       // Also update lastLocation
       await taskRef.child('lastLocation').set(locationData);
-      print('lastLocation updated successfully');
-
-      print('=== UPDATE COMPLETE ===');
     } catch (e, stackTrace) {
-      print('=== UPDATE FAILED ===');
-      print('Error: $e');
-      print('Stack trace: $stackTrace');
       throw Exception('Failed to update location: $e');
     }
   }
@@ -259,8 +218,6 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<List<PatrolTask>> getFinishedTasks(String userId) async {
     try {
-      print('Getting finished tasks for user: $userId');
-
       final snapshot = await _database
           .child('tasks')
           .orderByChild('userId')
@@ -268,7 +225,6 @@ class RouteRepositoryImpl implements RouteRepository {
           .get();
 
       if (!snapshot.exists) {
-        print('No tasks found for user $userId');
         return [];
       }
 
@@ -285,11 +241,8 @@ class RouteRepositoryImpl implements RouteRepository {
           }
         }
       } else {
-        print('Unexpected data type for tasks: ${snapshot.value.runtimeType}');
         return [];
       }
-
-      print('Total tasks found: ${tasks.length}');
 
       List<PatrolTask> finishedTasks = [];
 
@@ -297,7 +250,6 @@ class RouteRepositoryImpl implements RouteRepository {
           (MapEntry<dynamic, dynamic> entry) async {
         try {
           if (entry.value is! Map) {
-            print('Task ${entry.key} is not a Map: ${entry.value.runtimeType}');
             return;
           }
 
@@ -305,8 +257,6 @@ class RouteRepositoryImpl implements RouteRepository {
           final status = taskData['status']?.toString() ?? '';
 
           if (status.toLowerCase() == 'finished') {
-            print('Found finished task: ${entry.key}');
-
             // Get officer name if possible
             String? officerName;
             String? officerPhotoUrl;
@@ -333,9 +283,7 @@ class RouteRepositoryImpl implements RouteRepository {
                     }
                   }
                 }
-              } catch (e) {
-                print('Error getting officer info: $e');
-              }
+              } catch (e) {}
             }
 
             final task = _convertToPatrolTask({
@@ -347,12 +295,8 @@ class RouteRepositoryImpl implements RouteRepository {
 
             finishedTasks.add(task);
           }
-        } catch (e) {
-          print('Error processing task ${entry.key}: $e');
-        }
+        } catch (e) {}
       });
-
-      print('Found ${finishedTasks.length} finished tasks');
 
       // Sort by end time, most recent first
       finishedTasks.sort((a, b) =>
@@ -360,7 +304,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return finishedTasks;
     } catch (e) {
-      print('Error in getFinishedTasks: $e');
       return [];
     }
   }
@@ -368,7 +311,7 @@ class RouteRepositoryImpl implements RouteRepository {
 // Update watchCurrentTask to handle in_progress status
   @override
   Stream<PatrolTask?> watchCurrentTask(String userId) {
-    print('Watching tasks for user: $userId'); // Debug print
+    // Debug print
 
     return _database
         .child('tasks')
@@ -377,13 +320,11 @@ class RouteRepositoryImpl implements RouteRepository {
         .onValue
         .map((event) {
       if (!event.snapshot.exists) {
-        print('No tasks found');
         return null;
       }
 
       try {
         final tasksMap = event.snapshot.value as Map<dynamic, dynamic>;
-        print('Tasks data: $tasksMap');
 
         // Find active or ongoing task
         MapEntry<dynamic, dynamic>? activeTaskEntry;
@@ -402,14 +343,11 @@ class RouteRepositoryImpl implements RouteRepository {
         }
 
         if (activeTaskEntry == null) {
-          print('No active/ongoing task found');
           return null;
         }
 
         // Log assigned start/end times for debugging
         final taskData = activeTaskEntry.value as Map<dynamic, dynamic>;
-        print('Task assigned start time: ${taskData['assignedStartTime']}');
-        print('Task assigned end time: ${taskData['assignedEndTime']}');
 
         // Create PatrolTask with the task data
         return _convertToPatrolTask({
@@ -417,12 +355,9 @@ class RouteRepositoryImpl implements RouteRepository {
           'taskId': activeTaskEntry.key,
         });
       } catch (e, stackTrace) {
-        print('Error processing tasks: $e');
-        print('Stack trace: $stackTrace');
         return null;
       }
     }).handleError((error) {
-      print('Error in task stream: $error');
       return null;
     });
   }
@@ -455,7 +390,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
         return finishedTasks;
       } catch (e) {
-        print('Error processing finished tasks: $e');
         return [];
       }
     });
@@ -482,16 +416,14 @@ class RouteRepositoryImpl implements RouteRepository {
       } else if (value is int) {
         return DateTime.fromMillisecondsSinceEpoch(value);
       }
-    } catch (e) {
-      print('Error parsing datetime: $value, error: $e');
-    }
+    } catch (e) {}
     return null;
   }
 
   // Perbaiki metode _convertToPatrolTask untuk menangani semua properti penting
 
   PatrolTask _convertToPatrolTask(Map<dynamic, dynamic> data) {
-    print('Converting task data: $data'); // Debug print
+    // Debug print
     try {
       final startTime = _parseDateTime(data['startTime']);
       final assignedStartTime = _parseDateTime(data['assignedStartTime']);
@@ -544,12 +476,9 @@ class RouteRepositoryImpl implements RouteRepository {
             : 0,
       );
 
-      print(
-          'Task converted successfully: ID=${task.taskId}, Status=${task.status}');
       return task;
     } catch (e, stackTrace) {
-      print('Error converting task: $e'); // Debug print
-      print('Stack trace: $stackTrace');
+      // Debug print
 
       // Return a default task instead of rethrowing
       return PatrolTask(
@@ -580,7 +509,6 @@ class RouteRepositoryImpl implements RouteRepository {
       final taskData = Map<String, dynamic>.from(snapshot.value as Map);
       return _convertToPatrolTask(taskData);
     } catch (e) {
-      print('Error getting task by ID: $e');
       return null;
     }
   }
@@ -588,7 +516,7 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<void> updateTask(String taskId, Map<String, dynamic> updates) async {
     try {
-      print('Updating task $taskId with: $updates'); // Debug print
+      // Debug print
 
       // Get current task data first
       final taskSnapshot = await _database.child('tasks').child(taskId).get();
@@ -609,10 +537,9 @@ class RouteRepositoryImpl implements RouteRepository {
       // Update task with new data
       await _database.child('tasks').child(taskId).update(formattedUpdates);
 
-      print('Task updated successfully'); // Debug print
+      // Debug print
     } catch (e, stackTrace) {
-      print('Error updating task: $e'); // Debug print
-      print('Stack trace: $stackTrace');
+      // Debug print
       throw Exception('Failed to update task: $e');
     }
   }
@@ -652,12 +579,10 @@ class RouteRepositoryImpl implements RouteRepository {
       };
 
       await taskRef.set(newTask);
-      print('New task created with ID: $taskId');
 
       // Kembalikan ID task
       return taskId;
     } catch (e) {
-      print('Error creating task: $e');
       throw Exception('Failed to create task: $e');
     }
   }
@@ -683,10 +608,8 @@ class RouteRepositoryImpl implements RouteRepository {
       // Sort by creation date, most recent first
       tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-      print('Retrieved ${tasks.length} tasks');
       return tasks;
     } catch (e) {
-      print('Error getting all tasks: $e');
       throw Exception('Failed to get tasks: $e');
     }
   }
@@ -698,13 +621,10 @@ class RouteRepositoryImpl implements RouteRepository {
       final snapshot = await _database.child('vehicle').get();
 
       if (!snapshot.exists) {
-        print('No vehicles found in database');
         return [];
       }
 
       final value = snapshot.value;
-      print('Raw vehicle data type: ${value.runtimeType}');
-      print('Raw vehicle data: $value');
 
       if (value is List) {
         // Handle list format
@@ -720,10 +640,8 @@ class RouteRepositoryImpl implements RouteRepository {
             .toList();
       }
 
-      print('Unexpected data format for vehicles');
       return [];
     } catch (e) {
-      print('Error getting vehicles: $e');
       throw Exception('Failed to get vehicles: $e');
     }
   }
@@ -746,7 +664,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return UserModel.User.fromMap(userData);
     } catch (e) {
-      print('Error getting cluster details: $e');
       throw Exception('Failed to get cluster details: $e');
     }
   }
@@ -785,7 +702,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return;
     } catch (e) {
-      print('Error creating cluster account: $e');
       throw Exception('Failed to create cluster account: $e');
     }
   }
@@ -802,7 +718,6 @@ class RouteRepositoryImpl implements RouteRepository {
       await _database.child('users/${cluster.id}').update(updates);
       return;
     } catch (e) {
-      print('Error updating cluster account: $e');
       throw Exception('Failed to update cluster account: $e');
     }
   }
@@ -842,10 +757,8 @@ class RouteRepositoryImpl implements RouteRepository {
         'updated_by': _auth.currentUser?.uid,
       });
 
-      print('Officer added to cluster with Firebase ID: $officerId');
       return;
     } catch (e) {
-      print('Error adding officer to cluster: $e');
       throw Exception('Failed to add officer to cluster: $e');
     }
   }
@@ -902,7 +815,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return;
     } catch (e) {
-      print('Error updating officer in cluster: $e');
       throw Exception('Failed to update officer in cluster: $e');
     }
   }
@@ -949,7 +861,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return;
     } catch (e) {
-      print('Error removing officer from cluster: $e');
       throw Exception('Failed to remove officer from cluster: $e');
     }
   }
@@ -977,15 +888,11 @@ class RouteRepositoryImpl implements RouteRepository {
           final clusterData = Map<String, dynamic>.from(entry.value);
           clusterData['id'] = entry.key;
           clusters.add(UserModel.User.fromMap(clusterData));
-        } catch (e) {
-          print('Error parsing cluster data for ${entry.key}: $e');
-        }
+        } catch (e) {}
       }
 
-      print('Retrieved ${clusters.length} clusters');
       return clusters;
     } catch (e) {
-      print('Error getting all clusters: $e');
       throw Exception('Failed to get clusters: $e');
     }
   }
@@ -1002,10 +909,8 @@ class RouteRepositoryImpl implements RouteRepository {
         'updated_at': DateTime.now().toIso8601String(),
         'updated_by': _auth.currentUser?.uid,
       });
-      print('Tatar coordinates updated successfully');
       return;
     } catch (e) {
-      print('Error updating cluster coordinates: $e');
       throw Exception('Failed to update cluster coordinates: $e');
     }
   }
@@ -1025,10 +930,8 @@ class RouteRepositoryImpl implements RouteRepository {
       // Or actually delete (uncomment if needed)
       // await _database.child('users/$clusterId').remove();
 
-      print('Tatar deleted/archived successfully');
       return;
     } catch (e) {
-      print('Error deleting cluster: $e');
       throw Exception('Failed to delete cluster: $e');
     }
   }
@@ -1048,7 +951,6 @@ class RouteRepositoryImpl implements RouteRepository {
       userData['id'] = userId;
       return UserModel.User.fromMap(userData);
     } catch (e) {
-      print('Error getting current user cluster: $e');
       return null;
     }
   }
@@ -1071,9 +973,7 @@ class RouteRepositoryImpl implements RouteRepository {
             try {
               final officerMap = Map<String, dynamic>.from(officersData[i]);
               officers.add(Officer.fromMap(officerMap));
-            } catch (e) {
-              print('Error parsing officer at index $i: $e');
-            }
+            } catch (e) {}
           }
         }
       } else if (officersData is Map) {
@@ -1082,16 +982,13 @@ class RouteRepositoryImpl implements RouteRepository {
             try {
               final officerMap = Map<String, dynamic>.from(value);
               officers.add(Officer.fromMap(officerMap));
-            } catch (e) {
-              print('Error parsing officer with key $key: $e');
-            }
+            } catch (e) {}
           }
         });
       }
 
       return officers;
     } catch (e) {
-      print('Error getting cluster officers: $e');
       throw Exception('Failed to get cluster officers: $e');
     }
   }
@@ -1112,7 +1009,6 @@ class RouteRepositoryImpl implements RouteRepository {
           .where((task) => officerIds.contains(task.userId))
           .toList();
     } catch (e) {
-      print('Error getting cluster tasks: $e');
       throw Exception('Failed to get cluster tasks: $e');
     }
   }
@@ -1129,7 +1025,6 @@ class RouteRepositoryImpl implements RouteRepository {
               cluster.name.toLowerCase().contains(searchTerm.toLowerCase()))
           .toList();
     } catch (e) {
-      print('Error searching clusters: $e');
       throw Exception('Failed to search clusters: $e');
     }
   }
@@ -1142,9 +1037,7 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       await _checkAuth();
       await _database.child('users/$clusterId').update(updates);
-      print('Tatar updated successfully');
     } catch (e) {
-      print('Error updating cluster: $e');
       throw Exception('Failed to update cluster: $e');
     }
   }
@@ -1158,8 +1051,6 @@ class RouteRepositoryImpl implements RouteRepository {
     required Map<String, dynamic> mockData,
   }) async {
     try {
-      print('Logging mock location detection for task: $taskId');
-
       // Update flag pada task
       await updateTask(taskId, {
         'mockLocationDetected': true,
@@ -1184,10 +1075,8 @@ class RouteRepositoryImpl implements RouteRepository {
         'detectionTime': ServerValue.timestamp,
       });
 
-      print('Mock location data successfully logged to database');
       return;
     } catch (e) {
-      print('Error logging mock location to database: $e');
       throw Exception('Failed to log mock location: $e');
     }
   }
@@ -1196,8 +1085,6 @@ class RouteRepositoryImpl implements RouteRepository {
   Future<List<Map<String, dynamic>>> getMockLocationDetections(
       String taskId) async {
     try {
-      print('Getting mock location detections for task: $taskId');
-
       final snapshot =
           await _database.child('tasks/$taskId/mock_detections').get();
 
@@ -1220,7 +1107,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return detections;
     } catch (e) {
-      print('Error getting mock location detections: $e');
       return [];
     }
   }
@@ -1245,7 +1131,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return 0;
     } catch (e) {
-      print('Error getting mock location count: $e');
       return 0;
     }
   }
@@ -1297,10 +1182,7 @@ class RouteRepositoryImpl implements RouteRepository {
       // Only update if timeliness changed
       if (task.timeliness != timeliness) {
         await updateTask(taskId, {'timeliness': timeliness});
-        print('Updated task $taskId timeliness to: $timeliness');
       }
-    } catch (e) {
-      print('Error updating timeliness: $e');
-    }
+    } catch (e) {}
   }
 }

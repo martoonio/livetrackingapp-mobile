@@ -68,6 +68,7 @@ dependencies:
   equatable: ^2.0.7
   collection: ^1.18.0
   fl_chart: ^0.68.0
+  battery_plus: ^6.2.1
 
 dev_dependencies:
   flutter_test:

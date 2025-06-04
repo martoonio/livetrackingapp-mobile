@@ -116,9 +116,7 @@ class AdminMapScreenState extends State<AdminMapScreen> {
         }
       });
 
-      print('Loaded ${_clusterNames.length} clusters');
     } catch (e) {
-      print('Error loading clusters: $e');
     }
   }
 
@@ -127,7 +125,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
       _defaultIcon = await _getBitmapDescriptorFromAssetBytes(
           'assets/markers/default_marker.png', 120);
     } catch (e) {
-      print('Error loading marker icons: $e');
     }
   }
 
@@ -150,7 +147,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
         return BitmapDescriptor.defaultMarker;
       }
     } catch (e) {
-      print('Error creating custom marker: $e');
       return BitmapDescriptor.defaultMarker;
     }
   }
@@ -164,7 +160,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
 
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) {
-      print('User not authenticated');
       return;
     }
 
@@ -180,7 +175,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
 
       if (!snapshot.exists ||
           (snapshot.value as Map<dynamic, dynamic>).isEmpty) {
-        print('No tasks with status "ongoing", trying alternative statuses');
 
         final inProgressSnapshot = await FirebaseDatabase.instance
             .ref()
@@ -205,7 +199,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
 
       await _processTaskSnapshot(snapshot);
     } catch (e) {
-      print('Error loading active tasks: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -216,7 +209,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
 
   Future<void> _processTaskSnapshot(DataSnapshot snapshot) async {
     if (!snapshot.exists) {
-      print('No tasks found');
       setState(() {
         _isLoading = false;
         _activeTasks.clear();
@@ -252,7 +244,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
           }
         }
       } catch (e) {
-        print('Error processing task $taskId: $e');
       }
     });
 
@@ -322,7 +313,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
         return LatLng(lat, lng);
       }).toList();
     } catch (e) {
-      print('Error extracting route path: $e');
       return [];
     }
   }
@@ -351,7 +341,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
         }
       }
     } catch (e) {
-      print('Error fetching officer info: $e');
     }
   }
 
@@ -374,7 +363,6 @@ class AdminMapScreenState extends State<AdminMapScreen> {
         return DateTime.fromMillisecondsSinceEpoch(value);
       }
     } catch (e) {
-      print('Error parsing datetime: $value, error: $e');
     }
     return null;
   }

@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 class User {
   final String id;
   final String email;
@@ -10,6 +12,15 @@ class User {
   final DateTime? updatedAt;
   final String? updatedBy;
 
+  // TAMBAHAN BARU: Radius validasi checkpoint dalam meter
+  final double? checkpointValidationRadius;
+
+  // NEW: Battery monitoring fields untuk user (patrol)
+  final int? batteryLevel;
+  final String? batteryState; // charging, discharging, full, unknown
+  final DateTime? lastBatteryUpdate;
+  final bool? isOnline; // Status online berdasarkan update battery
+
   User({
     required this.id,
     required this.email,
@@ -21,7 +32,16 @@ class User {
     this.createdAt,
     this.updatedAt,
     this.updatedBy,
+    this.checkpointValidationRadius, // Default akan 50 meter jika null
+    // NEW: Battery fields
+    this.batteryLevel,
+    this.batteryState,
+    this.lastBatteryUpdate,
+    this.isOnline,
   });
+
+  // Getter untuk mendapatkan radius dengan default value
+  // double get validationRadius => checkpointValidationRadius ?? 50.0;
 
   // Cek apakah user memiliki profil lengkap
   bool get hasProfile => name.isNotEmpty && role.isNotEmpty;
@@ -31,6 +51,34 @@ class User {
 
   // Cek apakah user adalah akun patroli
   bool get isPatrol => role == 'patrol';
+
+  // NEW: Battery status getters
+  bool get hasLowBattery => batteryLevel != null && batteryLevel! < 20;
+  bool get hasMediumBattery =>
+      batteryLevel != null && batteryLevel! >= 20 && batteryLevel! <= 50;
+  bool get hasGoodBattery => batteryLevel != null && batteryLevel! > 50;
+
+  String get batteryStatusText {
+    if (batteryLevel == null) return 'Unknown';
+    if (hasLowBattery) return 'Low';
+    if (hasMediumBattery) return 'Medium';
+    return 'Good';
+  }
+
+  Color get batteryStatusColor {
+    if (batteryLevel == null) return const Color(0xFF9E9E9E); // neutral500
+    if (hasLowBattery) return const Color(0xFFD32F2F); // dangerR500
+    if (hasMediumBattery) return const Color(0xFFF57C00); // warningY500
+    return const Color(0xFF388E3C); // successG500
+  }
+
+  // NEW: Check if user is currently online (battery updated in last 10 minutes)
+  bool get isCurrentlyOnline {
+    if (lastBatteryUpdate == null) return false;
+    final now = DateTime.now();
+    final difference = now.difference(lastBatteryUpdate!);
+    return difference.inMinutes <= 10;
+  }
 
   // Konversi ke Map untuk Firebase
   Map<String, dynamic> toMap() {
@@ -45,6 +93,12 @@ class User {
       'created_at': createdAt?.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
       'updated_by': updatedBy,
+      'checkpoint_validation_radius': checkpointValidationRadius,
+      // NEW: Battery fields
+      'battery_level': batteryLevel,
+      'battery_state': batteryState,
+      'last_battery_update': lastBatteryUpdate?.toIso8601String(),
+      'is_online': isOnline,
     };
   }
 
@@ -63,24 +117,56 @@ class User {
       updatedAt:
           map['updated_at'] != null ? DateTime.parse(map['updated_at']) : null,
       updatedBy: map['updated_by'],
+      checkpointValidationRadius:
+          _parseDouble(map['checkpoint_validation_radius']),
+      // NEW: Battery fields parsing
+      batteryLevel: map['battery_level'],
+      batteryState: map['battery_state'],
+      lastBatteryUpdate: map['last_battery_update'] != null
+          ? DateTime.parse(map['last_battery_update'])
+          : null,
+      isOnline: map['is_online'],
     );
   }
 
-  // Perbaiki _parseOfficers method untuk menangani berbagai struktur data
+  static double? _parseDouble(dynamic value) {
+    if (value == null) return null;
 
+    try {
+      if (value is double) {
+        print('User._parseDouble: Value is already double: $value');
+        return value;
+      } else if (value is int) {
+        print('User._parseDouble: Converting int to double: $value');
+        return value.toDouble();
+      } else if (value is num) {
+        print('User._parseDouble: Converting num to double: $value');
+        return value.toDouble();
+      } else if (value is String) {
+        print('User._parseDouble: Parsing string to double: $value');
+        return double.tryParse(value);
+      } else {
+        print(
+            'User._parseDouble: Unknown type ${value.runtimeType}, value: $value');
+        return null;
+      }
+    } catch (e) {
+      print('User._parseDouble: Error parsing value $value: $e');
+      return null;
+    }
+  }
+
+  // Perbaiki _parseOfficers method untuk menangani berbagai struktur data
   static List<Officer>? _parseOfficers(dynamic officersData) {
     if (officersData == null) return null;
 
     List<Officer> result = [];
 
     try {
-      print('Parsing officers data type: ${officersData.runtimeType}');
-
       if (officersData is List) {
         // Filter null entries
         final nonNullEntries =
             officersData.where((item) => item != null).toList();
-        print('Found ${nonNullEntries.length} non-null officers in list');
 
         for (var officerData in nonNullEntries) {
           try {
@@ -95,23 +181,16 @@ class User {
 
               // Pastikan ID ada
               if (!officerMap.containsKey('id') || officerMap['id'] == null) {
-                print('Officer missing ID, skipping: $officerMap');
                 continue;
               }
 
               final officer = Officer.fromMap(officerMap);
               result.add(officer);
-              print(
-                  'Successfully parsed officer: ${officer.name} (ID: ${officer.id})');
             }
-          } catch (e) {
-            print('Error parsing individual officer: $e');
-          }
+          } catch (e) {}
         }
       } else if (officersData is Map) {
-        // Handle officers as Map
-        print('Officers data is Map with ${officersData.length} entries');
-
+        // Handle officers as Map with battery info
         officersData.forEach((key, value) {
           try {
             if (value != null && value is Map) {
@@ -132,19 +211,11 @@ class User {
 
               final officer = Officer.fromMap(officerMap);
               result.add(officer);
-              print('Successfully parsed officer from Map: ${officer.name}');
             }
-          } catch (e) {
-            print('Error parsing officer with key $key: $e');
-          }
+          } catch (e) {}
         });
-      } else {
-        print('Unsupported officers data type: ${officersData.runtimeType}');
-      }
-    } catch (e, stack) {
-      print('Error parsing officers data: $e');
-      print('Stack trace: $stack');
-    }
+      } else {}
+    } catch (e, stack) {}
 
     return result.isEmpty ? null : result;
   }
@@ -166,9 +237,7 @@ class User {
           return <double>[0.0, 0.0];
         }).toList();
       }
-    } catch (e) {
-      print('Error parsing cluster coordinates: $e');
-    }
+    } catch (e) {}
 
     return null;
   }
@@ -185,6 +254,12 @@ class User {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? updatedBy,
+    double? checkpointValidationRadius,
+    // NEW: Battery fields
+    int? batteryLevel,
+    String? batteryState,
+    DateTime? lastBatteryUpdate,
+    bool? isOnline,
   }) {
     return User(
       id: id ?? this.id,
@@ -197,6 +272,13 @@ class User {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       updatedBy: updatedBy ?? this.updatedBy,
+      checkpointValidationRadius:
+          checkpointValidationRadius ?? this.checkpointValidationRadius,
+      // NEW: Battery fields
+      batteryLevel: batteryLevel ?? this.batteryLevel,
+      batteryState: batteryState ?? this.batteryState,
+      lastBatteryUpdate: lastBatteryUpdate ?? this.lastBatteryUpdate,
+      isOnline: isOnline ?? this.isOnline,
     );
   }
 }
@@ -228,6 +310,11 @@ class Officer {
   final String clusterId; // ID cluster tempat officer ditugaskan
   final String? photoUrl; // URL foto officer
 
+  // NEW: Battery info untuk officer (akan diambil dari User yang terkait)
+  final int? batteryLevel;
+  final String? batteryState;
+  final DateTime? lastBatteryUpdate;
+
   Officer({
     required this.id,
     required this.name,
@@ -235,7 +322,24 @@ class Officer {
     required this.shift,
     required this.clusterId,
     this.photoUrl,
+    // NEW: Battery fields
+    this.batteryLevel,
+    this.batteryState,
+    this.lastBatteryUpdate,
   });
+
+  // NEW: Battery status getters untuk Officer
+  bool get hasLowBattery => batteryLevel != null && batteryLevel! < 20;
+  bool get hasMediumBattery =>
+      batteryLevel != null && batteryLevel! >= 20 && batteryLevel! <= 50;
+  bool get hasGoodBattery => batteryLevel != null && batteryLevel! > 50;
+
+  bool get isCurrentlyOnline {
+    if (lastBatteryUpdate == null) return false;
+    final now = DateTime.now();
+    final difference = now.difference(lastBatteryUpdate!);
+    return difference.inMinutes <= 10;
+  }
 
   // Konversi string shift menjadi enum ShiftType
   static ShiftType _parseShiftType(String? shiftStr, String? typeStr) {
@@ -334,6 +438,10 @@ class Officer {
       'shift': _shiftTypeToString(shift),
       'cluster_id': clusterId,
       'photo_url': photoUrl,
+      // NEW: Battery fields
+      'battery_level': batteryLevel,
+      'battery_state': batteryState,
+      'last_battery_update': lastBatteryUpdate?.toIso8601String(),
     };
   }
 
@@ -364,6 +472,37 @@ class Officer {
       shift: _parseShiftType(shiftStr, typeStr),
       clusterId: map['cluster_id'] ?? '',
       photoUrl: map['photo_url'],
+      // NEW: Battery fields parsing
+      batteryLevel: map['battery_level'],
+      batteryState: map['battery_state'],
+      lastBatteryUpdate: map['last_battery_update'] != null
+          ? DateTime.parse(map['last_battery_update'])
+          : null,
+    );
+  }
+
+  // NEW: Copy with method untuk Officer
+  Officer copyWith({
+    String? id,
+    String? name,
+    OfficerType? type,
+    ShiftType? shift,
+    String? clusterId,
+    String? photoUrl,
+    int? batteryLevel,
+    String? batteryState,
+    DateTime? lastBatteryUpdate,
+  }) {
+    return Officer(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      type: type ?? this.type,
+      shift: shift ?? this.shift,
+      clusterId: clusterId ?? this.clusterId,
+      photoUrl: photoUrl ?? this.photoUrl,
+      batteryLevel: batteryLevel ?? this.batteryLevel,
+      batteryState: batteryState ?? this.batteryState,
+      lastBatteryUpdate: lastBatteryUpdate ?? this.lastBatteryUpdate,
     );
   }
 }

@@ -1,3 +1,4 @@
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
@@ -40,6 +41,7 @@ class _ClusterPatrolHistoryScreenState
   void initState() {
     super.initState();
     _loadClusterTasks();
+    _loadClusterValidationRadius(widget.clusterId);
   }
 
   void _loadClusterTasks() {
@@ -384,7 +386,16 @@ class _ClusterPatrolHistoryScreenState
     final endTimeStr =
         task.endTime != null ? timeFormatter.format(task.endTime!) : 'N/A';
 
-    // Gunakan metode baru untuk menghitung titik yang dikunjungi dengan radius 5 meter
+    // TAMBAHAN BARU: Format assigned start time
+    final assignedStartDateStr = task.assignedStartTime != null
+        ? dateFormatter.format(task.assignedStartTime!)
+        : null;
+
+    final assignedStartTimeStr = task.assignedStartTime != null
+        ? timeFormatter.format(task.assignedStartTime!)
+        : null;
+
+    // Gunakan metode baru untuk menghitung titik yang dikunjungi dengan radius kustom
     final visitData = _calculateVisitedPoints(task);
     int completedPointsCount = visitData['visitedCount'] as int;
     int totalPointsCount = visitData['totalCount'] as int;
@@ -393,11 +404,9 @@ class _ClusterPatrolHistoryScreenState
     if (totalPointsCount == 0 &&
         (task.status.toLowerCase() == 'finished' ||
             task.status.toLowerCase() == 'completed')) {
-      // Jika status selesai tapi tidak ada data rute, anggap semua dikunjungi
       completedPointsCount = 1;
       totalPointsCount = 1;
     } else if (totalPointsCount == 0 && task.routePath != null) {
-      // Jika tidak ada data assigned route, gunakan jumlah route path sebagai progress
       completedPointsCount = task.routePath!.length;
       totalPointsCount = task.routePath!.length;
     }
@@ -558,16 +567,14 @@ class _ClusterPatrolHistoryScreenState
 
               const SizedBox(height: 16),
 
-              // Date and Time
-              Row(
-                children: [
-                  const Icon(Icons.calendar_today, size: 14, color: neutral600),
-                  const SizedBox(width: 8),
-                  Text(
-                    '$startDateStr, $startTimeStr - $endTimeStr',
-                    style: mediumTextStyle(size: 14, color: neutral800),
-                  ),
-                ],
+              // TAMBAHAN BARU: Waktu Jadwal dan Pelaksanaan
+              _buildTimeInfoSection(
+                assignedStartDateStr: assignedStartDateStr,
+                assignedStartTimeStr: assignedStartTimeStr,
+                startDateStr: startDateStr,
+                startTimeStr: startTimeStr,
+                endTimeStr: endTimeStr,
+                task: task,
               ),
 
               const SizedBox(height: 12),
@@ -592,7 +599,7 @@ class _ClusterPatrolHistoryScreenState
                                 const SizedBox(width: 4),
                                 Tooltip(
                                   message:
-                                      'Titik dianggap dikunjungi jika petugas berada dalam radius 5 meter.',
+                                      'Titik dianggap dikunjungi jika petugas berada dalam radius validasi checkpoint.',
                                   child: Icon(Icons.info_outline,
                                       size: 14, color: neutral500),
                                 ),
@@ -644,6 +651,141 @@ class _ClusterPatrolHistoryScreenState
           ),
         ),
       ),
+    );
+  }
+
+  // TAMBAHAN BARU: Widget untuk menampilkan informasi waktu
+  Widget _buildTimeInfoSection({
+    required String? assignedStartDateStr,
+    required String? assignedStartTimeStr,
+    required String startDateStr,
+    required String startTimeStr,
+    required String endTimeStr,
+    required PatrolTask task,
+  }) {
+    return Column(
+      children: [
+        // Waktu jadwal (assigned start time)
+        if (assignedStartDateStr != null && assignedStartTimeStr != null) ...[
+          Row(
+            children: [
+              const Icon(Icons.schedule, size: 14, color: kbpBlue600),
+              const SizedBox(width: 8),
+              Text(
+                'Jadwal: ',
+                style: mediumTextStyle(size: 12, color: neutral600),
+              ),
+              Text(
+                '$assignedStartDateStr, $assignedStartTimeStr',
+                style: semiBoldTextStyle(size: 12, color: kbpBlue700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+        ],
+
+        // Waktu pelaksanaan (actual start time)
+        Row(
+          children: [
+            Icon(
+              task.status.toLowerCase() == 'finished' ||
+                      task.status.toLowerCase() == 'completed'
+                  ? Icons.check_circle
+                  : task.status.toLowerCase() == 'ongoing' ||
+                          task.status.toLowerCase() == 'active'
+                      ? Icons.play_circle
+                      : Icons.access_time,
+              size: 14,
+              color: task.status.toLowerCase() == 'finished' ||
+                      task.status.toLowerCase() == 'completed'
+                  ? successG300
+                  : task.status.toLowerCase() == 'ongoing' ||
+                          task.status.toLowerCase() == 'active'
+                      ? kbpBlue600
+                      : neutral600,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Pelaksanaan: ',
+              style: mediumTextStyle(size: 12, color: neutral600),
+            ),
+            Expanded(
+              child: Text(
+                startTimeStr.isNotEmpty && endTimeStr != 'N/A'
+                    ? '$startDateStr, $startTimeStr - $endTimeStr'
+                    : startTimeStr.isNotEmpty
+                        ? '$startDateStr, $startTimeStr - Berlangsung'
+                        : 'Belum dimulai',
+                style: mediumTextStyle(size: 12, color: neutral800),
+              ),
+            ),
+          ],
+        ),
+
+        // Tampilkan delay info jika ada assigned start time dan actual start time
+        if (assignedStartTimeStr != null &&
+            startTimeStr.isNotEmpty &&
+            task.assignedStartTime != null &&
+            task.startTime != null) ...[
+          const SizedBox(height: 6),
+          _buildDelayInfo(task.assignedStartTime!, task.startTime!),
+        ],
+      ],
+    );
+  }
+
+  // TAMBAHAN BARU: Widget untuk menampilkan informasi keterlambatan
+  Widget _buildDelayInfo(DateTime assignedTime, DateTime actualTime) {
+    final difference = actualTime.difference(assignedTime);
+    final isLate = difference.inMinutes > 10; // Toleransi 5 menit
+    final isEarly = difference.inMinutes < -10;
+
+    String delayText;
+    Color delayColor;
+    IconData delayIcon;
+
+    if (isLate) {
+      final hours = difference.inHours;
+      final minutes = (difference.inMinutes % 60) - 10;
+      delayText = hours > 0
+          ? 'Terlambat $hours jam ${minutes}menit'
+          : 'Terlambat $minutes menit';
+      delayColor = dangerR500;
+      delayIcon = Icons.schedule_outlined;
+    } else if (isEarly) {
+      final hours = difference.inHours.abs();
+      final minutes = (difference.inMinutes % 60).abs();
+      delayText = hours > 0
+          ? 'Lebih awal $hours jam $minutes menit'
+          : 'Lebih awal $minutes menit';
+      delayColor = kbpBlue600;
+      delayIcon = Icons.fast_forward;
+    } else {
+      delayText = 'Tepat waktu';
+      delayColor = successG500;
+      delayIcon = Icons.check_circle_outline;
+    }
+
+    return Row(
+      children: [
+        Icon(delayIcon, size: 12, color: delayColor),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: delayColor.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: delayColor.withOpacity(0.3)),
+          ),
+          child: Text(
+            delayText,
+            style: mediumTextStyle(
+              size: 10,
+              color: delayColor,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1008,13 +1150,16 @@ class _ClusterPatrolHistoryScreenState
       case 'assigned':
         return 'Tugas Dijadwalkan';
       case 'ongoing':
+        return 'Sedang Berlangsung';
       case 'active':
-        return 'Sedang Patroli';
+        return 'Tugas Dijadwalkan';
       case 'finished':
       case 'completed':
         return 'Patroli Selesai';
       case 'cancelled':
         return 'Patroli Dibatalkan';
+      case 'expired':
+        return 'Patroli Tidak Dilaksanakan';
       default:
         return 'Status Tidak Diketahui';
     }
@@ -1032,6 +1177,8 @@ class _ClusterPatrolHistoryScreenState
         return successG500;
       case 'cancelled':
         return dangerR500;
+      case 'expired':
+        return dangerR300;
       default:
         return neutral500;
     }
@@ -1053,12 +1200,45 @@ class _ClusterPatrolHistoryScreenState
     }
   }
 
+  double? _clusterValidationRadius;
+
+  Future<void> _loadClusterValidationRadius(String clusterId) async {
+    try {
+      if (clusterId.isEmpty) {
+        print('ClusterId is empty, using default radius');
+        _clusterValidationRadius = 50.0;
+        return;
+      }
+
+      final snapshot = await FirebaseDatabase.instance
+          .ref('users')
+          .child(clusterId)
+          .child('checkpoint_validation_radius')
+          .get();
+
+      if (snapshot.exists && snapshot.value != null) {
+        _clusterValidationRadius = (snapshot.value as num).toDouble();
+        print('Loaded cluster validation radius: ${_clusterValidationRadius}m');
+      } else {
+        _clusterValidationRadius = 50.0; // Default fallback
+        print('No cluster validation radius found, using default: 50m');
+      }
+    } catch (e) {
+      print('Error loading cluster validation radius: $e');
+      _clusterValidationRadius = 50.0; // Default fallback
+    }
+  }
+
   // Tambahkan metode baru untuk menghitung titik yang dikunjungi
   Map<String, dynamic> _calculateVisitedPoints(PatrolTask task,
-      {double radiusInMeters = 10.0}) {
+      {double? customRadius}) {
     try {
       final Set<int> visitedCheckpoints = <int>{};
       final List<Map<String, double>> routePositions = [];
+
+      // Gunakan radius kustom jika disediakan, atau radius dari task, atau default 50m
+      final double radiusInMeters =
+          customRadius ?? _clusterValidationRadius ?? 50.0;
 
       if (task.routePath != null && task.assignedRoute != null) {
         // Ekstrak posisi dari route path
@@ -1093,6 +1273,7 @@ class _ClusterPatrolHistoryScreenState
 
               minDistance = Math.min(minDistance, distance);
               if (distance <= radiusInMeters) {
+                // Gunakan radius yang tepat
                 visitedCheckpoints.add(i);
                 break;
               }
@@ -1108,6 +1289,7 @@ class _ClusterPatrolHistoryScreenState
         'routePositions': routePositions,
         'visitedCount': visitedCheckpoints.length,
         'totalCount': task.assignedRoute?.length ?? 0,
+        'radiusUsed': radiusInMeters, // Tambahkan info radius yang digunakan
       };
     } catch (e) {
       print('Error calculating visited points: $e');
@@ -1116,6 +1298,7 @@ class _ClusterPatrolHistoryScreenState
         'routePositions': <Map<String, double>>[],
         'visitedCount': 0,
         'totalCount': task.assignedRoute?.length ?? 0,
+        'radiusUsed': customRadius ?? 50.0,
       };
     }
   }

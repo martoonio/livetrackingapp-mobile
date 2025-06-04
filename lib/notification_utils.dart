@@ -9,8 +9,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:intl/intl.dart';
 import 'package:livetrackingapp/admin_map_screen.dart';
 import 'package:livetrackingapp/domain/entities/patrol_task.dart';
+import 'package:livetrackingapp/domain/entities/report.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/firebase_options.dart';
 import 'package:googleapis_auth/auth_io.dart';
@@ -59,7 +61,6 @@ Future<void> showForegroundNotification(RemoteMessage message) async {
 
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  print("Handling a background message: ${message.messageId}");
 }
 
 // Tambahkan fungsi ini untuk menunggu context tersedia
@@ -185,9 +186,7 @@ void _processNotificationWithContext(String? notificationType,
             final double lng = (checkpoint['longitude'] as num).toDouble();
             missedPoints.add(LatLng(lat, lng));
           }
-        } catch (e) {
-          print('Error parsing missed checkpoints: $e');
-        }
+        } catch (e) {}
       }
 
       // Navigasi ke AdminMapScreen
@@ -208,6 +207,39 @@ void _processNotificationWithContext(String? notificationType,
             context, taskId, lat, lng, officerName, clusterName);
       } else {
         log('Invalid mock location data received: $data');
+      }
+      break;
+    // --- AKHIR FITUR BARU ---
+
+    // --- FITUR BARU: PENANGANAN NOTIFIKASI LAPORAN ---
+    case 'new_report':
+      final reportId = data['report_id'];
+      final patrolTaskId = data['patrol_task_id'];
+      final reportTitle = data['report_title'];
+      final reportDescription = data['report_description'];
+      final latitude = double.tryParse(data['latitude'] ?? '');
+      final longitude = double.tryParse(data['longitude'] ?? '');
+      final officerName = data['officer_name'];
+      final clusterName = data['cluster_name'];
+      final reportTimeStr = data['report_time'];
+      final photoUrl = data['photo_url'];
+
+      if (reportId != null && patrolTaskId != null) {
+        navigateToReportDetail(
+          context: context,
+          reportId: reportId,
+          patrolTaskId: patrolTaskId,
+          reportTitle: reportTitle ?? 'Laporan Tanpa Judul',
+          reportDescription: reportDescription ?? '',
+          latitude: latitude ?? 0.0,
+          longitude: longitude ?? 0.0,
+          officerName: officerName ?? 'Petugas',
+          clusterName: clusterName ?? 'Tatar',
+          reportTimeStr: reportTimeStr,
+          photoUrl: photoUrl,
+        );
+      } else {
+        log('Invalid report notification data received: $data');
       }
       break;
     // --- AKHIR FITUR BARU ---
@@ -395,6 +427,142 @@ void navigateToAdminMapForMockLocation(BuildContext context, String taskId,
 }
 // --- AKHIR FITUR BARU ---
 
+// --- FITUR BARU: NAVIGASI KE DETAIL LAPORAN ---
+void navigateToReportDetail({
+  required BuildContext context,
+  required String reportId,
+  required String patrolTaskId,
+  required String reportTitle,
+  required String reportDescription,
+  required double latitude,
+  required double longitude,
+  required String officerName,
+  required String clusterName,
+  String? reportTimeStr,
+  String? photoUrl,
+}) async {
+  try {
+    log('Navigating to report detail: Report $reportId, Task $patrolTaskId');
+
+    // Tutup semua dialog yang mungkin terbuka
+    Navigator.of(context, rootNavigator: true)
+        .popUntil((route) => route.isFirst);
+
+    // Dapatkan detail task terlebih dahulu
+    final taskSnapshot =
+        await FirebaseDatabase.instance.ref('tasks').child(patrolTaskId).get();
+
+    if (!taskSnapshot.exists) {
+      log('Patrol task not found: $patrolTaskId');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Detail patroli tidak ditemukan'),
+          backgroundColor: dangerR300,
+        ),
+      );
+      return;
+    }
+
+    // Konversi data ke PatrolTask
+    final taskData = taskSnapshot.value as Map<dynamic, dynamic>;
+    final task = PatrolTask(
+      taskId: patrolTaskId,
+      userId: taskData['userId']?.toString() ?? '',
+      status: taskData['status']?.toString() ?? '',
+      assignedStartTime: _parseDateTime(taskData['assignedStartTime']),
+      assignedEndTime: _parseDateTime(taskData['assignedEndTime']),
+      startTime: _parseDateTime(taskData['startTime']),
+      endTime: _parseDateTime(taskData['endTime']),
+      distance: taskData['distance'] != null
+          ? (taskData['distance'] as num).toDouble()
+          : null,
+      assignedRoute: taskData['assigned_route'] != null
+          ? (taskData['assigned_route'] as List)
+              .map((point) => (point as List)
+                  .map((coord) => (coord as num).toDouble())
+                  .toList())
+              .toList()
+          : null,
+      routePath: taskData['route_path'] != null
+          ? Map<String, dynamic>.from(taskData['route_path'] as Map)
+          : null,
+      clusterId: taskData['clusterId']?.toString() ?? '',
+      createdAt: _parseDateTime(taskData['createdAt']) ?? DateTime.now(),
+      mockLocationDetected: taskData['mockLocationDetected'] ?? false,
+      mockLocationCount: taskData['mockLocationCount'] != null
+          ? (taskData['mockLocationCount'] as num).toInt()
+          : 0,
+      initialReportPhotoUrl: taskData['initialReportPhotoUrl']?.toString(),
+      initialReportNote: taskData['initialReportNote']?.toString(),
+      initialReportTime: _parseDateTime(taskData['initialReportTime']),
+      finalReportPhotoUrl: taskData['finalReportPhotoUrl']?.toString(),
+      finalReportNote: taskData['finalReportNote']?.toString(),
+      finalReportTime: _parseDateTime(taskData['finalReportTime']),
+      timeliness: taskData['timeliness']?.toString(),
+    );
+
+    // Ambil detail report dari database
+    final reportSnapshot =
+        await FirebaseDatabase.instance.ref('reports').child(reportId).get();
+
+    if (!reportSnapshot.exists) {
+      log('Report not found: $reportId');
+      // Buat objek report sementara dari data notifikasi
+      final tempReport = Report(
+        id: reportId,
+        title: reportTitle,
+        description: reportDescription,
+        latitude: latitude,
+        longitude: longitude,
+        timestamp: reportTimeStr != null
+            ? DateTime.tryParse(reportTimeStr) ?? DateTime.now()
+            : DateTime.now(),
+        taskId: patrolTaskId,
+        userId: task.userId,
+        photoUrl: photoUrl ?? '',
+        officerName: officerName,
+        clusterName: clusterName,
+      );
+
+      // Navigasi ke PatrolHistoryScreen dan show detail
+      _navigateToPatrolHistoryWithReport(context, task, tempReport);
+      return;
+    }
+
+    // Konversi data report
+    final reportData = reportSnapshot.value as Map<dynamic, dynamic>;
+    final report =
+        Report.fromJson(reportId, Map<String, dynamic>.from(reportData));
+
+    // Navigasi ke PatrolHistoryScreen dan show detail
+    _navigateToPatrolHistoryWithReport(context, task, report);
+
+    log('Navigation to report detail successful');
+  } catch (e) {
+    log('Failed to navigate to report detail: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Gagal membuka detail laporan: $e'),
+        backgroundColor: dangerR300,
+      ),
+    );
+  }
+}
+
+// Fungsi helper untuk navigasi ke PatrolHistoryScreen dengan laporan
+void _navigateToPatrolHistoryWithReport(
+    BuildContext context, PatrolTask task, Report report) {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => PatrolHistoryScreen(
+        task: task,
+      ),
+    ),
+  );
+}
+// --- AKHIR FITUR BARU ---
+
 // Helper function untuk parse datetime
 DateTime? _parseDateTime(dynamic value) {
   if (value == null) return null;
@@ -456,7 +624,6 @@ Future<void> initNotification() async {
     badge: true,
     sound: true,
   );
-  print('User granted permission: ${settings.authorizationStatus}');
 
   // Konfigurasi Local Notifications
   const AndroidInitializationSettings initializationSettingsAndroid =
@@ -486,8 +653,6 @@ Future<void> initNotification() async {
 
   // Handle Foreground Messages
   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    print("Message received in foreground: ${message.notification?.title}");
-
     if (message.notification != null) {
       // Tambahkan payload untuk notifikasi foreground
       final Map<String, dynamic> payload = message.data;
@@ -514,9 +679,6 @@ Future<void> initNotification() async {
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
   FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-    print(
-        "Notification clicked while app in background: ${message.notification?.title}");
-
     // Coba bawa aplikasi ke foreground
     _bringAppToForeground();
 
@@ -620,9 +782,7 @@ Future<void> _saveMissedCheckpointNotification(
         .child('notifications/command_center')
         .push()
         .set(notificationData);
-  } catch (e) {
-    print('Error saving missed checkpoint notification to database: $e');
-  }
+  } catch (e) {}
 }
 
 // --- FITUR BARU: FUNGSI PENGIRIMAN NOTIFIKASI MOCK LOCATION ---
@@ -811,22 +971,104 @@ Future<void> sendPushNotificationToCommandCenter({
   }
 }
 
-// Fungsi perbaikan untuk mengirim notifikasi missed checkpoints
-
+// Update fungsi sendMissedCheckpointsNotification untuk mengambil radius dari cluster
 Future<void> sendMissedCheckpointsNotification({
   required String patrolTaskId,
   required String officerName,
   required String clusterName,
   required String officerId,
   required List<List<double>> missedCheckpoints,
+  required double customRadius,
 }) async {
   try {
+    // PERBAIKAN: Ambil clusterId dari task untuk mendapatkan radius yang tepat
+    String clusterId = '';
+    double radiusUsed = customRadius; // Default fallback
+
+    try {
+      final taskSnapshot = await FirebaseDatabase.instance
+          .ref('tasks')
+          .child(patrolTaskId)
+          .get();
+
+      if (taskSnapshot.exists) {
+        final taskData = taskSnapshot.value as Map<dynamic, dynamic>;
+        clusterId = taskData['clusterId']?.toString() ?? '';
+
+        // Ambil radius validasi dari cluster
+        if (clusterId.isNotEmpty) {
+          final clusterSnapshot =
+              await FirebaseDatabase.instance.ref('users/$clusterId').get();
+
+          if (clusterSnapshot.exists) {
+            final clusterData = clusterSnapshot.value as Map<dynamic, dynamic>;
+
+            // Gunakan checkpoint_validation_radius dari cluster
+            radiusUsed = clusterData['checkpoint_validation_radius'] != null
+                ? (clusterData['checkpoint_validation_radius'] as num)
+                    .toDouble()
+                : 50.0;
+
+            log('Using cluster validation radius: ${radiusUsed}m for cluster $clusterId');
+          }
+        }
+      }
+    } catch (e) {
+      log('Error fetching cluster radius: $e, using default 50m');
+    }
+
+    // Panggil fungsi yang sudah ada dengan radius yang tepat
+    await sendMissedCheckpointsNotificationWithRadius(
+      patrolTaskId: patrolTaskId,
+      officerName: officerName,
+      clusterName: clusterName,
+      officerId: officerId,
+      clusterId: clusterId,
+      missedCheckpoints: missedCheckpoints,
+      customRadius: radiusUsed,
+    );
+  } catch (e) {
+    log('Error in sendMissedCheckpointsNotification: $e');
+  }
+}
+
+// Update fungsi sendMissedCheckpointsNotificationWithRadius
+Future<void> sendMissedCheckpointsNotificationWithRadius({
+  required String patrolTaskId,
+  required String officerName,
+  required String clusterName,
+  required String officerId,
+  required String clusterId,
+  required List<List<double>> missedCheckpoints,
+  double? customRadius,
+}) async {
+  try {
+    // PERBAIKAN: Ambil radius validasi cluster yang tepat
+    double radiusUsed = customRadius ?? 50.0; // Default fallback
+
+    if (customRadius == null && clusterId.isNotEmpty) {
+      try {
+        final clusterSnapshot =
+            await FirebaseDatabase.instance.ref('users/$clusterId').get();
+
+        if (clusterSnapshot.exists) {
+          final clusterData = clusterSnapshot.value as Map<dynamic, dynamic>;
+
+          // Gunakan checkpoint_validation_radius dari cluster
+          radiusUsed = clusterData['checkpoint_validation_radius'] != null
+              ? (clusterData['checkpoint_validation_radius'] as num).toDouble()
+              : 50.0;
+
+          log('Fetched cluster validation radius: ${radiusUsed}m for cluster $clusterId');
+        }
+      } catch (e) {
+        log('Error fetching cluster radius in notification: $e');
+      }
+    }
+
     // PERBAIKAN: Cek dan ambil data lengkap dari database Firebase
     String displayOfficerName = officerName;
     String displayClusterName = clusterName;
-
-    print('Original officer name: $officerName');
-    print('Original cluster name: $clusterName');
 
     // Selalu fetch data untuk memastikan akurasi, tidak hanya jika format default
     try {
@@ -842,12 +1084,10 @@ Future<void> sendMissedCheckpointsNotification({
         // Gunakan officerName dan clusterName dari task jika tersedia
         if (taskData['officerName'] != null) {
           displayOfficerName = taskData['officerName'].toString();
-          print('Using task officerName from DB: $displayOfficerName');
         }
 
         if (taskData['clusterName'] != null) {
           displayClusterName = taskData['clusterName'].toString();
-          print('Using task clusterName from DB: $displayClusterName');
         }
 
         // Jika masih tidak ada, coba ambil dari user data
@@ -874,14 +1114,10 @@ Future<void> sendMissedCheckpointsNotification({
                   if (value is Map && value['id'] == officerId) {
                     displayOfficerName =
                         value['name']?.toString() ?? "Unknown Officer";
-                    print(
-                        'Found officer name in officers collection: $displayOfficerName');
                   }
                 });
               }
-            } catch (e) {
-              print('Error finding officer in users/$clusterId/officers: $e');
-            }
+            } catch (e) {}
           }
         }
 
@@ -902,17 +1138,12 @@ Future<void> sendMissedCheckpointsNotification({
                   clusterSnapshot.value as Map<dynamic, dynamic>;
               if (clusterData['name'] != null) {
                 displayClusterName = clusterData['name'].toString();
-                print(
-                    'Using cluster name from users collection: $displayClusterName');
               }
             }
-          } catch (e) {
-            print('Error finding cluster name: $e');
-          }
+          } catch (e) {}
         }
       }
     } catch (e) {
-      print('Error fetching detailed data for notification: $e');
       // Fallback to defaults if fetching fails
     }
 
@@ -925,9 +1156,6 @@ Future<void> sendMissedCheckpointsNotification({
     if (displayClusterName.trim().isEmpty || displayClusterName == "No Tatar") {
       displayClusterName = "Tatar";
     }
-
-    print('Final officer name for notification: $displayOfficerName');
-    print('Final cluster name for notification: $displayClusterName');
 
     // Ambil admin bearer token
     final bearerToken = await NotificationAccessToken.getToken;
@@ -942,7 +1170,6 @@ Future<void> sendMissedCheckpointsNotification({
     final DataSnapshot snapshot = await commandCenterQuery.get();
 
     if (!snapshot.exists) {
-      print('No command center users found');
       return;
     }
 
@@ -951,7 +1178,7 @@ Future<void> sendMissedCheckpointsNotification({
     int totalMissed = missedCheckpoints.length;
     String title = 'Titik Patroli Terlewat';
     String body =
-        '$displayOfficerName dari $displayClusterName melewatkan $totalMissed titik patroli';
+        '$displayOfficerName dari $displayClusterName melewatkan $totalMissed titik patroli (radius ${radiusUsed.toInt()}m)';
 
     // Konversi koordinat ke string untuk FCM payload
     // FCM data hanya menerima string sebagai value
@@ -968,9 +1195,10 @@ Future<void> sendMissedCheckpointsNotification({
       'officer_id': officerId,
       'officer_name': displayOfficerName,
       'cluster_name': displayClusterName,
-      'missed_checkpoints':
-          missedCheckpointsJson, // Koordinat dalam bentuk string JSON
+      'missed_checkpoints': missedCheckpointsJson,
       'total_missed': totalMissed.toString(),
+      'validation_radius':
+          radiusUsed.toString(), // Radius yang digunakan dari cluster
       'timestamp': DateTime.now().toIso8601String(),
     };
 
@@ -1005,23 +1233,17 @@ Future<void> sendMissedCheckpointsNotification({
 
         if (response.statusCode == 200) {
           successCount++;
-          print('Successfully sent notification to command center user');
-        } else {
-          print('FCM Error checkpoints: ${response.body}');
-        }
-      } catch (e) {
-        print('Error sending missed checkpoint notification: $e');
-      }
+        } else {}
+      } catch (e) {}
     }
 
     // Simpan notifikasi ke database
     await _saveMissedCheckpointNotification(
         patrolTaskId, officerId, officerName, clusterName, missedCheckpoints);
 
-    print(
-        'Sent missed checkpoint notification to $successCount command center users');
+    log('Sent missed checkpoints notification to $successCount command center users using ${radiusUsed}m radius');
   } catch (e) {
-    print('Error in sendMissedCheckpointsNotification: $e');
+    log('Error in sendMissedCheckpointsNotificationWithRadius: $e');
   }
 }
 
@@ -1119,5 +1341,175 @@ class NotificationAccessToken {
       log('error notifnya gan $e');
       return null;
     }
+  }
+}
+
+// --- FITUR BARU: FUNGSI PENGIRIMAN NOTIFIKASI LAPORAN ---
+Future<void> sendReportNotificationToCommandCenter({
+  required String reportId,
+  required String reportTitle,
+  required String reportDescription,
+  required String patrolTaskId,
+  required String officerId,
+  required String officerName,
+  required String clusterName,
+  required double latitude,
+  required double longitude,
+  required DateTime reportTime,
+  String? photoUrl,
+}) async {
+  try {
+    log('Sending report notification to command center for report $reportId');
+
+    // Ambil admin bearer token
+    final bearerToken = await NotificationAccessToken.getToken;
+    if (bearerToken == null) {
+      throw Exception('Failed to get admin access token');
+    }
+
+    // Ambil semua user dengan role commandCenter
+    final DatabaseReference usersRef = FirebaseDatabase.instance.ref('users');
+    final Query commandCenterQuery =
+        usersRef.orderByChild('role').equalTo('commandCenter');
+    final DataSnapshot snapshot = await commandCenterQuery.get();
+
+    if (!snapshot.exists) {
+      log('No command center users found to send report notification');
+      return;
+    }
+
+    final Map<dynamic, dynamic> usersData =
+        snapshot.value as Map<dynamic, dynamic>;
+
+    // Format waktu laporan
+    final timeFormatter = DateFormat('HH:mm', 'id_ID');
+    final dateFormatter = DateFormat('dd MMM yyyy', 'id_ID');
+    final reportTimeStr = timeFormatter.format(reportTime);
+    final reportDateStr = dateFormatter.format(reportTime);
+
+    String title = 'Laporan Baru Diterima';
+    String body = '$officerName ($clusterName) mengirim laporan: $reportTitle';
+
+    // Data untuk di-passing saat notifikasi diklik (semua harus string)
+    Map<String, String> notificationData = {
+      'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+      'type': 'new_report',
+      'report_id': reportId,
+      'report_title': reportTitle,
+      'report_description': reportDescription,
+      'patrol_task_id': patrolTaskId,
+      'officer_id': officerId,
+      'officer_name': officerName,
+      'cluster_name': clusterName,
+      'latitude': latitude.toString(),
+      'longitude': longitude.toString(),
+      'report_time': reportTime.toIso8601String(),
+      'report_time_formatted': '$reportDateStr $reportTimeStr',
+      'photo_url': photoUrl ?? '',
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+
+    // Kirim ke setiap user command center
+    int successCount = 0;
+    for (var entry in usersData.entries) {
+      final userData = entry.value as Map<dynamic, dynamic>;
+      final String? pushToken = userData['push_token'] as String?;
+
+      if (pushToken == null || pushToken.isEmpty) continue;
+
+      try {
+        final response = await http.post(
+          Uri.parse(
+              'https://fcm.googleapis.com/v1/projects/trackingsystem-kbp/messages:send'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $bearerToken',
+          },
+          body: jsonEncode({
+            "message": {
+              "token": pushToken,
+              "notification": {
+                "title": title,
+                "body": body,
+              },
+              "data": notificationData, // Semua value sudah dalam bentuk string
+            },
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          successCount++;
+          log('Successfully sent report notification to command center user: ${entry.key}');
+        } else {
+          log('FCM Error report notification for user ${entry.key}: ${response.body}');
+        }
+      } catch (e) {
+        log('Error sending report notification to user ${entry.key}: $e');
+      }
+    }
+
+    // Simpan notifikasi ke database untuk riwayat
+    await _saveReportNotificationToDatabase(
+      reportId: reportId,
+      reportTitle: reportTitle,
+      reportDescription: reportDescription,
+      patrolTaskId: patrolTaskId,
+      officerId: officerId,
+      officerName: officerName,
+      clusterName: clusterName,
+      latitude: latitude,
+      longitude: longitude,
+      reportTime: reportTime,
+      photoUrl: photoUrl,
+    );
+
+    log('Sent report notification to $successCount command center users');
+  } catch (e) {
+    log('Error in sendReportNotificationToCommandCenter: $e');
+  }
+}
+
+// Fungsi untuk menyimpan notifikasi laporan ke database
+Future<void> _saveReportNotificationToDatabase({
+  required String reportId,
+  required String reportTitle,
+  required String reportDescription,
+  required String patrolTaskId,
+  required String officerId,
+  required String officerName,
+  required String clusterName,
+  required double latitude,
+  required double longitude,
+  required DateTime reportTime,
+  String? photoUrl,
+}) async {
+  try {
+    final database = FirebaseDatabase.instance.ref();
+    final notificationData = {
+      'type': 'new_report',
+      'reportId': reportId,
+      'reportTitle': reportTitle,
+      'reportDescription': reportDescription,
+      'patrolTaskId': patrolTaskId,
+      'officerId': officerId,
+      'officerName': officerName,
+      'clusterName': clusterName,
+      'latitude': latitude,
+      'longitude': longitude,
+      'reportTime': reportTime.toIso8601String(),
+      'photoUrl': photoUrl,
+      'timestamp': ServerValue.timestamp,
+      'read': false,
+    };
+
+    // Simpan ke node notifikasi global (untuk command center)
+    await database
+        .child('notifications/command_center')
+        .push()
+        .set(notificationData);
+
+    log('Report notification saved to database successfully');
+  } catch (e) {
+    log('Error saving report notification to database: $e');
   }
 }

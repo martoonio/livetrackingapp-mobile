@@ -17,14 +17,11 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<User> login(String email, String password) async {
     try {
-      print('Attempting login...');
       final credential = await _firebaseAuth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
 
-      print('Firebase auth successful');
-      print('User UID: ${credential.user?.uid}');
 
       if (credential.user == null) {
         throw Exception('Login failed: No user returned');
@@ -60,10 +57,8 @@ class AuthRepositoryImpl implements AuthRepository {
       return user;
     } on firebase_auth.FirebaseAuthException catch (e) {
       // Melempar exception dengan kode error dari Firebase agar bisa digunakan oleh bloc
-      print('Firebase Auth Error: ${e.code} - ${e.message}');
       throw Exception('${e.code}: ${e.message}');
     } catch (e) {
-      print('Login error in repository: $e');
       throw Exception('Login failed: ${e.toString()}');
     }
   }
@@ -75,7 +70,6 @@ class AuthRepositoryImpl implements AuthRepository {
       final isNameExist = snapshot.child('name').exists;
       return isNameExist;
     } catch (e) {
-      print('Error checking user profile: $e');
       return false;
     }
   }
@@ -105,7 +99,6 @@ class AuthRepositoryImpl implements AuthRepository {
         role: role,
       );
     } catch (e) {
-      print('Error creating user profile: $e');
       throw Exception('Failed to create profile: $e');
     }
   }
@@ -120,7 +113,6 @@ class AuthRepositoryImpl implements AuthRepository {
         'updatedAt': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('Error updating user profile: $e');
       throw Exception('Failed to update profile: $e');
     }
   }
@@ -128,25 +120,20 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<void> removePushToken(String userId) async {
     try {
-      print('Removing push token for user: $userId');
       
       // Cek apakah user ada di database
       final snapshot = await _database.child('users').child(userId).get();
       if (!snapshot.exists) {
-        print('User not found in database');
         return;
       }
       
       // Hapus push_token dari database
       await _database.child('users').child(userId).child('push_token').remove();
-      print('Push token removed successfully');
       
       // Unsubscribe dari FCM topic untuk user ini
       await _firebaseMessaging.unsubscribeFromTopic('user_$userId');
-      print('Unsubscribed from FCM topic: user_$userId');
       
     } catch (e) {
-      print('Error removing push token: $e');
       // Tidak throw exception karena ini tidak boleh mengganggu proses logout
     }
   }
@@ -163,15 +150,12 @@ class AuthRepositoryImpl implements AuthRepository {
           await removePushToken(currentUserId);
         } catch (tokenError) {
           // Log error tapi jangan gagalkan proses logout
-          print('Error removing push token: $tokenError');
         }
       }
       
       // Lakukan logout dari Firebase Auth
       await _firebaseAuth.signOut();
-      print('User signed out successfully');
     } catch (e) {
-      print('Error during logout: $e');
       // Masih throw exception agar bisa ditangani di bloc
       throw Exception('Logout failed: $e');
     }
@@ -203,7 +187,6 @@ class AuthRepositoryImpl implements AuthRepository {
         role: userData['role'] as String? ?? '',
       );
     } catch (e) {
-      print('Error getting current user: $e');
       return null;
     }
   }

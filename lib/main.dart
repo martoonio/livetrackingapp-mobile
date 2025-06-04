@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -27,6 +28,8 @@ import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
 import 'package:livetrackingapp/presentation/survey/bloc/survey_bloc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:livetrackingapp/data/repositories/route_repositoryImpl.dart';
+// NEW IMPORT: Battery monitoring
+import 'package:battery_plus/battery_plus.dart';
 import 'data/repositories/auth_repositoryImpl.dart';
 import 'domain/repositories/auth_repository.dart';
 import 'domain/repositories/route_repository.dart';
@@ -42,6 +45,175 @@ final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 late Box offlineReportsBox;
+
+// UPDATE: Battery service dengan better error handling
+class BatteryService {
+  static final Battery _battery = Battery();
+  static Timer? _batteryTimer;
+  static StreamSubscription<BatteryState>? _batteryStateSubscription;
+  static bool _isInitialized = false;
+
+  static Future<void> initializeBatteryMonitoring() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Prevent multiple initialization
+    if (_isInitialized) {
+      log('Battery monitoring already initialized');
+      return;
+    }
+
+    try {
+      // Test if battery plugin is available
+      await _battery.batteryLevel;
+
+      // Update battery level immediately
+      await _updateBatteryLevel();
+
+      // Set up periodic battery level updates (every 5 minutes)
+      _batteryTimer?.cancel();
+      _batteryTimer = Timer.periodic(
+        const Duration(minutes: 5),
+        (timer) => _updateBatteryLevel(),
+      );
+
+      // Listen to battery state changes (charging/discharging)
+      _batteryStateSubscription?.cancel();
+      _batteryStateSubscription = _battery.onBatteryStateChanged.listen(
+        (BatteryState state) {
+          _updateBatteryState(state);
+        },
+        onError: (error) {
+          log('Error in battery state subscription: $error');
+        },
+      );
+
+      _isInitialized = true;
+      log('Battery monitoring initialized successfully');
+    } catch (e) {
+      log('Error initializing battery monitoring: $e');
+      // Don't throw error, just log it
+      _isInitialized = false;
+    }
+  }
+
+  static Future<void> _updateBatteryLevel() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      // Use try-catch for each battery operation
+      int? batteryLevel;
+      BatteryState? batteryState;
+
+      try {
+        batteryLevel = await _battery.batteryLevel;
+      } catch (e) {
+        log('Error getting battery level: $e');
+        batteryLevel = null;
+      }
+
+      try {
+        batteryState = await _battery.batteryState;
+      } catch (e) {
+        log('Error getting battery state: $e');
+        batteryState = null;
+      }
+
+      // Get user's info
+      final userRef = FirebaseDatabase.instance.ref('users/${user.uid}');
+      final userSnapshot = await userRef.get();
+
+      if (userSnapshot.exists) {
+        final userData = userSnapshot.value as Map<dynamic, dynamic>;
+        final userRole = userData['role'] as String?;
+
+        // Prepare update data
+        final updateData = <String, dynamic>{
+          'last_battery_update': DateTime.now().toIso8601String(),
+          'is_online': true,
+        };
+
+        // Only add battery data if available
+        if (batteryLevel != null) {
+          updateData['battery_level'] = batteryLevel;
+        }
+        if (batteryState != null) {
+          updateData['battery_state'] = batteryState.toString().split('.').last;
+        }
+
+        // Update user's battery info
+        await userRef.update(updateData);
+
+        // If user is patrol, also update in cluster's officers data
+        if (userRole == 'patrol') {
+          final clusterId = userData['clusterId'] as String?;
+          if (clusterId != null) {
+            final clusterRef = FirebaseDatabase.instance
+                .ref('clusters/$clusterId/officers/${user.uid}');
+
+            await clusterRef.update(updateData);
+          }
+        }
+
+        log('Battery updated: ${batteryLevel ?? "unknown"}% - ${batteryState?.toString() ?? "unknown"}');
+      }
+    } catch (e) {
+      log('Error updating battery level: $e');
+    }
+  }
+
+  static Future<void> _updateBatteryState(BatteryState state) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final userRef = FirebaseDatabase.instance.ref('users/${user.uid}');
+      final userSnapshot = await userRef.get();
+
+      if (userSnapshot.exists) {
+        final userData = userSnapshot.value as Map<dynamic, dynamic>;
+        final userRole = userData['role'] as String?;
+
+        final updateData = {
+          'battery_state': state.toString().split('.').last,
+          'last_battery_update': DateTime.now().toIso8601String(),
+        };
+
+        // Update user's battery state
+        await userRef.update(updateData);
+
+        // If patrol user, also update cluster
+        if (userRole == 'patrol') {
+          final clusterId = userData['clusterId'] as String?;
+          if (clusterId != null) {
+            final clusterRef = FirebaseDatabase.instance
+                .ref('clusters/$clusterId/officers/${user.uid}');
+
+            await clusterRef.update(updateData);
+          }
+        }
+      }
+    } catch (e) {
+      log('Error updating battery state: $e');
+    }
+  }
+
+  static void dispose() {
+    try {
+      _batteryTimer?.cancel();
+      _batteryTimer = null;
+
+      _batteryStateSubscription?.cancel();
+      _batteryStateSubscription = null;
+
+      _isInitialized = false;
+      log('Battery monitoring disposed');
+    } catch (e) {
+      log('Error disposing battery monitoring: $e');
+    }
+  }
+}
 
 void setupLocator() {
   getIt.registerLazySingleton<RouteRepository>(
@@ -120,11 +292,8 @@ void setupLocator() {
 Future<void> requestLocationPermission() async {
   final status = await Permission.location.request();
   if (status.isGranted) {
-    print('Location permission granted');
   } else if (status.isDenied) {
-    print('Location permission denied');
   } else if (status.isPermanentlyDenied) {
-    print('Location permission permanently denied');
     await openAppSettings();
   }
 }
@@ -132,11 +301,8 @@ Future<void> requestLocationPermission() async {
 Future<void> requestNotificationPermission() async {
   final status = await Permission.notification.request();
   if (status.isGranted) {
-    print('Notification permission granted');
   } else if (status.isDenied) {
-    print('Notification permission denied');
   } else if (status.isPermanentlyDenied) {
-    print('Notification permission permanently denied');
     await openAppSettings();
   }
 }
@@ -150,20 +316,22 @@ Future<void> initializeApp() async {
 
   await Hive.initFlutter();
   offlineReportsBox = await Hive.openBox('offline_reports');
-  print('Initialized Hive box for offline reports');
 
   if (FirebaseAuth.instance.currentUser != null) {
     try {
       FirebaseDatabase.instance.setPersistenceEnabled(true);
-      print(
-          'Database persistence enabled for user: ${FirebaseAuth.instance.currentUser?.uid}');
     } catch (e) {
-      print('Error enabling persistence: $e');
+      log('Error setting Firebase persistence: $e');
     }
   }
 
   await requestLocationPermission();
   await requestNotificationPermission();
+
+  // Initialize battery monitoring with delay to ensure all plugins are ready
+  Future.delayed(const Duration(seconds: 3), () {
+    BatteryService.initializeBatteryMonitoring();
+  });
 }
 
 Future<String?> getUserRole() async {
@@ -180,11 +348,9 @@ Future<String?> getUserRole() async {
       final data = snapshot.value as Map<dynamic, dynamic>;
       return data['role'] as String?;
     } else {
-      print('User data not found in database');
       return null;
     }
   } catch (e) {
-    print('Error fetching user role: $e');
     return null;
   }
 }
@@ -222,26 +388,44 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      setState(() {
-      });
+      setState(() {});
 
       _processNotifications();
+    });
+
+    // Listen to auth state changes to manage battery monitoring
+    FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (user != null) {
+        // User signed in, start battery monitoring with delay
+        Future.delayed(const Duration(seconds: 2), () {
+          BatteryService.initializeBatteryMonitoring();
+        });
+      } else {
+        // User signed out, stop battery monitoring
+        BatteryService.dispose();
+      }
     });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Clean up battery monitoring
+    BatteryService.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     log('App lifecycle state changed: $state');
-    log('Context available: ${navigatorKey.currentContext != null}');
 
     if (state == AppLifecycleState.resumed) {
       log('App resumed, checking for pending notifications');
+
+      // Restart battery monitoring when app resumes with delay
+      Future.delayed(const Duration(seconds: 1), () {
+        BatteryService.initializeBatteryMonitoring();
+      });
 
       Future.delayed(const Duration(milliseconds: 1000), () {
         final context = navigatorKey.currentContext;
@@ -268,6 +452,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
         _syncOfflineReports(context);
       });
+    } else if (state == AppLifecycleState.paused) {
+      log('App paused, battery monitoring continues in background');
+    } else if (state == AppLifecycleState.detached) {
+      // App is being terminated, dispose battery monitoring
+      BatteryService.dispose();
     }
   }
 
@@ -277,13 +466,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       try {
         getIt<GetOfflineReportsUseCase>().call().then((reports) {
           if (reports.isNotEmpty) {
-            print('Found ${reports.length} offline reports to sync');
             context.read<ReportBloc>().add(SyncOfflineReportsEvent());
           }
         });
-      } catch (e) {
-        print('Error checking offline reports: $e');
-      }
+      } catch (e) {}
     }
   }
 
@@ -291,14 +477,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     await Future.delayed(const Duration(milliseconds: 1000));
 
     if (widget.initialMessage != null) {
-      print(
-          'Processing initial message: ${widget.initialMessage?.notification?.title}');
       _processNotificationMessage(widget.initialMessage!);
     }
 
     if (_pendingNotification != null) {
-      print(
-          'Processing pending notification: ${_pendingNotification?.notification?.title}');
       _processNotificationMessage(_pendingNotification!);
       _pendingNotification = null;
     }
@@ -309,7 +491,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       if (navigatorKey.currentContext != null) {
         handleNotificationClick(message, navigatorKey.currentContext);
       } else {
-        print('Navigator context still null, saving notification for later');
         _pendingNotification = message;
 
         Future.delayed(const Duration(seconds: 1), () {
@@ -333,7 +514,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             repository: getIt<AuthRepository>(),
           )..add(CheckAuthStatus()),
         ),
-
         BlocProvider<PatrolBloc>(
           create: (context) {
             final bloc = PatrolBloc(
@@ -343,7 +523,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             return bloc;
           },
         ),
-
         BlocProvider<AdminBloc>(
           create: (context) {
             final bloc = AdminBloc(
@@ -356,7 +535,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           },
           lazy: false,
         ),
-
         BlocProvider<ReportBloc>(
           create: (context) => ReportBloc(
             createReportUseCase: getIt<CreateReportUseCase>(),
@@ -364,7 +542,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             getOfflineReportsUseCase: getIt<GetOfflineReportsUseCase>(),
           ),
         ),
-
         BlocProvider<SurveyBloc>(
           create: (context) => SurveyBloc(
             getActiveSurveysUseCase: getIt<GetActiveSurveysUseCase>(),
@@ -384,7 +561,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       ],
       child: BlocBuilder<AuthBloc, AuthState>(
         builder: (context, state) {
-          print('Current auth state: $state');
           return MaterialApp(
             navigatorKey: navigatorKey,
             title: 'Live Tracking App',

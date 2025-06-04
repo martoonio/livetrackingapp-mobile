@@ -130,12 +130,7 @@ class _MapScreenState extends State<MapScreen> {
               updates: {'distance': _totalDistance},
             ));
       }
-
-      print('Distance updated: $_totalDistance meters');
-    } else {
-      print(
-          'First position set: ${newPosition.latitude}, ${newPosition.longitude}');
-    }
+    } else {}
     _lastPosition = newPosition;
   }
 
@@ -144,11 +139,6 @@ class _MapScreenState extends State<MapScreen> {
     super.initState();
 
     final task = widget.task;
-
-    print('=== MAP INITIALIZATION ===');
-    print('Task ID: ${task.taskId}');
-    print('Task Status: ${task.status}');
-    print('Task Start Time: ${task.startTime}');
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
@@ -162,14 +152,11 @@ class _MapScreenState extends State<MapScreen> {
     currentState = context.read<PatrolBloc>().state;
 
     if (task.status == 'ongoing' || task.status == 'in_progress') {
-      print('Task is already in progress, resuming patrol...');
       // We need to wait for widget to be built before triggering resume
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _resumeExistingPatrol(task);
       });
-    } else {
-      print('Task is not in progress: ${task.status}');
-    }
+    } else {}
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
@@ -189,7 +176,6 @@ class _MapScreenState extends State<MapScreen> {
     isWakeLockEnabled = await WakelockPlus.enabled;
     if (!isWakeLockEnabled) {
       WakelockPlus.enable();
-      print('Wakelock enabled.');
       isWakeLockEnabled = true;
     }
   }
@@ -197,7 +183,6 @@ class _MapScreenState extends State<MapScreen> {
   void _disableWakelock() async {
     if (isWakeLockEnabled) {
       WakelockPlus.disable();
-      print('Wakelock disabled.');
       isWakeLockEnabled = false;
     }
   }
@@ -247,15 +232,11 @@ class _MapScreenState extends State<MapScreen> {
 
   void _resumeExistingPatrol(PatrolTask task) {
     if (task.startTime == null) {
-      print('Cannot resume patrol: no start time found in task');
       return;
     }
 
-    print('Resuming patrol that started at ${task.startTime}');
-
     // Get route path data
     final routePath = task.routePath as Map<dynamic, dynamic>?;
-    print('Found route path with ${routePath?.length ?? 0} points');
 
     // Simpan route path yang sudah ada dengan struktur yang benar
     Map<String, dynamic> existingRoutePath = {};
@@ -272,7 +253,6 @@ class _MapScreenState extends State<MapScreen> {
           existingRoutePath[key.toString()] = value;
         }
       });
-      print('Successfully converted ${existingRoutePath.length} route points');
     }
 
     // Resume patrol in bloc with existing route path
@@ -311,11 +291,7 @@ class _MapScreenState extends State<MapScreen> {
               }
             }
           }
-          print(
-              'Loaded ${_routePoints.length} points for route polyline display');
-        } catch (e) {
-          print('Error extracting route points: $e');
-        }
+        } catch (e) {}
       }
 
       // Update lastPosition to the most recent point if available
@@ -343,12 +319,8 @@ class _MapScreenState extends State<MapScreen> {
               altitudeAccuracy: 0,
               headingAccuracy: 0,
             );
-            print(
-                'Restored last position: ${_lastPosition!.latitude}, ${_lastPosition!.longitude}');
           }
-        } catch (e) {
-          print('Error restoring last position: $e');
-        }
+        } catch (e) {}
       }
     });
 
@@ -378,13 +350,8 @@ class _MapScreenState extends State<MapScreen> {
         if (_routePoints.isNotEmpty && mapController != null) {
           _zoomToPolyline();
         }
-
-        print('Displayed saved route path with ${_routePoints.length} points');
       });
     }
-
-    print(
-        'Patrol resumed with elapsed time: $_elapsedTime, distance: $_totalDistance');
 
     // Notify user
     showCustomSnackbar(
@@ -450,8 +417,6 @@ class _MapScreenState extends State<MapScreen> {
                     }
                   },
                   onError: (e) {
-                    print('Error in upload progress: $e');
-
                     // Pastikan dialog masih ada sebelum mencoba menutupnya
                     if (dialogContextRef != null &&
                         Navigator.canPop(dialogContextRef!)) {
@@ -568,14 +533,12 @@ class _MapScreenState extends State<MapScreen> {
       final String downloadUrl = await taskSnapshot.ref.getDownloadURL();
       return downloadUrl;
     } catch (e) {
-      print('Error uploading photo: $e');
       throw Exception('Failed to upload photo: $e');
     }
   }
 
   void _startLocationTracking() {
     String timeNow = DateTime.now().toIso8601String();
-    print('Starting location tracking... time: $timeNow');
 
     // Cancel any existing subscription
     _positionStreamSubscription?.cancel();
@@ -583,10 +546,8 @@ class _MapScreenState extends State<MapScreen> {
     // Preserve existing route points if applicable
     final isResuming = widget.task.status == 'ongoing' && _routePoints.isEmpty;
     if (isResuming && widget.task.routePath != null) {
-      print('Patrol is being resumed - preserve route data');
       // Route points will be loaded by _displaySavedRoute
     } else if (!isResuming) {
-      print('Starting new tracking - clearing route data');
       setState(() {
         _routePoints.clear();
         _polylines.clear();
@@ -602,16 +563,11 @@ class _MapScreenState extends State<MapScreen> {
       (Position position) async {
         if (mounted) {
           // Log lokasi untuk debugging
-          print('Position update: ${position.latitude}, ${position.longitude}');
 
           // Check for mock location
           final isMocked = await LocationValidator.isLocationMocked(position);
-          print('Is location mocked: $isMocked');
 
           if (isMocked) {
-            print(
-                'MOCK LOCATION DETECTED in UI: ${position.latitude}, ${position.longitude}');
-
             // TAMBAHAN: Log langsung ke Firebase tanpa melalui bloc
             try {
               // Ambil state untuk cek apakah sedang patroli
@@ -641,8 +597,6 @@ class _MapScreenState extends State<MapScreen> {
                   // 'deviceInfo': await getDeviceInfo(), // Dihapus karena tidak ada di file ini
                 };
 
-                print('Logging mock location directly: $mockData');
-
                 // 1. Update flag pada task
                 final taskRef = FirebaseDatabase.instance
                     .ref()
@@ -653,11 +607,8 @@ class _MapScreenState extends State<MapScreen> {
                   'lastMockDetection': mockData['timestamp'],
                 });
 
-                print('✓ Updated task mock flags successfully');
-
                 // 2. Catat detail percobaan ke node khusus di database
                 await taskRef.child('mock_detections').push().set(mockData);
-                print('✓ Mock detection saved to task');
 
                 // 3. Simpan juga di koleksi terpisah untuk analisis
                 await FirebaseDatabase.instance
@@ -670,8 +621,6 @@ class _MapScreenState extends State<MapScreen> {
                   'userId': widget.task.userId,
                   'detectionTime': ServerValue.timestamp,
                 });
-
-                print('✓ Mock detection saved to global logs');
 
                 // 4. Update mockCount dalam state bloc supaya UI terupdate
                 context
@@ -689,15 +638,10 @@ class _MapScreenState extends State<MapScreen> {
                     latitude: position.latitude,
                     longitude: position.longitude,
                   );
-                  print(
-                      'Notifikasi mock location dikirim ke Command Center dari MapScreen.');
                 }
                 // --- AKHIR FITUR BARU ---
               }
-            } catch (e) {
-              print('Error logging mock location directly: $e');
-              print(StackTrace.current);
-            }
+            } catch (e) {}
 
             // Tampilkan peringatan di UI
             setState(() {
@@ -743,35 +687,25 @@ class _MapScreenState extends State<MapScreen> {
           final isPatrolActive = isPatrollingInBloc || isPatrollingInTask;
 
           if (isPatrolActive) {
-            print('Patrol active, updating location');
             // IMPORTANT: This is where we send location updates to bloc
             final timestamp = DateTime.now();
             context.read<PatrolBloc>().add(UpdatePatrolLocation(
                   position: position,
                   timestamp: timestamp,
                 ));
-            print(
-                'Location update dispatched to bloc: ${position.latitude}, ${position.longitude}');
 
             // For local UI updates
             _updateDistance(position);
             _updatePolyline(position);
-          } else {
-            print(
-                'Patrol not active (Bloc: $isPatrollingInBloc, Task: $isPatrollingInTask)');
-          }
+          } else {}
         }
       },
-      onError: (error) {
-        print('Location tracking error: $error');
-      },
+      onError: (error) {},
     );
   }
 
   void _startPatrol(BuildContext context) {
     final startTime = DateTime.now();
-
-    print('Starting patrol at $startTime');
 
     // Update task status
     context.read<PatrolBloc>().add(UpdateTask(
@@ -795,7 +729,6 @@ class _MapScreenState extends State<MapScreen> {
     _totalDistance = 0; // Reset distance
     _lastPosition = null;
     _startLocationTracking(); // Start location tracking
-    print('Patroli telah dimulai setelah laporan awal');
 
     widget.onStart();
   }
@@ -830,9 +763,6 @@ class _MapScreenState extends State<MapScreen> {
       _resetLongPressAnimation();
       return;
     }
-
-    print(
-        'Patrol button pressed - Bloc state: $isPatrollingInBloc, Task status: $isPatrollingInTask');
 
     if (isPatrolActive) {
       if (state is PatrolLoaded) {
@@ -1203,7 +1133,6 @@ class _MapScreenState extends State<MapScreen> {
                                 });
                               }
                             } catch (e) {
-                              print('Error taking photo: $e');
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(content: Text('Error: $e')),
                               );
@@ -1439,9 +1368,7 @@ class _MapScreenState extends State<MapScreen> {
             selectedPhotos.add(File(pickedFile.path));
           });
         }
-      } catch (e) {
-        print('Error picking image: $e');
-      }
+      } catch (e) {}
     }
 
     // Buat dialog di dalam showDialog
@@ -1816,6 +1743,37 @@ class _MapScreenState extends State<MapScreen> {
                                       kejadianController.clear();
                                       catatanController.clear();
 
+                                      if (!isOffline) {
+                                        await sendReportNotificationToCommandCenter(
+                                          reportId:
+                                              reportId, // ID laporan yang baru dibuat
+                                          reportTitle:
+                                              kejadianController.text.trim(),
+                                          reportDescription:
+                                              catatanController.text.trim(),
+                                          patrolTaskId: widget.task.taskId,
+                                          officerId: widget.task.userId,
+                                          officerName:
+                                              widget.task.officerName.isNotEmpty
+                                                  ? widget.task.officerName
+                                                  : 'Petugas',
+                                          clusterName:
+                                              widget.task.clusterName.isNotEmpty
+                                                  ? widget.task.clusterName
+                                                  : 'Tatar',
+                                          latitude:
+                                              userCurrentLocation?.latitude ??
+                                                  0.0,
+                                          longitude:
+                                              userCurrentLocation?.longitude ??
+                                                  0.0,
+                                          reportTime: DateTime.now(),
+                                          photoUrl: combinedPhotoPath.isNotEmpty
+                                              ? combinedPhotoPath
+                                              : null,
+                                        );
+                                      }
+
                                       // Tampilkan snackbar berdasarkan status koneksi
                                       showCustomSnackbar(
                                         context: context,
@@ -1909,9 +1867,7 @@ class _MapScreenState extends State<MapScreen> {
           CameraUpdate.newLatLngBounds(bounds, 50),
         );
       }
-    } catch (e) {
-      print('Error adding route markers: $e');
-    }
+    } catch (e) {}
   }
 
   LatLngBounds _getRouteBounds(List<List<double>> coordinates) {
@@ -1978,16 +1934,11 @@ class _MapScreenState extends State<MapScreen> {
 
           final state = context.read<PatrolBloc>().state;
           if (state is PatrolLoaded && state.isPatrolling) {
-            print('Patrol is active, updating distance...');
             _updateDistance(position);
-          } else {
-            print('Patrol is not active, skipping distance update.');
-          }
+          } else {}
         }
       },
-      onError: (error) {
-        print('Location tracking error: $error');
-      },
+      onError: (error) {},
     );
 
     return await Geolocator.getCurrentPosition();
@@ -2027,8 +1978,6 @@ class _MapScreenState extends State<MapScreen> {
     final LatLng newPoint = LatLng(position.latitude, position.longitude);
 
     // Debug info
-    print(
-        'Adding point to polyline: ${position.latitude}, ${position.longitude}');
 
     // Cek jika titik berubah signifikan
     if (_routePoints.isNotEmpty) {
@@ -2038,7 +1987,6 @@ class _MapScreenState extends State<MapScreen> {
 
       // Hanya tambahkan titik jika jarak cukup signifikan
       if (distance < 5) {
-        print('Point too close, skipping');
         return; // Skip jika kurang dari 5 meter
       }
     }
@@ -2066,12 +2014,8 @@ class _MapScreenState extends State<MapScreen> {
       final state = context.read<PatrolBloc>().state;
       if (state is PatrolLoaded &&
           state.task != null &&
-          _routePoints.length % 10 == 0) {
-        print('Saving route with ${_routePoints.length} points');
-      }
-    } catch (e) {
-      print('Error updating polyline: $e');
-    }
+          _routePoints.length % 10 == 0) {}
+    } catch (e) {}
   }
 
 // Metode untuk menampilkan rute yang tersimpan dari database
@@ -2111,15 +2055,11 @@ class _MapScreenState extends State<MapScreen> {
         }
       });
 
-      print('Loaded saved route with ${_routePoints.length} points');
-
       // Jika ada titik, zoom ke area yang mencakup semua titik
       if (_routePoints.isNotEmpty) {
         _zoomToPolyline();
       }
-    } catch (e) {
-      print('Error loading saved route: $e');
-    }
+    } catch (e) {}
   }
 
   void _zoomToPolyline() {
@@ -2155,7 +2095,6 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _onMapCreated(GoogleMapController controller) {
-    print('Map creation started');
     try {
       setState(() {
         mapController = controller;
@@ -2175,24 +2114,13 @@ class _MapScreenState extends State<MapScreen> {
           ),
         );
       }
-    } catch (e) {
-      print('Error in map creation: $e');
-    }
+    } catch (e) {}
   }
 
-  void _debugMapStatus() {
-    print('=== Google Maps Debug Info ===');
-    print('Map Controller: ${mapController != null ? 'Initialized' : 'Null'}');
-    print('Is Map Ready: $_isMapReady');
-    print('Markers Count: ${_markers.length}');
-    print('User Location: $userCurrentLocation');
-    print('Has Assigned Route: ${widget.task.assignedRoute != null}');
-    print('===========================');
-  }
+  void _debugMapStatus() {}
 
   Future<void> _stopPatrol(BuildContext context, PatrolLoaded state) async {
     final endTime = DateTime.now();
-    print('Stopping patrol at $endTime');
 
     // Convert route path
     List<List<double>> convertedPath = [];
@@ -2203,16 +2131,13 @@ class _MapScreenState extends State<MapScreen> {
         finalRoutePath =
             Map<String, dynamic>.from(state.task!.routePath as Map);
       }
-    } catch (e) {
-      print('Error processing route path: $e');
-    }
+    } catch (e) {}
 
     if (mounted) {
       final result =
           await _showFinalReportDialog(context, state, endTime, finalRoutePath);
 
       if (result != true) {
-        print('User canceled patrol ending process');
         return;
       }
     }
@@ -2387,9 +2312,7 @@ class _MapScreenState extends State<MapScreen> {
                                   capturedImage = File(photo.path);
                                 });
                               }
-                            } catch (e) {
-                              print('Error taking photo: $e');
-                            }
+                            } catch (e) {}
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: kbpBlue900,
@@ -2615,8 +2538,6 @@ class _MapScreenState extends State<MapScreen> {
                                             }
 
                                             if (!taskSnapshot.exists) {
-                                              print(
-                                                  'Error: Task tidak ditemukan di database');
                                               throw Exception(
                                                   'Task tidak ditemukan di database');
                                             }
@@ -2703,9 +2624,6 @@ class _MapScreenState extends State<MapScreen> {
                                               );
                                             }
                                           } catch (e) {
-                                            print(
-                                                'Error saat menyiapkan ringkasan patroli: $e');
-
                                             // Tutup dialog loading jika masih ada
                                             if (mounted &&
                                                 Navigator.canPop(context)) {
@@ -2758,8 +2676,6 @@ class _MapScreenState extends State<MapScreen> {
                                             isSubmitting = false;
                                           });
 
-                                          print(
-                                              'Error submitting final report: $e');
                                           ScaffoldMessenger.of(context)
                                               .showSnackBar(
                                             SnackBar(
@@ -3058,7 +2974,6 @@ class _MapScreenState extends State<MapScreen> {
         }
       },
       child: BlocBuilder<PatrolBloc, PatrolState>(builder: (context, state) {
-        print('MapScreen state: ${state is PatrolLoaded && state.isOffline}');
         final isPatrolling = state is PatrolLoaded && state.isPatrolling;
         final isMockDetected =
             (state is PatrolLoaded && state.mockLocationDetected) ||

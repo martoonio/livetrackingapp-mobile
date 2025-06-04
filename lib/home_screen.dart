@@ -102,8 +102,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       _currentUser = authState.user;
-      print(
-          'Loading data for user: ${_currentUser!.id}, role: ${_currentUser!.role}');
 
       if (_currentUser!.role == 'patrol') {
         await _loadClusterOfficerTasks();
@@ -111,8 +109,6 @@ class _HomeScreenState extends State<HomeScreen> {
         // Tambahkan pengecekan untuk task yang expired
         await _checkForExpiredTasks();
       } else {
-        print('Loading patrol data for officer');
-
         context
             .read<PatrolBloc>()
             .add(LoadPatrolHistory(userId: _currentUser!.id));
@@ -123,9 +119,6 @@ class _HomeScreenState extends State<HomeScreen> {
             .getCurrentTask(_currentUser!.id);
 
         if (currentTask != null) {
-          print(
-              'Found current task: ${currentTask.taskId}, status: ${currentTask.status}');
-
           // Cek apakah task sudah melewati batas waktu
           final now = DateTime.now();
           if (currentTask.status == 'active' &&
@@ -141,7 +134,6 @@ class _HomeScreenState extends State<HomeScreen> {
             if (currentTask.status == 'ongoing' ||
                 currentTask.status == 'in_progress' ||
                 currentTask.status == 'active') {
-              print('Task is ongoing/active - restoring patrol state');
               context.read<PatrolBloc>().add(ResumePatrol(
                     task: currentTask,
                     startTime: currentTask.startTime ?? DateTime.now(),
@@ -149,15 +141,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ));
             }
           }
-        } else {
-          print('No current task found');
-        }
+        } else {}
 
         _startTaskStream();
       }
     } catch (e, stack) {
-      print('Error loading user data: $e');
-      print('Stack trace: $stack');
     } finally {
       setState(() {
         _isLoading = false;
@@ -178,9 +166,6 @@ class _HomeScreenState extends State<HomeScreen> {
           task.assignedEndTime != null &&
           now.isAfter(task.assignedEndTime!) &&
           task.startTime == null) {
-        print(
-            'Found expired task: ${task.taskId} for officer: ${task.officerName}');
-
         // Tambahkan ke list expired
         expiredTasks.add(task);
 
@@ -194,17 +179,13 @@ class _HomeScreenState extends State<HomeScreen> {
             },
           );
 
-          print('Updated task ${task.taskId} status to expired');
-
           // Kirim notifikasi ke command center
           await sendPushNotificationToCommandCenter(
             title: 'Petugas Tidak Melakukan Patroli',
             body:
                 'Petugas ${task.officerName} telah melewati batas waktu tugas',
           );
-        } catch (e) {
-          print('Error updating expired task: $e');
-        }
+        } catch (e) {}
       }
     }
 
@@ -219,8 +200,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final now = DateTime.now();
 
     try {
-      print('Marking task ${task.taskId} as expired');
-
       // Update status di database
       await context.read<PatrolBloc>().repository.updateTask(
         task.taskId,
@@ -229,8 +208,6 @@ class _HomeScreenState extends State<HomeScreen> {
           'expiredAt': now.toIso8601String(),
         },
       );
-
-      print('Task marked as expired');
 
       // Update task di bloc
       final updatedTask = task.copyWith(status: 'expired');
@@ -250,20 +227,16 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       }
-    } catch (e) {
-      print('Error marking task as expired: $e');
-    }
+    } catch (e) {}
   }
 
   Future<void> _loadClusterOfficerTasks() async {
     if (_currentUser == null) {
-      print('Current user is null');
       return;
     }
 
     try {
       final clusterId = _currentUser!.id;
-      print('Loading tasks for cluster: $clusterId');
 
       final officerSnapshot = await FirebaseDatabase.instance
           .ref()
@@ -271,7 +244,6 @@ class _HomeScreenState extends State<HomeScreen> {
           .get();
 
       if (!officerSnapshot.exists) {
-        print('No officers found in cluster $clusterId');
         setState(() {
           _upcomingTasks = [];
           _historyTasks = [];
@@ -292,8 +264,6 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
       } else {
-        print(
-            'Unexpected format for officers data: ${officerSnapshot.value.runtimeType}');
         setState(() {
           _upcomingTasks = [];
           _historyTasks = [];
@@ -302,9 +272,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      print('Officer data type: ${officerSnapshot.value.runtimeType}');
-      print('Officers data after conversion: $officersData');
-
       Map<String, Map<String, String>> officerInfo = {};
 
       try {
@@ -312,7 +279,6 @@ class _HomeScreenState extends State<HomeScreen> {
         if (officerSnapshot.value is List) {
           final officersList = List.from(
               (officerSnapshot.value as List).where((item) => item != null));
-          print('Officers data is an array with ${officersList.length} items');
 
           for (var officer in officersList) {
             if (officer is Map) {
@@ -325,9 +291,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   'name': name,
                   'photo_url': photoUrl,
                 };
-
-                print(
-                    'Officer in array: $offId, Name: $name, Has Photo: ${photoUrl.isNotEmpty}');
               }
             }
           }
@@ -343,15 +306,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 'name': name,
                 'photo_url': photoUrl,
               };
-
-              print(
-                  'Officer in map: $idKey, Name: $name, Has Photo: ${photoUrl.isNotEmpty}');
             }
           });
         }
-      } catch (e) {
-        print('Error processing officers data: $e');
-      }
+      } catch (e) {}
 
       final taskSnapshot = await FirebaseDatabase.instance
           .ref()
@@ -369,8 +327,6 @@ class _HomeScreenState extends State<HomeScreen> {
         if (taskSnapshot.value is Map) {
           tasksData = taskSnapshot.value as Map<dynamic, dynamic>;
         } else {
-          print(
-              'Unexpected format for tasks data: ${taskSnapshot.value.runtimeType}');
           setState(() {
             _upcomingTasks = [];
             _historyTasks = [];
@@ -379,15 +335,11 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
 
-        print('Found ${tasksData.length} tasks for cluster');
-
         tasksData.forEach((taskId, taskData) {
           if (taskData is Map) {
             try {
               final userId = taskData['userId']?.toString() ?? '';
               final status = taskData['status']?.toString() ?? 'unknown';
-
-              print('Processing task $taskId: status=$status, userId=$userId');
 
               // Convert task data
               final task = PatrolTask(
@@ -427,11 +379,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 task.officerName = officerInfo[userId]!['name'].toString();
                 task.officerPhotoUrl =
                     officerInfo[userId]!['photo_url'].toString();
-                print(
-                    'Set officer info for task $taskId: ${task.officerName}, photo: ${task.officerPhotoUrl?.isNotEmpty}');
-              } else {
-                print('No officer info found for userId: $userId');
-              }
+              } else {}
 
               // Important: Check for active AND ongoing status
               if (status.toLowerCase() == 'finished' ||
@@ -444,15 +392,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   status.toLowerCase() == 'in_progress') {
                 allUpcomingTasks.add(task);
               }
-            } catch (e, stack) {
-              print('Error processing task $taskId: $e');
-              print('Stack trace: $stack');
-            }
+            } catch (e, stack) {}
           }
         });
-      } else {
-        print('No tasks found for cluster $clusterId');
-      }
+      } else {}
 
       // Sort tasks
       allHistoryTasks.sort((a, b) =>
@@ -467,12 +410,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _upcomingTasks = allUpcomingTasks;
         _isLoading = false;
       });
-
-      print(
-          'Loaded ${_upcomingTasks.length} upcoming and ${_historyTasks.length} history tasks');
     } catch (e, stack) {
-      print('Error loading cluster officer tasks: $e');
-      print('Stack trace: $stack');
       setState(() {
         _isLoading = false;
       });
@@ -498,16 +436,13 @@ class _HomeScreenState extends State<HomeScreen> {
       } else if (value is int) {
         return DateTime.fromMillisecondsSinceEpoch(value);
       }
-    } catch (e) {
-      print('Error parsing datetime: $value, error: $e');
-    }
+    } catch (e) {}
     return null;
   }
 
   void _startTaskStream() {
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) {
-      print('User not authenticated');
       return;
     }
 
@@ -532,12 +467,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _handleNewTask(PatrolTask task) {
-    print('=== New Task Received ===');
-    print('Task ID: ${task.taskId}');
-    print('Status: ${task.status}');
-    print('Assigned Start Time: ${task.assignedStartTime}');
-    print('Assigned End Time: ${task.assignedEndTime}');
-
     if (task.status == 'active') {
       _showTaskDialog(task);
     }
@@ -575,9 +504,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // Perbaiki fungsi _showPatrolSummary untuk memastikan finalReportPhotoUrl diambil dengan benar
   void _showPatrolSummary(PatrolTask task) {
     try {
-      print('=== Converting Route Path ===');
-      print('Original route path: ${task.routePath}');
-
       List<List<double>> convertedPath = [];
 
       if (task.routePath != null && task.routePath is Map) {
@@ -588,22 +514,16 @@ class _HomeScreenState extends State<HomeScreen> {
           ..sort((a, b) => (a.value['timestamp'] as String)
               .compareTo(b.value['timestamp'] as String));
 
-        print('Sorted entries count: ${sortedEntries.length}');
-
         // Convert coordinates - KEEP SAME ORDER as MapScreen
         convertedPath = sortedEntries.map((entry) {
           final coordinates = entry.value['coordinates'] as List;
-          print('Processing coordinates: $coordinates');
           return [
             (coordinates[0] as num).toDouble(), // latitude comes first
             (coordinates[1] as num).toDouble(), // longitude comes second
           ];
         }).toList();
 
-        if (convertedPath.isNotEmpty) {
-          print('First point: ${convertedPath.first}');
-          print('Last point: ${convertedPath.last}');
-        }
+        if (convertedPath.isNotEmpty) {}
       }
 
       if (convertedPath.isEmpty) {
@@ -638,8 +558,6 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       });
     } catch (e, stackTrace) {
-      print('Error showing patrol summary: $e');
-      print('Stack trace: $stackTrace');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error loading patrol summary: $e')),
       );
@@ -659,14 +577,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (snapshot.exists) {
         final data = snapshot.value as Map<dynamic, dynamic>;
-        print('Refreshed task data: $data');
 
         // Cek apakah ada finalReportPhotoUrl
         if (data.containsKey('finalReportPhotoUrl')) {
-          print('Found finalReportPhotoUrl: ${data['finalReportPhotoUrl']}');
-        } else {
-          print('finalReportPhotoUrl not found in database');
-        }
+        } else {}
 
         // Konversi data ke PatrolTask
         final updatedTask = PatrolTask(
@@ -708,9 +622,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         return updatedTask;
       }
-    } catch (e) {
-      print('Error refreshing task data: $e');
-    }
+    } catch (e) {}
 
     return null;
   }
@@ -2036,7 +1948,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return BlocBuilder<PatrolBloc, PatrolState>(
       builder: (context, state) {
         // Tambahkan log debug untuk state
-        print('BlocBuilder for upcoming tasks: state = ${state.runtimeType}');
 
         if (state is PatrolLoading) {
           return const SizedBox(
@@ -2050,10 +1961,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
         if (state is PatrolLoaded) {
           // Tambahkan log detail untuk memeriksa task
-          print(
-              'PatrolLoaded state with task: ${state.task?.taskId}, status: ${state.task?.status}');
-          print('isPatrolling: ${state.isPatrolling}');
-          print('FinishedTasks count: ${state.finishedTasks.length}');
 
           if (state.task != null &&
               (state.task!.status == 'active' ||

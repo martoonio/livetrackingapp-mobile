@@ -26,7 +26,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
   void _initTasksStream() {
     final authState = context.read<AuthBloc>().state;
     if (authState is AuthAuthenticated) {
-      print('Initializing task stream for user: ${authState.user.id}');
 
       _tasksStream = FirebaseDatabase.instance
           .ref()
@@ -34,17 +33,14 @@ class _TaskListScreenState extends State<TaskListScreen> {
           .onValue
           .asBroadcastStream()
           .map((event) {
-        print('Raw database event: ${event.snapshot.value}');
 
         if (!event.snapshot.exists) {
-          print('No snapshot exists');
           return <PatrolTask>[];
         }
 
         try {
           // First cast to Map<dynamic, dynamic>
           final rawMap = event.snapshot.value as Map<dynamic, dynamic>;
-          print('Raw map data: $rawMap');
 
           final tasks = rawMap.entries.map((entry) {
             // Cast the value to Map<dynamic, dynamic> first
@@ -56,15 +52,11 @@ class _TaskListScreenState extends State<TaskListScreen> {
               'taskId': entry.key,
             });
 
-            print('Converting task: $convertedData');
             return PatrolTask.fromJson(convertedData);
           }).toList();
 
-          print('Processed ${tasks.length} tasks');
           return tasks;
         } catch (e, stackTrace) {
-          print('Error processing tasks: $e');
-          print('Stack trace: $stackTrace');
           return <PatrolTask>[];
         }
       });
@@ -75,7 +67,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
         onError: (error) => print('Stream error: $error'),
       );
     } else {
-      print('User not authenticated');
     }
   }
 
@@ -103,7 +94,6 @@ class _TaskListScreenState extends State<TaskListScreen> {
                 }
 
                 if (!snapshot.hasData) {
-                  print('masuk sini no data');
                   return Center(
                     child: LottieBuilder.asset(
                       'assets/lottie/maps_loading.json',

@@ -82,14 +82,12 @@ class FirebaseSurveyDataSource {
               surveys.add(survey);
             }
           } catch (e) {
-            print('Error parsing survey $key: $e');
           }
         }
       });
 
       return surveys;
     } catch (e) {
-      print("Error fetching active surveys: $e");
       rethrow;
     }
   }
@@ -147,7 +145,6 @@ class FirebaseSurveyDataSource {
 
       return Survey.fromMap(surveyData, surveyId);
     } catch (e) {
-      print("Error fetching survey details for $surveyId: $e");
       rethrow;
     }
   }
@@ -159,7 +156,6 @@ class FirebaseSurveyDataSource {
           .child(response.responseId)
           .set(response.toMap());
     } catch (e) {
-      print("Error submitting survey response ${response.responseId}: $e");
       rethrow;
     }
   }
@@ -214,7 +210,6 @@ class FirebaseSurveyDataSource {
                   SurveyResponse.fromMap(responseData, key.toString());
               return; // Keluar dari forEach setelah menemukan
             } catch (e) {
-              print('Error parsing user response $key: $e');
             }
           }
         }
@@ -222,8 +217,6 @@ class FirebaseSurveyDataSource {
 
       return userResponse;
     } catch (e) {
-      print(
-          "Error fetching user survey response for survey $surveyId, user $userId: $e");
       rethrow;
     }
   }
@@ -285,14 +278,12 @@ class FirebaseSurveyDataSource {
             final survey = Survey.fromMap(surveyData, key.toString());
             surveys.add(survey);
           } catch (e) {
-            print('Error parsing survey $key: $e');
           }
         }
       });
 
       return surveys;
     } catch (e) {
-      print("Error fetching all surveys for $commandCenterId: $e");
       rethrow;
     }
   }
@@ -326,7 +317,6 @@ class FirebaseSurveyDataSource {
       }
       return surveyId;
     } catch (e) {
-      print("Error creating survey: $e");
       rethrow;
     }
   }
@@ -359,7 +349,6 @@ class FirebaseSurveyDataSource {
         }
       }
     } catch (e) {
-      print("Error updating survey ${survey.surveyId}: $e");
       rethrow;
     }
   }
@@ -376,7 +365,6 @@ class FirebaseSurveyDataSource {
       //   }
       // }
     } catch (e) {
-      print("Error deleting survey $surveyId: $e");
       rethrow;
     }
   }
@@ -424,14 +412,12 @@ class FirebaseSurveyDataSource {
           try {
             responses.add(SurveyResponse.fromMap(responseData, key.toString()));
           } catch (e) {
-            print('Error parsing response $key: $e');
           }
         }
       });
 
       return responses;
     } catch (e) {
-      print("Error fetching survey responses for $surveyId: $e");
       rethrow;
     }
   }
@@ -555,7 +541,6 @@ class FirebaseSurveyDataSource {
 
       return summary;
     } catch (e) {
-      print("Error fetching survey responses summary for $surveyId: $e");
       rethrow;
     }
   }
@@ -564,7 +549,6 @@ class FirebaseSurveyDataSource {
     try {
       await _db.child('surveys').child(surveyId).update({'isActive': isActive});
     } catch (e) {
-      print("Error updating survey status for $surveyId: $e");
       rethrow;
     }
   }

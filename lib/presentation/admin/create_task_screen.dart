@@ -49,7 +49,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   @override
   void initState() {
     super.initState();
-    print('CreateTaskScreen initialized');
 
     // Jika ada initialClusterId, set sebagai cluster terpilih
     if (widget.initialClusterId != null) {
@@ -58,11 +57,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
     // Load semua data yang diperlukan dengan delay untuk mencegah race condition
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      print('Dispatching LoadAllClusters event');
       context.read<AdminBloc>().add(const LoadAllClusters());
 
       Future.delayed(const Duration(milliseconds: 300), () {
-        print('Dispatching LoadOfficersAndVehicles event');
         context.read<AdminBloc>().add(const LoadOfficersAndVehicles());
       });
     });
@@ -183,9 +180,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     setState(() {
       _assignedEndTime = endTime;
     });
-
-    print(
-        'Updated end time: ${DateFormat('yyyy-MM-dd HH:mm').format(_assignedEndTime)}');
   }
 
   // Perbarui fungsi _updateMarkers untuk membuat marker yang dapat diklik untuk dihapus
@@ -430,7 +424,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         patrolTime: DateFormat('dd/MM/yyyy - HH:mm').format(_assignedStartTime),
         taskId: taskId,
       );
-      print('Notifikasi terkirim ke petugas $_selectedOfficerId');
       setState(() {
         _isCreating = false;
       });
@@ -665,9 +658,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       _assignedStartTime = startDate;
       _assignedEndTime = endDate;
     });
-
-    print(
-        'Initial times set: Start=${DateFormat('yyyy-MM-dd HH:mm').format(startDate)}, End=${DateFormat('yyyy-MM-dd HH:mm').format(endDate)}');
   }
 
   @override
@@ -1594,9 +1584,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           // Update juga waktu selesai
           _updateEndTimeBasedOnStartTime();
         });
-
-        print(
-            'Updated start time: ${DateFormat('yyyy-MM-dd HH:mm').format(_assignedStartTime)}');
       }
     }
   }
