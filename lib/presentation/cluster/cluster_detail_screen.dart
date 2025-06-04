@@ -62,7 +62,7 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
       initialIndex: widget.initialTab,
     );
     _loadClusterDetails();
-    _loadCheckValidationRadius();
+    _loadClusterValidationRadius(widget.clusterId);
 
     // Tambahkan listener untuk mendeteksi perubahan tab
     _tabController.addListener(() {
@@ -215,7 +215,33 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     super.dispose();
   }
 
-  void _loadCheckValidationRadius() {}
+  Future<void> _loadClusterValidationRadius(String clusterId) async {
+    try {
+      if (clusterId.isEmpty) {
+        print('ClusterId is empty, using default radius');
+        _checkpointValidationRadius = 50.0;
+        return;
+      }
+
+      final snapshot = await FirebaseDatabase.instance
+          .ref('users')
+          .child(clusterId)
+          .child('checkpoint_validation_radius')
+          .get();
+
+      if (snapshot.exists && snapshot.value != null) {
+        _checkpointValidationRadius = (snapshot.value as num).toDouble();
+        print(
+            'Loaded cluster validation radius: ${_checkpointValidationRadius}m');
+      } else {
+        _checkpointValidationRadius = 50.0; // Default fallback
+        print('No cluster validation radius found, using default: 50m');
+      }
+    } catch (e) {
+      print('Error loading cluster validation radius: $e');
+      _checkpointValidationRadius = 50.0; // Default fallback
+    }
+  }
 
   void _loadClusterDetails() {
     context.read<AdminBloc>().add(
@@ -1096,34 +1122,6 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
     }
   }
 
-  Future<void> _loadClusterValidationRadius(String clusterId) async {
-    try {
-      if (clusterId.isEmpty) {
-        print('ClusterId is empty, using default radius');
-        _checkpointValidationRadius = 50.0;
-        return;
-      }
-
-      final snapshot = await FirebaseDatabase.instance
-          .ref('users')
-          .child(clusterId)
-          .child('checkpoint_validation_radius')
-          .get();
-
-      if (snapshot.exists && snapshot.value != null) {
-        _checkpointValidationRadius = (snapshot.value as num).toDouble();
-        print(
-            'Loaded cluster validation radius: ${_checkpointValidationRadius}m');
-      } else {
-        _checkpointValidationRadius = 50.0; // Default fallback
-        print('No cluster validation radius found, using default: 50m');
-      }
-    } catch (e) {
-      print('Error loading cluster validation radius: $e');
-      _checkpointValidationRadius = 50.0; // Default fallback
-    }
-  }
-
   Widget _buildMapTab(User cluster) {
     return Stack(
       children: [
@@ -1649,7 +1647,13 @@ class _ClusterDetailScreenState extends State<ClusterDetailScreen>
         onSuccess: () {
           // Refresh data setelah update
           context.read<AdminBloc>().add(GetClusterDetail(widget.clusterId));
-          _loadCheckValidationRadius();
+          _loadClusterValidationRadius(widget.clusterId);
+          showCustomSnackbar(
+            context: context,
+            title: 'Berhasil',
+            subtitle: 'Radius validasi checkpoint berhasil diperbarui',
+            type: SnackbarType.success,
+          );
         },
       ),
     );

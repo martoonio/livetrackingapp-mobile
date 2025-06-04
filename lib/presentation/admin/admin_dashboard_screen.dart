@@ -540,7 +540,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       Row(
                         children: [
                           Text(
-                            'Tugas #${task.taskId.substring(0, 8)}',
+                            // PERBAIKAN: Safe substring untuk taskId
+                            'Tugas #${_getSafeTaskIdPreview(task.taskId)}',
                             style: boldTextStyle(size: 16),
                           ),
                           const SizedBox(width: 8),
@@ -569,7 +570,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ),
                         ],
                       ),
-                      // const SizedBox(height: 4),
                       Text(
                         assignedOfficer.name,
                         style: mediumTextStyle(size: 14, color: neutral600),
@@ -1498,5 +1498,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       default:
         return status;
     }
+  }
+
+  String _getSafeTaskIdPreview(String taskId) {
+    // Mengembalikan 8 karakter pertama dari taskId yang valid, atau string kosong jika tidak valid
+    if (taskId.isEmpty) return '';
+
+    return taskId.length > 8 ? taskId.substring(0, 8) : taskId;
   }
 }

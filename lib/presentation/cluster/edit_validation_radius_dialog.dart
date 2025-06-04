@@ -65,15 +65,6 @@ class _EditValidationRadiusDialogState
       if (mounted) {
         Navigator.of(context).pop();
         widget.onSuccess();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Radius validasi ${widget.clusterName} berhasil diperbarui menjadi ${newRadius.toInt()} meter',
-            ),
-            backgroundColor: successG500,
-          ),
-        );
       }
     } catch (e) {
       if (mounted) {

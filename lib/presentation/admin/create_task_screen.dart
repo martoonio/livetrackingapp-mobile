@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:livetrackingapp/domain/entities/patrol_task.dart'; // Import PatrolTask
 import 'package:livetrackingapp/domain/entities/user.dart';
 import 'package:livetrackingapp/notification_utils.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
@@ -23,15 +24,17 @@ class CreateTaskScreen extends StatefulWidget {
   State<CreateTaskScreen> createState() => _CreateTaskScreenState();
 }
 
-class _CreateTaskScreenState extends State<CreateTaskScreen> {
-  final _formKey = GlobalKey<FormState>();
+class _CreateTaskScreenState extends State<CreateTaskScreen>
+    with SingleTickerProviderStateMixin {
+  // Single Task Form
+  final _singleFormKey = GlobalKey<FormState>();
   final Set<Marker> _markers = {};
   final List<LatLng> _selectedPoints = [];
-  bool _isCreating = false;
+  bool _isCreatingSingle = false; // For single task submission
   bool _isMapExpanded = false;
   GoogleMapController? _mapController;
 
-  // Form values
+  // Form values for Single Task
   String? _selectedClusterId;
   String _vehicleId = '';
   String? _selectedOfficerId;
@@ -41,18 +44,41 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   String? _createdTaskId;
   String? get taskId => _createdTaskId;
 
-  // Shift-based time presets
-
   DateTime _assignedStartTime = DateTime.now();
   DateTime _assignedEndTime = DateTime.now().add(const Duration(hours: 8));
+
+  // Multiple Task Tab
+  late TabController _tabController;
+  final _multipleTaskFormKey = GlobalKey<FormState>();
+  final List<PatrolTask> _stagedTasks =
+      []; // List to hold tasks before multiple assignment
+  DateTime? _multipleStartDate;
+  DateTime? _multipleEndDate;
+  bool _isAssigningMultiple = false; // For multiple task submission
+
+  // Form values for adding a task to the staged list (similar to single task)
+  String? _multiSelectedClusterId;
+  String _multiVehicleId = '';
+  String? _multiSelectedOfficerId;
+  Officer? _multiSelectedOfficer;
+  String? _multiSelectedClusterName;
+  final List<LatLng> _multiSelectedPoints = [];
+  DateTime _multiAssignedStartTime = DateTime.now();
+  DateTime _multiAssignedEndTime = DateTime.now().add(const Duration(hours: 8));
+
+  // Add a placeholder for the admin user ID.
+  // In a real application, this should be retrieved from the authenticated user's session.
+  final String _adminUserId = 'admin_user_id_placeholder';
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
 
     // Jika ada initialClusterId, set sebagai cluster terpilih
     if (widget.initialClusterId != null) {
       _selectedClusterId = widget.initialClusterId;
+      _multiSelectedClusterId = widget.initialClusterId;
     }
 
     // Load semua data yang diperlukan dengan delay untuk mencegah race condition
@@ -68,12 +94,11 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
   @override
   void dispose() {
     _mapController?.dispose();
+    _tabController.dispose();
     super.dispose();
   }
 
-  // Tambahkan metode-metode ini di dalam class _CreateTaskScreenState
-
-// Cek apakah waktu yang dipilih sesuai dengan range shift
+  // Cek apakah waktu yang dipilih sesuai dengan range shift
   bool _isTimeInShiftRange(TimeOfDay time, ShiftType shift) {
     int hour = time.hour;
 
@@ -91,7 +116,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     }
   }
 
-// Dapatkan pesan range waktu untuk shift tertentu
+  // Dapatkan pesan range waktu untuk shift tertentu
   String _getShiftTimeRangeMessage(ShiftType shift) {
     switch (shift) {
       case ShiftType.pagi:
@@ -107,21 +132,18 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     }
   }
 
-  void _updateEndTimeBasedOnStartTime() {
-    if (_selectedOfficer == null) return;
+  void _updateEndTimeBasedOnStartTime(
+      DateTime startTime, Officer? officer, Function(DateTime) onUpdate) {
+    if (officer == null) return;
 
-    // Default: waktu selesai adalah 1 jam setelah waktu mulai
-    DateTime endTime = _assignedStartTime.add(const Duration(hours: 1));
-
-    // Tentukan batas maksimum waktu selesai berdasarkan shift
+    DateTime endTime = startTime.add(const Duration(hours: 1));
     DateTime maxEndTime;
 
-    // Gunakan tanggal yang sama dengan assignedStartTime
-    final startDate = _assignedStartTime;
+    final startDate = startTime;
 
-    switch (_selectedOfficer!.shift) {
+    switch (officer.shift) {
       case ShiftType.pagi:
-        // Batas waktu maksimum untuk shift pagi: jam 15:00 di hari yang sama dengan start
+        // 07:00-15:00
         maxEndTime = DateTime(
           startDate.year,
           startDate.month,
@@ -130,8 +152,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           0,
         );
         break;
+
       case ShiftType.sore:
-        // Batas waktu maksimum untuk shift sore: jam 23:00 di hari yang sama dengan start
+        // 15:00-23:00
         maxEndTime = DateTime(
           startDate.year,
           startDate.month,
@@ -140,18 +163,35 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           0,
         );
         break;
+
       case ShiftType.malam:
-        // Batas waktu maksimum untuk shift malam: jam 7:00 di hari berikutnya
-        maxEndTime = DateTime(
-          startDate.year,
-          startDate.month,
-          startDate.day + 1,
-          7,
-          0,
-        );
+        // 23:00-07:00 (next day)
+        if (startTime.hour >= 23) {
+          // Start di malam hari, max end time adalah 07:00 hari berikutnya
+          maxEndTime = DateTime(
+            startDate.year,
+            startDate.month,
+            startDate.day + 1,
+            7,
+            0,
+          );
+        } else if (startTime.hour >= 0 && startTime.hour < 7) {
+          // Start di dini hari, max end time adalah 07:00 hari yang sama
+          maxEndTime = DateTime(
+            startDate.year,
+            startDate.month,
+            startDate.day,
+            7,
+            0,
+          );
+        } else {
+          // Invalid start time untuk shift malam
+          maxEndTime = startTime.add(const Duration(hours: 1));
+        }
         break;
+
       case ShiftType.siang:
-        // Batas waktu maksimum untuk shift siang outsource: jam 19:00 di hari yang sama dengan start
+        // 07:00-19:00
         maxEndTime = DateTime(
           startDate.year,
           startDate.month,
@@ -160,29 +200,58 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           0,
         );
         break;
+
       case ShiftType.malamPanjang:
-        // Batas waktu maksimum untuk shift malam outsource: jam 7:00 di hari berikutnya
-        maxEndTime = DateTime(
-          startDate.year,
-          startDate.month,
-          startDate.day + 1,
-          7,
-          0,
-        );
+        // 19:00-07:00 (next day)
+        if (startTime.hour >= 19) {
+          // Start di malam hari, max end time adalah 07:00 hari berikutnya
+          maxEndTime = DateTime(
+            startDate.year,
+            startDate.month,
+            startDate.day + 1,
+            7,
+            0,
+          );
+        } else if (startTime.hour >= 0 && startTime.hour < 7) {
+          // Start di dini hari, max end time adalah 07:00 hari yang sama
+          maxEndTime = DateTime(
+            startDate.year,
+            startDate.month,
+            startDate.day,
+            7,
+            0,
+          );
+        } else {
+          // Invalid start time untuk shift malam panjang
+          maxEndTime = startTime.add(const Duration(hours: 1));
+        }
         break;
     }
 
-    // Gunakan waktu yang lebih awal antara endTime (waktu mulai + 1 jam) atau maxEndTime (batas shift)
+    // Pastikan end time tidak melewati batas maksimal
     if (endTime.isAfter(maxEndTime)) {
       endTime = maxEndTime;
     }
 
-    setState(() {
-      _assignedEndTime = endTime;
-    });
-  }
+    // Pastikan end time minimal 1 jam setelah start time
+    if (endTime.isBefore(startTime.add(const Duration(hours: 1)))) {
+      endTime = startTime.add(const Duration(hours: 1));
 
-  // Perbarui fungsi _updateMarkers untuk membuat marker yang dapat diklik untuk dihapus
+      // Jika setelah ditambah 1 jam masih melewati batas, set ke batas maksimal
+      if (endTime.isAfter(maxEndTime)) {
+        endTime = maxEndTime;
+      }
+    }
+
+    print('DEBUG _updateEndTimeBasedOnStartTime:');
+    print('  - Officer shift: ${officer.shift}');
+    print('  - Start time: $startTime');
+    print('  - Calculated end time: $endTime');
+    print('  - Max end time: $maxEndTime');
+    print('  - Is overnight: ${_isOvernightShift(startTime, endTime)}');
+
+    onUpdate(endTime);
+  }
 
   void _updateMarkers() {
     _markers.clear();
@@ -195,14 +264,11 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
             title: 'Titik ${i + 1}',
             snippet: 'Klik untuk menghapus titik ini',
             onTap: () {
-              // Ketika infoWindow diklik, hapus marker ini
               _removeMarkerAtIndex(i);
             },
           ),
           onTap: () {
-            // Ketika marker diklik, tampilkan infoWindow
             if (_mapController != null) {
-              // Perbarui tampilan camera untuk fokus ke marker yang diklik
               _mapController!.showMarkerInfoWindow(MarkerId('point_$i'));
             }
           },
@@ -211,17 +277,13 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     }
   }
 
-// Tambahkan fungsi baru untuk menghapus titik berdasarkan index
   void _removeMarkerAtIndex(int index) {
     if (index >= 0 && index < _selectedPoints.length) {
       setState(() {
-        // Hapus titik dari list
         _selectedPoints.removeAt(index);
-        // Update semua marker dengan index yang terbarui
         _updateMarkers();
       });
 
-      // Tampilkan snackbar konfirmasi
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Titik berhasil dihapus'),
@@ -232,16 +294,12 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     }
   }
 
-// Modifikasi juga _handleMapTap untuk mendukung penghapusan titik dengan tap langsung
   void _handleMapTap(LatLng position) {
-    // Periksa apakah tap berada di dekat titik yang sudah ada (untuk menghapus)
     int indexToRemove = _findNearestPointIndex(position);
 
     if (indexToRemove != -1) {
-      // Jika dekat dengan titik yang sudah ada, hapus titik tersebut
       _removeMarkerAtIndex(indexToRemove);
     } else {
-      // Jika tidak dekat dengan titik yang sudah ada, tambahkan titik baru
       setState(() {
         _selectedPoints.add(position);
         _updateMarkers();
@@ -249,9 +307,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     }
   }
 
-// Fungsi tambahan untuk mencari titik terdekat dari posisi tap
   int _findNearestPointIndex(LatLng tapPosition) {
-    // Jarak minimum dalam derajat untuk mendeteksi "klik pada titik" (~5-10 meter)
     const double minDistance = 0.0001;
 
     for (int i = 0; i < _selectedPoints.length; i++) {
@@ -259,17 +315,13 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       final distance = _calculateDistance(tapPosition, point);
 
       if (distance < minDistance) {
-        return i; // Kembalikan index titik yang cukup dekat
+        return i;
       }
     }
-
-    return -1; // Tidak ada titik yang cukup dekat
+    return -1;
   }
 
-// Fungsi untuk menghitung jarak antara dua titik koordinat
   double _calculateDistance(LatLng pos1, LatLng pos2) {
-    // Menggunakan formula sederhana Euclidean distance untuk keperluan deteksi tap
-    // Ini hanya perkiraan, tidak akurat untuk jarak sebenarnya di bumi
     final dx = pos1.latitude - pos2.latitude;
     final dy = pos1.longitude - pos2.longitude;
     return sqrt(dx * dx + dy * dy);
@@ -289,7 +341,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
 
       _updateMarkers();
 
-      // Zoom to bounds if we have points
       if (_selectedPoints.isNotEmpty && _mapController != null) {
         _fitMapToBounds();
       }
@@ -320,7 +371,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     ));
   }
 
-  void _submitTask() async {
+  void _submitSingleTask() async {
     if (_isMapExpanded) {
       setState(() {
         _isMapExpanded = false;
@@ -328,7 +379,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       return;
     }
 
-    if (!_formKey.currentState!.validate()) return;
+    if (!_singleFormKey.currentState!.validate()) return;
 
     if (_selectedClusterId == null) {
       showCustomSnackbar(
@@ -350,16 +401,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       return;
     }
 
-    // if (_vehicleId.isEmpty) {
-    //   showCustomSnackbar(
-    //     context: context,
-    //     title: 'Error',
-    //     subtitle: 'Silakan pilih kendaraan terlebih dahulu',
-    //     type: SnackbarType.danger,
-    //   );
-    //   return;
-    // }
-
     if (_selectedPoints.isEmpty) {
       showCustomSnackbar(
         context: context,
@@ -370,7 +411,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       return;
     }
 
-    // Konfirmasi waktu patroli
     if (_assignedEndTime.isBefore(_assignedStartTime) ||
         _assignedEndTime.isAtSameMomentAs(_assignedStartTime)) {
       showCustomSnackbar(
@@ -382,23 +422,36 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       return;
     }
 
-    // 1. Menampilkan dialog konfirmasi
-    final result = await _showConfirmationDialog();
+    final result = await _showConfirmationDialog(
+      isMultiple: false,
+      singleTask: PatrolTask(
+        taskId:
+            '', // Task ID will be generated by Firebase, use empty string for now
+        userId: _adminUserId, // Assign the current admin user's ID
+        createdAt: DateTime.now(), // Set creation timestamp
+        clusterId: _selectedClusterId!,
+        assignedRoute:
+            _selectedPoints.map((p) => [p.latitude, p.longitude]).toList(),
+        assignedStartTime: _assignedStartTime,
+        assignedEndTime: _assignedEndTime,
+        officerName: _selectedOfficer?.name,
+        clusterName: _selectedClusterName,
+        status: 'assigned', // Default status
+      ),
+    );
     if (result != true) {
-      return; // User membatalkan operasi
+      return;
     }
 
     setState(() {
-      _isCreating = true;
+      _isCreatingSingle = true;
     });
 
     try {
-      // Konversi LatLng ke List<List<double>>
       final coordinates = _selectedPoints
           .map((point) => [point.latitude, point.longitude])
           .toList();
 
-      // Kirim event create task ke AdminBloc
       context.read<AdminBloc>().add(
             CreateTask(
               clusterId: _selectedClusterId!,
@@ -412,12 +465,11 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
             ),
           );
 
-      // Menunggu sebentar untuk memastikan event diproses
       await Future.delayed(const Duration(milliseconds: 500));
 
-      // Kirim notifikasi ke petugas
       await sendPushNotificationToOfficer(
-        officerId: _selectedClusterId!,
+        officerId:
+            _selectedOfficerId!, // Use _selectedOfficerId for notification
         title: 'Tugas Patroli Baru',
         body:
             'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(_assignedStartTime)}',
@@ -425,7 +477,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         taskId: taskId,
       );
       setState(() {
-        _isCreating = false;
+        _isCreatingSingle = false;
       });
 
       if (mounted) {
@@ -436,11 +488,11 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           type: SnackbarType.success,
         );
 
-        Navigator.pop(context); // Kembali ke halaman sebelumnya
+        Navigator.pop(context);
       }
     } catch (e) {
       setState(() {
-        _isCreating = false;
+        _isCreatingSingle = false;
       });
 
       showCustomSnackbar(
@@ -452,17 +504,51 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     }
   }
 
-  // Menampilkan dialog konfirmasi
-  // Memperbaiki dialog konfirmasi untuk menampilkan nama cluster yang benar
+  bool _isOvernightShift(DateTime startTime, DateTime endTime) {
+    // Check if the shift crosses midnight
+    return startTime.hour > endTime.hour ||
+        (startTime.hour == endTime.hour && startTime.minute > endTime.minute);
+  }
 
-  Future<bool?> _showConfirmationDialog() async {
-    String officerName = _selectedOfficer?.name ?? 'Tidak ditemukan';
-    String clusterName = 'Unknown Tatar';
+  Future<bool?> _showConfirmationDialog({
+    required bool isMultiple,
+    PatrolTask? singleTask,
+    List<PatrolTask>? multipleTasks,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    String officerName =
+        singleTask?.officerName ?? _selectedOfficer?.name ?? 'Tidak ditemukan';
+    String clusterName =
+        singleTask?.clusterName ?? _selectedClusterName ?? 'Unknown Tatar';
 
-    // Get readable shift display text
     String shiftText = '';
-    if (_selectedOfficer != null) {
-      switch (_selectedOfficer!.shift) {
+    ShiftType? currentShift;
+    if (singleTask != null) {
+      // Find the officer associated with this singleTask to get shift info
+      final adminState = context.read<AdminBloc>().state;
+      List<Officer> allOfficers = [];
+      if (adminState is OfficersAndVehiclesLoaded) {
+        allOfficers = adminState.officers;
+      } else if (adminState is AdminLoaded) {
+        allOfficers = _getOfficersFromClusters(adminState.clusters);
+      }
+      final officer = allOfficers.firstWhere(
+        (o) => o.id == singleTask.officerId,
+        orElse: () => Officer(
+            id: '',
+            name: '',
+            type: OfficerType.organik,
+            shift: ShiftType.pagi,
+            clusterId: ''),
+      );
+      currentShift = officer.shift;
+    } else if (_selectedOfficer != null) {
+      currentShift = _selectedOfficer!.shift;
+    }
+
+    if (currentShift != null) {
+      switch (currentShift) {
         case ShiftType.pagi:
           shiftText = 'Pagi (07-15)';
           break;
@@ -481,16 +567,12 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       }
     }
 
-    // Get readable type display text
     String typeText =
         _selectedOfficer?.type == OfficerType.organik ? 'Organik' : 'Outsource';
 
-    // Cari info cluster dari state
+    // Find cluster name from state
     final adminState = context.read<AdminBloc>().state;
-
-    // Pendekatan lebih sederhana untuk menemukan cluster yang dipilih
     List<User> availableClusters = [];
-
     if (adminState is ClustersLoaded) {
       availableClusters = adminState.clusters;
     } else if (adminState is AdminLoaded) {
@@ -499,7 +581,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       availableClusters = adminState.clusters;
     }
 
-    // Coba temukan cluster berdasarkan ID
     if (_selectedClusterId != null && availableClusters.isNotEmpty) {
       for (var cluster in availableClusters) {
         if (cluster.id == _selectedClusterId) {
@@ -515,7 +596,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       builder: (BuildContext context) {
         return AlertDialog(
           title: Text(
-            'Konfirmasi Tugas Patroli',
+            isMultiple
+                ? 'Konfirmasi Tugas Patroli Berulang'
+                : 'Konfirmasi Tugas Patroli',
             style: boldTextStyle(size: h4),
           ),
           content: SingleChildScrollView(
@@ -524,16 +607,106 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('Detail Tugas:', style: semiBoldTextStyle()),
-                _infoRow('Tatar', clusterName),
-                _infoRow(
-                    'Petugas', '$officerName ($typeText - Shift $shiftText)'),
-                // _infoRow('Kendaraan', _vehicleId),
-                _infoRow(
-                    'Jumlah Titik Patroli', _selectedPoints.length.toString()),
-                _infoRow('Mulai Patroli',
-                    "${DateFormat('dd/MM/yyyy - HH:mm').format(_assignedStartTime)}"),
-                _infoRow('Selesai Patroli',
-                    "${DateFormat('dd/MM/yyyy - HH:mm').format(_assignedEndTime)}"),
+                if (!isMultiple && singleTask != null) ...[
+                  _infoRow('Tatar', clusterName),
+                  _infoRow(
+                      'Petugas', '$officerName ($typeText - Shift $shiftText)'),
+                  _infoRow('Jumlah Titik Patroli',
+                      singleTask.assignedRoute!.length.toString()),
+                  _infoRow(
+                      'Mulai Patroli',
+                      DateFormat('dd/MM/yyyy - HH:mm')
+                          .format(singleTask.assignedStartTime!)),
+                  _infoRow(
+                      'Selesai Patroli',
+                      DateFormat('dd/MM/yyyy - HH:mm')
+                          .format(singleTask.assignedEndTime!)),
+                ],
+                if (isMultiple &&
+                    multipleTasks != null &&
+                    startDate != null &&
+                    endDate != null) ...[
+                  _infoRow(
+                      'Jumlah Jenis Tugas', multipleTasks.length.toString()),
+                  _infoRow('Rentang Tanggal',
+                      '${DateFormat('dd/MM/yyyy').format(startDate)} - ${DateFormat('dd/MM/yyyy').format(endDate)}'),
+                  const SizedBox(height: 8),
+                  Text('Preview Tugas yang akan dibuat:',
+                      style: semiBoldTextStyle()),
+
+                  // PERBAIKAN: Preview yang menampilkan tanggal yang benar
+                  ...() {
+                    List<Widget> previewWidgets = [];
+                    DateTime currentDate = startDate;
+                    int taskNumber = 1;
+
+                    while (currentDate
+                        .isBefore(endDate.add(const Duration(days: 1)))) {
+                      for (var task in multipleTasks) {
+                        final String officerIdToFind =
+                            task.officerId ?? task.userId ?? '';
+
+                        final officer = availableClusters
+                            .expand((c) => c.officers ?? [])
+                            .firstWhere(
+                              (o) => o.id == officerIdToFind,
+                              orElse: () => Officer(
+                                id: officerIdToFind,
+                                name: task.officerName ?? 'Unknown Officer',
+                                type: OfficerType.organik,
+                                shift: ShiftType.pagi,
+                                clusterId: task.clusterId,
+                              ),
+                            );
+
+                        // PERBAIKAN: Hitung waktu yang benar untuk preview
+                        final startTime = DateTime(
+                          currentDate.year,
+                          currentDate.month,
+                          currentDate.day,
+                          task.assignedStartTime!.hour,
+                          task.assignedStartTime!.minute,
+                        );
+
+                        DateTime endTime;
+                        if (_isOvernightShift(
+                            task.assignedStartTime!, task.assignedEndTime!)) {
+                          endTime = DateTime(
+                            currentDate.year,
+                            currentDate.month,
+                            currentDate.day + 1,
+                            task.assignedEndTime!.hour,
+                            task.assignedEndTime!.minute,
+                          );
+                        } else {
+                          endTime = DateTime(
+                            currentDate.year,
+                            currentDate.month,
+                            currentDate.day,
+                            task.assignedEndTime!.hour,
+                            task.assignedEndTime!.minute,
+                          );
+                        }
+
+                        previewWidgets.add(
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8.0, top: 4.0),
+                            child: Text(
+                              'Task $taskNumber: ${task.clusterName ?? 'Unknown Tatar'} - ${officer.name}\n'
+                              '  Mulai: ${DateFormat('dd/MM/yyyy HH:mm').format(startTime)}\n'
+                              '  Selesai: ${DateFormat('dd/MM/yyyy HH:mm').format(endTime)}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        );
+                        taskNumber++;
+                      }
+                      currentDate = currentDate.add(const Duration(days: 1));
+                    }
+
+                    return previewWidgets;
+                  }(),
+                ]
               ],
             ),
           ),
@@ -554,8 +727,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: kbpBlue900,
               ),
-              child: const Text('Ya, Buat Tugas',
-                  style: TextStyle(color: Colors.white)),
+              child: Text(
+                  isMultiple ? 'Ya, Buat Tugas Berulang' : 'Ya, Buat Tugas',
+                  style: const TextStyle(color: Colors.white)),
               onPressed: () {
                 Navigator.of(context).pop(true);
               },
@@ -566,7 +740,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     );
   }
 
-  // Helper widget untuk menampilkan info di dialog konfirmasi
   Widget _infoRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8.0),
@@ -588,32 +761,48 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
     );
   }
 
-  // Mencari officer data berdasarkan ID
-  // Perbarui metode _updateSelectedOfficer
+  void _updateSelectedOfficer(String officerId, List<Officer> officers,
+      {bool isMulti = false}) {
+    print('DEBUG _updateSelectedOfficer:');
+    print('  - officerId: $officerId');
+    print('  - isMulti: $isMulti');
+    print('  - officers.length: ${officers.length}');
 
-  void _updateSelectedOfficer(String officerId, List<Officer> officers) {
     final officer = officers.firstWhere(
       (o) => o.id == officerId,
-      orElse: () => Officer(
-        id: '',
-        name: '',
-        type: OfficerType.organik, // Default ke organik
-        shift: ShiftType.pagi, // Default ke pagi
-        clusterId: '',
-      ),
+      orElse: () {
+        print('  - Officer not found, creating dummy');
+        return Officer(
+          id: officerId, // PERBAIKAN: Gunakan officerId yang dipilih
+          name: 'Officer Not Found',
+          type: OfficerType.organik,
+          shift: ShiftType.pagi,
+          clusterId: '',
+        );
+      },
     );
 
-    setState(() {
-      _selectedOfficer = officer;
-    });
+    print('  - Found officer: ${officer.name} (${officer.id})');
 
-    // Atur waktu berdasarkan shift petugas
-    _setInitialTimeBasedOnShift(officer.type, officer.shift);
+    setState(() {
+      if (isMulti) {
+        _multiSelectedOfficerId = officerId; // PERBAIKAN: Set ID yang benar
+        _multiSelectedOfficer = officer;
+        _setInitialTimeBasedOnShift(officer.type, officer.shift, isMulti: true);
+
+        print('  - Set _multiSelectedOfficerId: $_multiSelectedOfficerId');
+        print(
+            '  - Set _multiSelectedOfficer.name: ${_multiSelectedOfficer?.name}');
+      } else {
+        _selectedOfficerId = officerId;
+        _selectedOfficer = officer;
+        _setInitialTimeBasedOnShift(officer.type, officer.shift);
+      }
+    });
   }
 
-// 3. Tambah metode baru untuk set awal waktu berdasarkan type dan shift
-
-  void _setInitialTimeBasedOnShift(OfficerType type, ShiftType shift) {
+  void _setInitialTimeBasedOnShift(OfficerType type, ShiftType shift,
+      {bool isMulti = false}) {
     final now = DateTime.now();
 
     // Tambahkan 1 hari untuk jadwal default - mulai besok
@@ -636,10 +825,12 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         endDate = startDate.add(const Duration(hours: 1));
         break;
       case ShiftType.malam:
-        // Organik: 23:00-07:00
+        // Organik: 23:00-07:00 (next day)
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 0);
-        endDate = startDate.add(const Duration(hours: 1));
+        // PERBAIKAN: Set end time ke 7 AM hari berikutnya, bukan midnight
+        endDate =
+            DateTime(tomorrow.year, tomorrow.month, tomorrow.day + 1, 7, 0);
         break;
       case ShiftType.siang:
         // Outsource: 07:00-19:00
@@ -647,34 +838,937 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         endDate = startDate.add(const Duration(hours: 1));
         break;
       case ShiftType.malamPanjang:
-        // Outsource: 19:00-07:00
+        // Outsource: 19:00-07:00 (next day)
         startDate =
             DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 19, 0);
-        endDate = startDate.add(const Duration(hours: 1));
+        // PERBAIKAN: Set end time ke 7 AM hari berikutnya, bukan 8 PM
+        endDate =
+            DateTime(tomorrow.year, tomorrow.month, tomorrow.day + 1, 7, 0);
         break;
     }
 
+    // PERBAIKAN: Set state sesuai dengan mode (single atau multi)
     setState(() {
-      _assignedStartTime = startDate;
-      _assignedEndTime = endDate;
+      if (isMulti) {
+        _multiAssignedStartTime = startDate;
+        _multiAssignedEndTime = endDate;
+
+        print('DEBUG _setInitialTimeBasedOnShift (Multi):');
+        print('  - Officer Type: $type');
+        print('  - Shift: $shift');
+        print('  - Start Time: $_multiAssignedStartTime');
+        print('  - End Time: $_multiAssignedEndTime');
+        print(
+            '  - Is Overnight: ${_isOvernightShift(_multiAssignedStartTime, _multiAssignedEndTime)}');
+      } else {
+        _assignedStartTime = startDate;
+        _assignedEndTime = endDate;
+
+        print('DEBUG _setInitialTimeBasedOnShift (Single):');
+        print('  - Officer Type: $type');
+        print('  - Shift: $shift');
+        print('  - Start Time: $_assignedStartTime');
+        print('  - End Time: $_assignedEndTime');
+        print(
+            '  - Is Overnight: ${_isOvernightShift(_assignedStartTime, _assignedEndTime)}');
+      }
     });
+  }
+
+  bool _isValidShiftTime(
+      DateTime startTime, DateTime endTime, ShiftType shift) {
+    final startHour = startTime.hour;
+    final endHour = endTime.hour;
+
+    switch (shift) {
+      case ShiftType.pagi:
+        // 07:00-15:00
+        return startHour >= 7 &&
+            startHour < 15 &&
+            endHour >= 7 &&
+            endHour <= 15 &&
+            endTime.isAfter(startTime);
+
+      case ShiftType.sore:
+        // 15:00-23:00
+        return startHour >= 15 &&
+            startHour < 23 &&
+            endHour >= 15 &&
+            endHour <= 23 &&
+            endTime.isAfter(startTime);
+
+      case ShiftType.malam:
+        // 23:00-07:00 (next day)
+        if (startHour >= 23) {
+          // Start di malam hari, end bisa di hari yang sama (after 23) atau hari berikutnya (before 7)
+          return (endHour >= 23 || (endHour >= 0 && endHour <= 7)) &&
+              endTime.isAfter(startTime);
+        } else if (startHour >= 0 && startHour < 7) {
+          // Start di dini hari, end harus masih di range dini hari
+          return endHour >= 0 && endHour <= 7 && endTime.isAfter(startTime);
+        }
+        return false;
+
+      case ShiftType.siang:
+        // 07:00-19:00
+        return startHour >= 7 &&
+            startHour < 19 &&
+            endHour >= 7 &&
+            endHour <= 19 &&
+            endTime.isAfter(startTime);
+
+      case ShiftType.malamPanjang:
+        // 19:00-07:00 (next day)
+        if (startHour >= 19) {
+          // Start di malam hari, end bisa di hari yang sama (after 19) atau hari berikutnya (before 7)
+          return (endHour >= 19 || (endHour >= 0 && endHour <= 7)) &&
+              endTime.isAfter(startTime);
+        } else if (startHour >= 0 && startHour < 7) {
+          // Start di dini hari, end harus masih di range dini hari
+          return endHour >= 0 && endHour <= 7 && endTime.isAfter(startTime);
+        }
+        return false;
+
+      default:
+        return false;
+    }
+  }
+
+  // Helper method to build the common task form section
+  Widget _buildTaskForm({
+    required GlobalKey<FormState> formKey,
+    required String? selectedClusterId,
+    required Function(String?) onClusterChanged,
+    required String? selectedOfficerId,
+    required Function(String?) onOfficerChanged,
+    required DateTime assignedStartTime,
+    required Function(DateTime) onStartTimeChanged,
+    required DateTime assignedEndTime,
+    required Function(DateTime) onEndTimeChanged,
+    required List<LatLng> selectedPoints,
+    required Function(LatLng) onMapTap,
+    required Function() onRemoveLastPoint,
+    required Function() onExpandMap,
+    required GoogleMapController? mapController,
+    required Set<Marker> markers,
+    required List<User> clusters,
+    required List<Officer> filteredOfficers,
+    required Function(List<List<double>>) addClusterCoordsToMap,
+    required Officer? currentSelectedOfficer,
+  }) {
+    return Form(
+      key: formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Informasi Tugas
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.white,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Informasi Tugas',
+                    style: boldTextStyle(size: 18),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Dropdown Tatar
+                  Text(
+                    'Tatar',
+                    style: boldTextStyle(size: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: kbpBlue900),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonFormField<String>(
+                      value: selectedClusterId,
+                      decoration: const InputDecoration(
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        border: InputBorder.none,
+                      ),
+                      hint: const Text('Pilih Tatar'),
+                      isExpanded: true,
+                      items: clusters.map((cluster) {
+                        return DropdownMenuItem(
+                          value: cluster.id,
+                          child: Text(cluster.name),
+                        );
+                      }).toList(),
+                      onChanged: onClusterChanged,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Silakan pilih cluster';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                  if (selectedClusterId != null) ...[
+                    16.height,
+                    Text(
+                      'Petugas',
+                      style: boldTextStyle(size: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: kbpBlue900),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: DropdownButtonFormField<String>(
+                        value: selectedOfficerId,
+                        decoration: const InputDecoration(
+                          contentPadding:
+                              EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          border: InputBorder.none,
+                        ),
+                        hint: const Text('Pilih Petugas'),
+                        isExpanded: true,
+                        items: filteredOfficers.map((officer) {
+                          String shiftText = '';
+                          switch (officer.shift) {
+                            case ShiftType.pagi:
+                              shiftText = 'Pagi (07-15)';
+                              break;
+                            case ShiftType.sore:
+                              shiftText = 'Sore (15-23)';
+                              break;
+                            case ShiftType.malam:
+                              shiftText = 'Malam (23-07)';
+                              break;
+                            case ShiftType.siang:
+                              shiftText = 'Siang (07-19)';
+                              break;
+                            case ShiftType.malamPanjang:
+                              shiftText = 'Malam (19-07)';
+                              break;
+                          }
+                          String typeText = officer.type == OfficerType.organik
+                              ? 'Organik'
+                              : 'Outsource';
+                          return DropdownMenuItem(
+                            value: officer.id,
+                            child: Text(
+                                '${officer.name} ($typeText - $shiftText)'),
+                          );
+                        }).toList(),
+                        onChanged: onOfficerChanged,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Silakan pilih petugas';
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.white,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Jadwal Patroli',
+                    style: boldTextStyle(size: 18),
+                  ),
+                  const SizedBox(height: 4),
+                  if (currentSelectedOfficer != null) ...[
+                    Text(
+                      'Shift ${getShiftDisplayText(currentSelectedOfficer.shift)}',
+                      style: const TextStyle(
+                        fontStyle: FontStyle.italic,
+                        color: kbpBlue700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  const Text(
+                    'Waktu Mulai',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: neutral900,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () async {
+                      if (currentSelectedOfficer == null) {
+                        showCustomSnackbar(
+                          context: context,
+                          title: 'Perhatian',
+                          subtitle:
+                              'Silakan pilih petugas terlebih dahulu untuk menentukan waktu patroli',
+                          type: SnackbarType.warning,
+                        );
+                        return;
+                      }
+                      final selectedDate = await showDatePicker(
+                        context: context,
+                        initialDate: assignedStartTime,
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (selectedDate != null) {
+                        final selectedTime = await showTimePicker(
+                          context: context,
+                          initialTime:
+                              TimeOfDay.fromDateTime(assignedStartTime),
+                          builder: (BuildContext context, Widget? child) {
+                            return MediaQuery(
+                              data: MediaQuery.of(context).copyWith(
+                                alwaysUse24HourFormat: true,
+                              ),
+                              child: child!,
+                            );
+                          },
+                        );
+                        if (selectedTime != null) {
+                          bool isValidTime = _isTimeInShiftRange(
+                              selectedTime, currentSelectedOfficer.shift);
+                          if (!isValidTime) {
+                            if (mounted) {
+                              showCustomSnackbar(
+                                context: context,
+                                title: 'Waktu Tidak Valid',
+                                subtitle: _getShiftTimeRangeMessage(
+                                    currentSelectedOfficer.shift),
+                                type: SnackbarType.danger,
+                              );
+                            }
+                            return;
+                          }
+                          final newStartDate = DateTime(
+                            selectedDate.year,
+                            selectedDate.month,
+                            selectedDate.day,
+                            selectedTime.hour,
+                            selectedTime.minute,
+                          );
+                          DateTime finalStartDate = newStartDate;
+                          if ((currentSelectedOfficer.shift ==
+                                      ShiftType.malam ||
+                                  currentSelectedOfficer.shift ==
+                                      ShiftType.malamPanjang) &&
+                              selectedTime.hour < 7) {
+                            finalStartDate = DateTime(
+                              selectedDate.year,
+                              selectedDate.month,
+                              selectedDate.day,
+                              selectedTime.hour,
+                              selectedTime.minute,
+                            );
+                          }
+                          onStartTimeChanged(finalStartDate);
+                        }
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: kbpBlue900),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            DateFormat('dd/MM/yyyy - HH:mm')
+                                .format(assignedStartTime),
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const Icon(Icons.calendar_today, color: kbpBlue900),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Waktu Selesai',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: neutral900,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () async {
+                      if (currentSelectedOfficer == null) {
+                        showCustomSnackbar(
+                          context: context,
+                          title: 'Perhatian',
+                          subtitle:
+                              'Silakan pilih petugas terlebih dahulu untuk menentukan waktu patroli',
+                          type: SnackbarType.warning,
+                        );
+                        return;
+                      }
+                      final selectedDate = await showDatePicker(
+                        context: context,
+                        initialDate: assignedEndTime,
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (selectedDate != null) {
+                        final selectedTime = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.fromDateTime(assignedEndTime),
+                          builder: (BuildContext context, Widget? child) {
+                            return MediaQuery(
+                              data: MediaQuery.of(context).copyWith(
+                                alwaysUse24HourFormat: true,
+                              ),
+                              child: child!,
+                            );
+                          },
+                        );
+                        if (selectedTime != null) {
+                          bool isValidTime = _isTimeInShiftRange(
+                              selectedTime, currentSelectedOfficer.shift);
+                          if (!isValidTime) {
+                            if (mounted) {
+                              showCustomSnackbar(
+                                context: context,
+                                title: 'Waktu Tidak Valid',
+                                subtitle: _getShiftTimeRangeMessage(
+                                    currentSelectedOfficer.shift),
+                                type: SnackbarType.danger,
+                              );
+                            }
+                            return;
+                          }
+                          DateTime newEndTime = DateTime(
+                            selectedDate.year,
+                            selectedDate.month,
+                            selectedDate.day,
+                            selectedTime.hour,
+                            selectedTime.minute,
+                          );
+                          if ((currentSelectedOfficer.shift ==
+                                      ShiftType.malam ||
+                                  currentSelectedOfficer.shift ==
+                                      ShiftType.malamPanjang) &&
+                              selectedTime.hour < 7) {
+                            newEndTime =
+                                newEndTime.add(const Duration(days: 1));
+                          }
+                          if (newEndTime.isBefore(assignedStartTime) ||
+                              newEndTime.isAtSameMomentAs(assignedStartTime)) {
+                            showCustomSnackbar(
+                              context: context,
+                              title: 'Waktu Tidak Valid',
+                              subtitle:
+                                  'Waktu selesai harus setelah waktu mulai',
+                              type: SnackbarType.danger,
+                            );
+                            return;
+                          }
+                          onEndTimeChanged(newEndTime);
+                        }
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: kbpBlue900),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            DateFormat('dd/MM/yyyy - HH:mm')
+                                .format(assignedEndTime),
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const Icon(Icons.calendar_today, color: kbpBlue900),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: Colors.white,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Titik Patroli',
+                        style: boldTextStyle(size: 18),
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: onExpandMap,
+                        icon: const Icon(Icons.fullscreen,
+                            color: Colors.white, size: 16),
+                        label: const Text('Perbesar Peta'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kbpBlue900,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Klik pada peta untuk menentukan titik-titik patroli.',
+                    style: TextStyle(color: neutral600),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    height: 250,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: kbpBlue300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Stack(
+                        children: [
+                          MapSection(
+                            mapController: mapController,
+                            markers: markers,
+                            onMapTap: onMapTap,
+                          ),
+                          Positioned(
+                            right: 8,
+                            top: 8,
+                            child: FloatingActionButton.small(
+                              heroTag: 'expand_map_form',
+                              backgroundColor: Colors.white,
+                              foregroundColor: kbpBlue900,
+                              onPressed: onExpandMap,
+                              child: const Icon(Icons.fullscreen),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Titik dipilih: ${selectedPoints.length}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w500,
+                          color: neutral700,
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed:
+                            selectedPoints.isEmpty ? null : onRemoveLastPoint,
+                        icon: const Icon(Icons.undo, size: 16),
+                        label: const Text('Hapus Titik Terakhir'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: kbpBlue900,
+                          disabledForegroundColor: neutral400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Multiple Task Assignment Logic
+  void _addStagedTask() {
+    if (!_multipleTaskFormKey.currentState!.validate()) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Error',
+        subtitle: 'Harap lengkapi semua bidang untuk menambahkan tugas',
+        type: SnackbarType.danger,
+      );
+      return;
+    }
+
+    if (_multiSelectedClusterId == null) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Error',
+        subtitle: 'Silakan pilih cluster terlebih dahulu',
+        type: SnackbarType.danger,
+      );
+      return;
+    }
+
+    if (_multiSelectedOfficerId == null) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Error',
+        subtitle: 'Silakan pilih petugas terlebih dahulu',
+        type: SnackbarType.danger,
+      );
+      return;
+    }
+
+    if (_multiSelectedPoints.isEmpty) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Error',
+        subtitle: 'Silakan tentukan titik-titik patroli terlebih dahulu',
+        type: SnackbarType.danger,
+      );
+      return;
+    }
+
+    if (_multiAssignedEndTime.isBefore(_multiAssignedStartTime) ||
+        _multiAssignedEndTime.isAtSameMomentAs(_multiAssignedStartTime)) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Error',
+        subtitle: 'Waktu selesai harus setelah waktu mulai',
+        type: SnackbarType.danger,
+      );
+      return;
+    }
+
+    // PERBAIKAN: Pastikan data officer ter-set dengan benar
+    print('DEBUG _addStagedTask:');
+    print('  - _multiSelectedOfficerId: $_multiSelectedOfficerId');
+    print('  - _multiSelectedOfficer?.id: ${_multiSelectedOfficer?.id}');
+    print('  - _multiSelectedOfficer?.name: ${_multiSelectedOfficer?.name}');
+
+    final newStagedTask = PatrolTask(
+      taskId: '',
+      userId:
+          _multiSelectedOfficerId!, // PERBAIKAN: Gunakan officerId sebagai userId
+      createdAt: DateTime.now(),
+      clusterId: _multiSelectedClusterId!,
+      assignedRoute:
+          _multiSelectedPoints.map((p) => [p.latitude, p.longitude]).toList(),
+      assignedStartTime: _multiAssignedStartTime,
+      assignedEndTime: _multiAssignedEndTime,
+      officerName: _multiSelectedOfficer?.name ??
+          'Unknown Officer', // PERBAIKAN: Pastikan officer name ada
+      clusterName: _multiSelectedClusterName ?? 'Unknown Cluster',
+      status: 'assigned',
+      // TAMBAHAN: Set properti tambahan jika ada
+      officerId:
+          _multiSelectedOfficerId!, // TAMBAHAN: Jika ada property officerId terpisah
+    );
+
+    setState(() {
+      _stagedTasks.add(newStagedTask);
+
+      // PERBAIKAN: Clear form fields dengan lebih hati-hati
+      _multiSelectedOfficerId = null;
+      _multiSelectedOfficer = null;
+      _multiSelectedPoints.clear();
+
+      // Reset times to default for the next entry
+      _multiAssignedStartTime =
+          DateTime.now().add(const Duration(days: 1, hours: 7));
+      _multiAssignedEndTime =
+          _multiAssignedStartTime.add(const Duration(hours: 1));
+    });
+
+    showCustomSnackbar(
+      context: context,
+      title: 'Berhasil',
+      subtitle: 'Tugas berhasil ditambahkan ke daftar',
+      type: SnackbarType.success,
+    );
+  }
+
+  void _removeStagedTask(int index) {
+    setState(() {
+      _stagedTasks.removeAt(index);
+    });
+    showCustomSnackbar(
+      context: context,
+      title: 'Dihapus',
+      subtitle: 'Tugas dihapus dari daftar',
+      type: SnackbarType.success,
+    );
+  }
+
+  Future<void> _pickDateRange() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 7)), // Max 7 days range
+      initialDateRange: _multipleStartDate != null && _multipleEndDate != null
+          ? DateTimeRange(start: _multipleStartDate!, end: _multipleEndDate!)
+          : null,
+    );
+
+    if (picked != null) {
+      if (picked.end.difference(picked.start).inDays > 6) {
+        // Check for max 7 days (0-indexed difference)
+        showCustomSnackbar(
+          context: context,
+          title: 'Rentang Tanggal Terlalu Panjang',
+          subtitle: 'Maksimal rentang tanggal adalah 7 hari.',
+          type: SnackbarType.warning,
+        );
+        return;
+      }
+      setState(() {
+        _multipleStartDate = picked.start;
+        _multipleEndDate = picked.end;
+      });
+    }
+  }
+
+  void _assignMultipleTasks() async {
+    if (_stagedTasks.isEmpty) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Error',
+        subtitle: 'Tidak ada tugas dalam daftar untuk ditetapkan',
+        type: SnackbarType.danger,
+      );
+      return;
+    }
+    if (_multipleStartDate == null || _multipleEndDate == null) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Error',
+        subtitle: 'Silakan pilih rentang tanggal',
+        type: SnackbarType.danger,
+      );
+      return;
+    }
+
+    final result = await _showConfirmationDialog(
+      isMultiple: true,
+      multipleTasks: _stagedTasks,
+      startDate: _multipleStartDate,
+      endDate: _multipleEndDate,
+    );
+    if (result != true) {
+      return;
+    }
+
+    setState(() {
+      _isAssigningMultiple = true;
+    });
+
+    try {
+      List<PatrolTask> tasksToCreate = [];
+      DateTime currentDate = _multipleStartDate!;
+
+      print('DEBUG _assignMultipleTasks:');
+      print('  - Start Date: $_multipleStartDate');
+      print('  - End Date: $_multipleEndDate');
+      print('  - Staged Tasks Count: ${_stagedTasks.length}');
+
+      while (currentDate
+          .isBefore(_multipleEndDate!.add(const Duration(days: 1)))) {
+        print('  - Processing date: $currentDate');
+
+        for (var stagedTask in _stagedTasks) {
+          final String assignedOfficerId =
+              stagedTask.officerId ?? stagedTask.userId ?? '';
+
+          if (assignedOfficerId.isEmpty) {
+            print('WARNING: No officer ID found for staged task');
+            continue;
+          }
+
+          print('    - Processing task for officer: $assignedOfficerId');
+          print('    - Original start time: ${stagedTask.assignedStartTime}');
+          print('    - Original end time: ${stagedTask.assignedEndTime}');
+
+          final originalStartTime = stagedTask.assignedStartTime!;
+          final originalEndTime = stagedTask.assignedEndTime!;
+
+          // Set start time dengan tanggal currentDate
+          final assignedStartTime = DateTime(
+            currentDate.year,
+            currentDate.month,
+            currentDate.day,
+            originalStartTime.hour,
+            originalStartTime.minute,
+          );
+
+          print('    - New start time: $assignedStartTime');
+
+          // PERBAIKAN: Untuk end time, gunakan method _isOvernightShift
+          DateTime assignedEndTime;
+
+          if (_isOvernightShift(originalStartTime, originalEndTime)) {
+            // Ini overnight shift, end time harus di hari berikutnya
+            assignedEndTime = DateTime(
+              currentDate.year,
+              currentDate.month,
+              currentDate.day + 1,
+              originalEndTime.hour,
+              originalEndTime.minute,
+            );
+            print('    - Detected overnight shift, end time moved to next day');
+          } else {
+            // Normal shift, same day
+            assignedEndTime = DateTime(
+              currentDate.year,
+              currentDate.month,
+              currentDate.day,
+              originalEndTime.hour,
+              originalEndTime.minute,
+            );
+            print('    - Normal shift, same day end time');
+          }
+
+          print('    - Final end time: $assignedEndTime');
+
+          // TAMBAHAN: Double check untuk memastikan end time selalu setelah start time
+          if (assignedEndTime.isBefore(assignedStartTime) ||
+              assignedEndTime.isAtSameMomentAs(assignedStartTime)) {
+            print('    - WARNING: End time is not after start time, fixing...');
+            if (_isOvernightShift(originalStartTime, originalEndTime)) {
+              // Untuk overnight shift, pastikan end time di hari berikutnya
+              assignedEndTime = DateTime(
+                currentDate.year,
+                currentDate.month,
+                currentDate.day + 1,
+                originalEndTime.hour,
+                originalEndTime.minute,
+              );
+            } else {
+              // Untuk normal shift, tambah 1 jam
+              assignedEndTime = assignedStartTime.add(const Duration(hours: 1));
+            }
+            print('    - Fixed end time: $assignedEndTime');
+          }
+
+          final taskToCreate = stagedTask.copyWith(
+            assignedStartTime: assignedStartTime,
+            assignedEndTime: assignedEndTime,
+            userId: assignedOfficerId,
+            officerId: assignedOfficerId,
+          );
+
+          tasksToCreate.add(taskToCreate);
+
+          print('    - Task created:');
+          print('      Start: ${taskToCreate.assignedStartTime}');
+          print('      End: ${taskToCreate.assignedEndTime}');
+          print(
+              '      Is Overnight: ${_isOvernightShift(taskToCreate.assignedStartTime!, taskToCreate.assignedEndTime!)}');
+        }
+
+        currentDate = currentDate.add(const Duration(days: 1));
+      }
+
+      print('  - Total tasks to create: ${tasksToCreate.length}');
+
+      // Dispatch all tasks to the bloc
+      for (var task in tasksToCreate) {
+        final String assignedOfficerId = task.officerId ?? task.userId ?? '';
+
+        if (assignedOfficerId.isEmpty) {
+          print('ERROR: Cannot create task without officer ID');
+          continue;
+        }
+
+        print(
+            'Creating task: ${task.assignedStartTime} - ${task.assignedEndTime}');
+
+        context.read<AdminBloc>().add(
+              CreateTask(
+                clusterId: task.clusterId,
+                vehicleId: '',
+                assignedRoute: task.assignedRoute!,
+                assignedOfficerId: assignedOfficerId,
+                assignedStartTime: task.assignedStartTime!,
+                assignedEndTime: task.assignedEndTime!,
+                officerName: task.officerName,
+                clusterName: task.clusterName,
+              ),
+            );
+
+        // Send notification for each task
+        try {
+          await sendPushNotificationToOfficer(
+            officerId: assignedOfficerId,
+            title: 'Tugas Patroli Baru',
+            body:
+                'Anda telah ditugaskan untuk patroli pada ${DateFormat('dd/MM/yyyy - HH:mm').format(task.assignedStartTime!)}',
+            patrolTime: DateFormat('dd/MM/yyyy - HH:mm')
+                .format(task.assignedStartTime!),
+            taskId: null,
+          );
+        } catch (e) {
+          print(
+              'Failed to send notification to officer $assignedOfficerId: $e');
+        }
+      }
+
+      setState(() {
+        _isAssigningMultiple = false;
+        _stagedTasks.clear();
+        _multipleStartDate = null;
+        _multipleEndDate = null;
+        _multiSelectedClusterId = null;
+        _multiSelectedOfficerId = null;
+        _multiSelectedOfficer = null;
+        _multiSelectedClusterName = null;
+        _multiSelectedPoints.clear();
+      });
+
+      if (mounted) {
+        showCustomSnackbar(
+          context: context,
+          title: 'Berhasil',
+          subtitle:
+              'Semua tugas patroli berhasil dibuat dan notifikasi terkirim',
+          type: SnackbarType.success,
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      setState(() {
+        _isAssigningMultiple = false;
+      });
+      showCustomSnackbar(
+        context: context,
+        title: 'Error',
+        subtitle: 'Gagal membuat tugas patroli berulang: $e',
+        type: SnackbarType.danger,
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Jika map sedang dalam mode expanded, tampilkan fullscreen map
     if (_isMapExpanded) {
       return Scaffold(
         body: Stack(
           children: [
-            // Fullscreen map
             MapSection(
               mapController: _mapController,
               markers: _markers,
               onMapTap: _handleMapTap,
             ),
-
-            // Control panel overlay
             Positioned(
               top: MediaQuery.of(context).padding.top + 16,
               left: 16,
@@ -776,17 +1870,27 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
       );
     }
 
-    // Tampilan form normal
     return Scaffold(
       appBar: AppBar(
         title: const Text('Buat Tugas Patroli'),
         backgroundColor: kbpBlue900,
         foregroundColor: Colors.white,
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white.withOpacity(0.7),
+          indicatorColor: Colors.white,
+          tabs: const [
+            Tab(text: 'Single'),
+            Tab(text: 'Multiple'),
+          ],
+        ),
       ),
       body: BlocConsumer<AdminBloc, AdminState>(
         listener: (context, state) {
           if (state is CreateTaskSuccess) {
             _createdTaskId = state.taskId;
+            // No need to show snackbar here, it's handled by _submitSingleTask or _assignMultipleTasks
           } else if (state is CreateTaskError) {
             showCustomSnackbar(
               context: context,
@@ -795,12 +1899,12 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
               type: SnackbarType.danger,
             );
             setState(() {
-              _isCreating = false;
+              _isCreatingSingle = false;
+              _isAssigningMultiple = false;
             });
           }
         },
         builder: (context, state) {
-          // Tampilkan loading jika data belum siap
           if (state is AdminLoading ||
               state is OfficersAndVehiclesLoading ||
               state is ClustersLoading) {
@@ -814,7 +1918,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
             );
           }
 
-          // Tampilkan error jika gagal memuat data
           if (state is AdminError ||
               state is OfficersAndVehiclesError ||
               state is ClustersError) {
@@ -854,7 +1957,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
             );
           }
 
-          // Extract data from state
           List<Officer> officers = [];
           List<String> vehicles = [];
           List<User> clusters = [];
@@ -871,7 +1973,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
           } else if (state is ClustersLoaded) {
             clusters = state.clusters;
 
-            // Cari officers dan vehicles dari state lain
             final adminState = context.read<AdminBloc>().state;
             if (adminState is OfficersAndVehiclesLoaded) {
               officers = adminState.officers;
@@ -882,18 +1983,15 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
             }
           }
 
-          // Get coordinates for the selected cluster
+          // Get coordinates for the selected cluster for Single Tab
           if (_selectedClusterId != null) {
             final selectedCluster = clusters.firstWhere(
               (cluster) => cluster.id == _selectedClusterId,
               orElse: () => User(id: '', email: '', name: '', role: ''),
             );
-
             if (selectedCluster.id.isNotEmpty &&
                 selectedCluster.clusterCoordinates != null) {
               selectedClusterCoordinates = selectedCluster.clusterCoordinates;
-
-              // Add cluster coordinates to map if we just got them
               if (selectedClusterCoordinates != null &&
                   _selectedPoints.isEmpty) {
                 Future.microtask(() {
@@ -903,590 +2001,497 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
             }
           }
 
-          // Filter officers jika cluster telah dipilih
-          List<Officer> filteredOfficers = officers;
+          // Filter officers for Single Tab
+          List<Officer> filteredOfficersSingle = officers;
           if (_selectedClusterId != null && _selectedClusterId!.isNotEmpty) {
-            filteredOfficers = officers
+            filteredOfficersSingle = officers
                 .where((officer) => officer.clusterId == _selectedClusterId)
                 .toList();
           }
 
-          return Form(
-            key: _formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Informasi Tugas
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    color: Colors.white,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Informasi Tugas',
-                          style: boldTextStyle(size: 18),
-                        ),
-                        const SizedBox(height: 16),
+          // Filter officers for Multiple Tab
+          List<Officer> filteredOfficersMulti = officers;
+          if (_multiSelectedClusterId != null &&
+              _multiSelectedClusterId!.isNotEmpty) {
+            filteredOfficersMulti = officers
+                .where(
+                    (officer) => officer.clusterId == _multiSelectedClusterId)
+                .toList();
+          }
 
-                        // Dropdown Tatar
-                        Text(
-                          'Tatar',
-                          style: boldTextStyle(size: 16),
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: kbpBlue900),
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              // Single Task Tab
+              Column(
+                children: [
+                  Expanded(
+                    child: _buildTaskForm(
+                      formKey: _singleFormKey,
+                      selectedClusterId: _selectedClusterId,
+                      onClusterChanged: (value) {
+                        setState(() {
+                          _selectedClusterId = value;
+                          if (value != null) {
+                            final selectedCluster = clusters.firstWhere(
+                              (cluster) => cluster.id == value,
+                              orElse: () =>
+                                  User(id: '', email: '', name: '', role: ''),
+                            );
+                            if (selectedCluster.id.isNotEmpty) {
+                              _selectedClusterName = selectedCluster.name;
+                            }
+                          }
+                          _selectedOfficerId = null;
+                          _selectedOfficer = null;
+                          _selectedPoints.clear();
+                          _markers.clear();
+                        });
+                      },
+                      selectedOfficerId: _selectedOfficerId,
+                      onOfficerChanged: (value) {
+                        setState(() {
+                          _selectedOfficerId = value;
+                          if (value != null) {
+                            _updateSelectedOfficer(
+                                value, filteredOfficersSingle);
+                          }
+                        });
+                      },
+                      assignedStartTime: _assignedStartTime,
+                      onStartTimeChanged: (newTime) {
+                        setState(() {
+                          _assignedStartTime = newTime;
+                          _updateEndTimeBasedOnStartTime(
+                              _assignedStartTime, _selectedOfficer, (endTime) {
+                            setState(() {
+                              _assignedEndTime = endTime;
+                            });
+                          });
+                        });
+                      },
+                      assignedEndTime: _assignedEndTime,
+                      onEndTimeChanged: (newTime) {
+                        setState(() {
+                          _assignedEndTime = newTime;
+                        });
+                      },
+                      selectedPoints: _selectedPoints,
+                      onMapTap: _handleMapTap,
+                      onRemoveLastPoint: () {
+                        setState(() {
+                          if (_selectedPoints.isNotEmpty) {
+                            _selectedPoints.removeLast();
+                            _updateMarkers();
+                          }
+                        });
+                      },
+                      onExpandMap: () {
+                        setState(() {
+                          _isMapExpanded = true;
+                        });
+                      },
+                      mapController: _mapController,
+                      markers: _markers,
+                      clusters: clusters,
+                      filteredOfficers: filteredOfficersSingle,
+                      addClusterCoordsToMap: _addClusterCoordinatesToMap,
+                      currentSelectedOfficer: _selectedOfficer,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16.0, vertical: 8.0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isCreatingSingle ? null : _submitSingleTask,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kbpBlue900,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: DropdownButtonFormField<String>(
-                            value: _selectedClusterId,
-                            decoration: const InputDecoration(
-                              contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 8),
-                              border: InputBorder.none,
-                            ),
-                            hint: const Text('Pilih Tatar'),
-                            isExpanded: true,
-                            items: clusters.map((cluster) {
-                              return DropdownMenuItem(
-                                value: cluster.id,
-                                child: Text(cluster.name),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              setState(() {
-                                _selectedClusterId = value;
-
-                                // Simpan nama cluster saat pilihan dibuat
-                                if (value != null) {
-                                  final selectedCluster = clusters.firstWhere(
-                                    (cluster) => cluster.id == value,
-                                    orElse: () => User(
-                                        id: '', email: '', name: '', role: ''),
-                                  );
-                                  if (selectedCluster.id.isNotEmpty) {
-                                    _selectedClusterName = selectedCluster
-                                        .name; // Tambahkan field ini di class
-                                  }
-                                }
-
-                                _selectedOfficerId = null;
-                                _selectedOfficer = null;
-                                _selectedPoints.clear();
-                                _markers.clear();
-                              });
-                            },
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Silakan pilih cluster';
-                              }
-                              return null;
-                            },
-                          ),
+                          disabledBackgroundColor: neutral300,
                         ),
-                        // const SizedBox(height: 16),
-
-                        // Dropdown Petugas - hanya tampilkan jika cluster telah dipilih
-                        if (_selectedClusterId != null) ...[
-                          16.height,
-                          Text(
-                            'Petugas',
-                            style: boldTextStyle(size: 16),
-                          ),
-                          const SizedBox(height: 8),
-                          Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(color: kbpBlue900),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: DropdownButtonFormField<String>(
-                              value: _selectedOfficerId,
-                              decoration: const InputDecoration(
-                                contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 8),
-                                border: InputBorder.none,
-                              ),
-                              hint: const Text('Pilih Petugas'),
-                              isExpanded: true,
-                              items: filteredOfficers.map((officer) {
-                                // Get readable shift display text
-                                String shiftText = '';
-                                switch (officer.shift) {
-                                  case ShiftType.pagi:
-                                    shiftText = 'Pagi (07-15)';
-                                    break;
-                                  case ShiftType.sore:
-                                    shiftText = 'Sore (15-23)';
-                                    break;
-                                  case ShiftType.malam:
-                                    shiftText = 'Malam (23-07)';
-                                    break;
-                                  case ShiftType.siang:
-                                    shiftText = 'Siang (07-19)';
-                                    break;
-                                  case ShiftType.malamPanjang:
-                                    shiftText = 'Malam (19-07)';
-                                    break;
-                                }
-
-                                // Get readable type display text
-                                String typeText =
-                                    officer.type == OfficerType.organik
-                                        ? 'Organik'
-                                        : 'Outsource';
-
-                                return DropdownMenuItem(
-                                  value: officer.id,
-                                  child: Text(
-                                      '${officer.name} ($typeText - $shiftText)'),
-                                );
-                              }).toList(),
-                              onChanged: (value) {
-                                setState(() {
-                                  _selectedOfficerId = value;
-                                  if (value != null) {
-                                    _updateSelectedOfficer(
-                                        value, filteredOfficers);
-                                  }
-                                });
-                              },
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Silakan pilih petugas';
-                                }
-                                return null;
-                              },
-                            ),
-                          ),
-                          // const SizedBox(height: 16),
-                        ],
-
-                        // Dropdown Kendaraan
-                        // const Text(
-                        //   'Kendaraan',
-                        //   style: TextStyle(
-                        //     fontWeight: FontWeight.bold,
-                        //     color: neutral900,
-                        //   ),
-                        // ),
-                        // const SizedBox(height: 8),
-                        // Container(
-                        //   decoration: BoxDecoration(
-                        //     border: Border.all(color: kbpBlue900),
-                        //     borderRadius: BorderRadius.circular(8),
-                        //   ),
-                        //   child: DropdownButtonFormField<String>(
-                        //     value: _vehicleId.isEmpty ? null : _vehicleId,
-                        //     decoration: const InputDecoration(
-                        //       contentPadding: EdgeInsets.symmetric(
-                        //           horizontal: 16, vertical: 8),
-                        //       border: InputBorder.none,
-                        //     ),
-                        //     hint: const Text('Pilih Kendaraan'),
-                        //     isExpanded: true,
-                        //     items: vehicles.map((vehicle) {
-                        //       return DropdownMenuItem(
-                        //         value: vehicle,
-                        //         child: Text(vehicle),
-                        //       );
-                        //     }).toList(),
-                        //     onChanged: (value) {
-                        //       setState(() {
-                        //         _vehicleId = value ?? '';
-                        //       });
-                        //     },
-                        //     validator: (value) {
-                        //       if (value == null || value.isEmpty) {
-                        //         return 'Silakan pilih kendaraan';
-                        //       }
-                        //       return null;
-                        //     },
-                        //   ),
-                        // ),
-                      ],
-                    ),
-                  ),
-
-                  // const SizedBox(height: 16),
-
-                  // Jadwal Patroli
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    color: Colors.white,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Jadwal Patroli',
-                          style: boldTextStyle(size: 18),
-                        ),
-                        const SizedBox(height: 4),
-
-                        // Waktu Mulai dan Selesai (disesuaikan dengan shift officer)
-                        if (_selectedOfficer != null) ...[
-                          Text(
-                            'Shift ${getShiftDisplayText(_selectedOfficer!.shift)}',
-                            style: const TextStyle(
-                              fontStyle: FontStyle.italic,
-                              color: kbpBlue700,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                        ],
-
-                        // Waktu Mulai
-                        const Text(
-                          'Waktu Mulai',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: neutral900,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        // Modifikasi GestureDetector pada "Waktu Mulai" dan "Waktu Selesai"
-
-// Waktu Mulai
-                        GestureDetector(
-                          onTap: () async {
-                            _showStartTimePicker();
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: kbpBlue900),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  DateFormat('dd/MM/yyyy - HH:mm')
-                                      .format(_assignedStartTime),
-                                  style: const TextStyle(fontSize: 16),
-                                ),
-                                const Icon(Icons.calendar_today,
-                                    color: kbpBlue900),
-                              ],
-                            ),
-                          ),
-                        ),
-
-// Waktu Selesai
-
-                        const SizedBox(height: 16),
-
-                        // Waktu Selesai
-                        const Text(
-                          'Waktu Selesai',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: neutral900,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        GestureDetector(
-                          onTap: () async {
-                            if (_selectedOfficer == null) {
-                              showCustomSnackbar(
-                                context: context,
-                                title: 'Perhatian',
-                                subtitle:
-                                    'Silakan pilih petugas terlebih dahulu untuk menentukan waktu patroli',
-                                type: SnackbarType.warning,
-                              );
-                              return;
-                            }
-
-                            // Pilih tanggal terlebih dahulu
-                            final selectedDate = await showDatePicker(
-                              context: context,
-                              initialDate: _assignedEndTime,
-                              firstDate: DateTime.now(),
-                              lastDate:
-                                  DateTime.now().add(const Duration(days: 365)),
-                            );
-
-                            if (selectedDate != null) {
-                              // Tampilkan time picker
-                              final selectedTime = await showTimePicker(
-                                context: context,
-                                initialTime:
-                                    TimeOfDay.fromDateTime(_assignedEndTime),
-                                builder: (BuildContext context, Widget? child) {
-                                  return MediaQuery(
-                                    data: MediaQuery.of(context).copyWith(
-                                      alwaysUse24HourFormat: true,
+                        child: _isCreatingSingle
+                            ? Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 3,
                                     ),
-                                    child: child!,
-                                  );
-                                },
-                              );
-
-                              if (selectedTime != null) {
-                                // Validasi jam yang dipilih sesuai shift
-                                bool isValidTime = _isTimeInShiftRange(
-                                    selectedTime, _selectedOfficer!.shift);
-
-                                if (!isValidTime) {
-                                  if (mounted) {
-                                    showCustomSnackbar(
-                                      context: context,
-                                      title: 'Waktu Tidak Valid',
-                                      subtitle: _getShiftTimeRangeMessage(
-                                          _selectedOfficer!.shift),
-                                      type: SnackbarType.danger,
-                                    );
-                                  }
-                                  return;
-                                }
-
-                                DateTime newEndTime = DateTime(
-                                  selectedDate.year,
-                                  selectedDate.month,
-                                  selectedDate.day,
-                                  selectedTime.hour,
-                                  selectedTime.minute,
-                                );
-
-                                // Untuk shift malam, jika jam lebih kecil dari 7, artinya ini adalah dini hari (pagi berikutnya)
-                                if (_selectedOfficer!.shift == 'Malam' &&
-                                    selectedTime.hour < 7) {
-                                  newEndTime =
-                                      newEndTime.add(const Duration(days: 1));
-                                }
-
-                                // Pastikan waktu selesai setelah waktu mulai
-                                if (newEndTime.isBefore(_assignedStartTime) ||
-                                    newEndTime
-                                        .isAtSameMomentAs(_assignedStartTime)) {
-                                  showCustomSnackbar(
-                                    context: context,
-                                    title: 'Waktu Tidak Valid',
-                                    subtitle:
-                                        'Waktu selesai harus setelah waktu mulai',
-                                    type: SnackbarType.danger,
-                                  );
-                                  return;
-                                }
-
-                                setState(() {
-                                  _assignedEndTime = newEndTime;
-                                });
-                              }
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: kbpBlue900),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  DateFormat('dd/MM/yyyy - HH:mm')
-                                      .format(_assignedEndTime),
-                                  style: const TextStyle(fontSize: 16),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Membuat Tugas...',
+                                    style: boldTextStyle(
+                                      color: Colors.white,
+                                      size: 16,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Text(
+                                'Buat Tugas Patroli',
+                                style: boldTextStyle(
+                                  color: Colors.white,
+                                  size: 16,
                                 ),
-                                const Icon(Icons.calendar_today,
-                                    color: kbpBlue900),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
+                              ),
+                      ),
                     ),
                   ),
+                ],
+              ),
 
-                  const SizedBox(height: 16),
-
-                  // Titik Patroli
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    color: Colors.white,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              // Multiple Task Tab
+              Column(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Text(
-                              'Titik Patroli',
+                              'Tambahkan Tugas ke Daftar',
                               style: boldTextStyle(size: 18),
                             ),
-                            ElevatedButton.icon(
-                              onPressed: () {
+                            const SizedBox(height: 16),
+                            _buildTaskForm(
+                              formKey: _multipleTaskFormKey,
+                              selectedClusterId: _multiSelectedClusterId,
+                              onClusterChanged: (value) {
                                 setState(() {
-                                  _isMapExpanded = true;
+                                  _multiSelectedClusterId = value;
+                                  if (value != null) {
+                                    final selectedCluster = clusters.firstWhere(
+                                      (cluster) => cluster.id == value,
+                                      orElse: () => User(
+                                          id: '',
+                                          email: '',
+                                          name: '',
+                                          role: ''),
+                                    );
+                                    if (selectedCluster.id.isNotEmpty) {
+                                      _multiSelectedClusterName =
+                                          selectedCluster.name;
+                                    }
+                                  }
+                                  _multiSelectedOfficerId = null;
+                                  _multiSelectedOfficer = null;
+                                  _multiSelectedPoints.clear();
                                 });
                               },
-                              icon: const Icon(Icons.fullscreen,
-                                  color: Colors.white, size: 16),
-                              label: const Text('Perbesar Peta'),
+                              selectedOfficerId: _multiSelectedOfficerId,
+                              onOfficerChanged: (value) {
+                                setState(() {
+                                  _multiSelectedOfficerId = value;
+                                  if (value != null) {
+                                    _updateSelectedOfficer(
+                                        value, filteredOfficersMulti,
+                                        isMulti: true);
+                                  }
+                                });
+                              },
+                              assignedStartTime: _multiAssignedStartTime,
+                              onStartTimeChanged: (newTime) {
+                                setState(() {
+                                  _multiAssignedStartTime = newTime;
+                                  _updateEndTimeBasedOnStartTime(
+                                      _multiAssignedStartTime,
+                                      _multiSelectedOfficer, (endTime) {
+                                    setState(() {
+                                      _multiAssignedEndTime = endTime;
+                                    });
+                                  });
+                                });
+                              },
+                              assignedEndTime: _multiAssignedEndTime,
+                              onEndTimeChanged: (newTime) {
+                                setState(() {
+                                  _multiAssignedEndTime = newTime;
+                                });
+                              },
+                              selectedPoints: _multiSelectedPoints,
+                              onMapTap: (position) {
+                                setState(() {
+                                  _multiSelectedPoints.add(position);
+                                });
+                              },
+                              onRemoveLastPoint: () {
+                                setState(() {
+                                  if (_multiSelectedPoints.isNotEmpty) {
+                                    _multiSelectedPoints.removeLast();
+                                  }
+                                });
+                              },
+                              onExpandMap: () {
+                                // For multiple tab, we don't expand the map in the same way,
+                                // but we could open a dedicated map picker if needed.
+                                showCustomSnackbar(
+                                  context: context,
+                                  title: 'Info',
+                                  subtitle:
+                                      'Fitur perbesar peta tidak tersedia di mode multiple task. Silakan gunakan peta di bawah untuk memilih titik.',
+                                  type: SnackbarType.warning,
+                                );
+                              },
+                              mapController:
+                                  null, // No dedicated map controller for this small map
+                              markers: {}, // No markers for this small map
+                              clusters: clusters,
+                              filteredOfficers: filteredOfficersMulti,
+                              addClusterCoordsToMap: (coords) {
+                                setState(() {
+                                  _multiSelectedPoints.clear();
+                                  for (var coord in coords) {
+                                    _multiSelectedPoints
+                                        .add(LatLng(coord[0], coord[1]));
+                                  }
+                                });
+                              },
+                              currentSelectedOfficer: _multiSelectedOfficer,
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: _addStagedTask,
+                              icon: const Icon(Icons.add, color: Colors.white),
+                              label: const Text('Tambahkan ke Daftar Tugas'),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: kbpBlue900,
+                                backgroundColor: kbpBlue700,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Klik pada peta untuk menentukan titik-titik patroli.',
-                          style: TextStyle(color: neutral600),
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          height: 250,
-                          decoration: BoxDecoration(
-                            border: Border.all(color: kbpBlue300),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Stack(
-                              children: [
-                                MapSection(
-                                  mapController: _mapController,
-                                  markers: _markers,
-                                  onMapTap: _handleMapTap,
-                                ),
-                                Positioned(
-                                  right: 8,
-                                  top: 8,
-                                  child: FloatingActionButton.small(
-                                    heroTag: 'expand_map',
-                                    backgroundColor: Colors.white,
-                                    foregroundColor: kbpBlue900,
-                                    onPressed: () {
-                                      setState(() {
-                                        _isMapExpanded = true;
-                                      });
-                                    },
-                                    child: const Icon(Icons.fullscreen),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
+                            const SizedBox(height: 24),
                             Text(
-                              'Titik dipilih: ${_selectedPoints.length}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w500,
-                                color: neutral700,
+                              'Daftar Tugas yang Akan Ditetapkan',
+                              style: boldTextStyle(size: 18),
+                            ),
+                            const SizedBox(height: 16),
+                            _stagedTasks.isEmpty
+                                ? const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16.0),
+                                      child: Text(
+                                        'Belum ada tugas dalam daftar.',
+                                        style: TextStyle(
+                                            fontStyle: FontStyle.italic,
+                                            color: neutral600),
+                                      ),
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    shrinkWrap: true,
+                                    physics:
+                                        const NeverScrollableScrollPhysics(),
+                                    itemCount: _stagedTasks.length,
+                                    itemBuilder: (context, index) {
+                                      final task = _stagedTasks[index];
+
+                                      // PERBAIKAN: Gunakan userId atau officerId untuk mencari officer
+                                      final String officerIdToFind =
+                                          task.officerId ?? task.userId ?? '';
+
+                                      print('DEBUG ListView.builder:');
+                                      print(
+                                          '  - task.officerId: ${task.officerId}');
+                                      print('  - task.userId: ${task.userId}');
+                                      print(
+                                          '  - officerIdToFind: $officerIdToFind');
+                                      print(
+                                          '  - task.officerName: ${task.officerName}');
+
+                                      final officer = officers.firstWhere(
+                                        (o) => o.id == officerIdToFind,
+                                        orElse: () {
+                                          print(
+                                              '  - Officer not found in officers list');
+                                          return Officer(
+                                            id: officerIdToFind,
+                                            name: task.officerName ??
+                                                'Unknown Officer', // PERBAIKAN: Gunakan officerName dari task
+                                            type: OfficerType.organik,
+                                            shift: ShiftType.pagi,
+                                            clusterId: task.clusterId,
+                                          );
+                                        },
+                                      );
+
+                                      print(
+                                          '  - Final officer.name: ${officer.name}');
+
+                                      return Card(
+                                        margin:
+                                            const EdgeInsets.only(bottom: 8.0),
+                                        elevation: 2,
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(12.0),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      '${task.clusterName ?? 'N/A'} - ${officer.name}',
+                                                      style: boldTextStyle(
+                                                          size: 16),
+                                                    ),
+                                                    Text(
+                                                      'Waktu: ${DateFormat('HH:mm').format(task.assignedStartTime!)} - ${DateFormat('HH:mm').format(task.assignedEndTime!)}',
+                                                      style: mediumTextStyle(
+                                                          size: 14,
+                                                          color: neutral700),
+                                                    ),
+                                                    Text(
+                                                      'Titik: ${task.assignedRoute!.length}',
+                                                      style: mediumTextStyle(
+                                                          size: 14,
+                                                          color: neutral700),
+                                                    ),
+                                                    // TAMBAHAN: Debug info
+                                                    if (officerIdToFind
+                                                        .isNotEmpty) ...[
+                                                      Text(
+                                                        'Officer ID: $officerIdToFind',
+                                                        style: TextStyle(
+                                                            fontSize: 10,
+                                                            color: neutral500),
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(Icons.delete,
+                                                    color: Colors.red),
+                                                onPressed: () =>
+                                                    _removeStagedTask(index),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                            const SizedBox(height: 24),
+                            Text(
+                              'Rentang Tanggal Penugasan',
+                              style: boldTextStyle(size: 18),
+                            ),
+                            const SizedBox(height: 16),
+                            GestureDetector(
+                              onTap: _pickDateRange,
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: kbpBlue900),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      _multipleStartDate == null
+                                          ? 'Pilih Rentang Tanggal (Maks 7 Hari)'
+                                          : '${DateFormat('dd/MM/yyyy').format(_multipleStartDate!)} - ${DateFormat('dd/MM/yyyy').format(_multipleEndDate!)}',
+                                      style: const TextStyle(fontSize: 16),
+                                    ),
+                                    const Icon(Icons.calendar_today,
+                                        color: kbpBlue900),
+                                  ],
+                                ),
                               ),
                             ),
-                            TextButton.icon(
-                              onPressed: _selectedPoints.isEmpty
+                            const SizedBox(height: 24),
+                            ElevatedButton(
+                              onPressed: (_isAssigningMultiple ||
+                                      _stagedTasks.isEmpty ||
+                                      _multipleStartDate == null)
                                   ? null
-                                  : () {
-                                      setState(() {
-                                        if (_selectedPoints.isNotEmpty) {
-                                          _selectedPoints.removeLast();
-                                          _updateMarkers();
-                                        }
-                                      });
-                                    },
-                              icon: const Icon(Icons.undo, size: 16),
-                              label: const Text('Hapus Titik Terakhir'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: kbpBlue900,
-                                disabledForegroundColor: neutral400,
+                                  : _assignMultipleTasks,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: kbpBlue900,
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                disabledBackgroundColor: neutral300,
                               ),
+                              child: _isAssigningMultiple
+                                  ? Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        const SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            color: Colors.white,
+                                            strokeWidth: 3,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Text(
+                                          'Menetapkan Tugas...',
+                                          style: boldTextStyle(
+                                            color: Colors.white,
+                                            size: 16,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Text(
+                                      'Tetapkan Tugas Berulang',
+                                      style: boldTextStyle(
+                                        color: Colors.white,
+                                        size: 16,
+                                      ),
+                                    ),
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // Tombol Buat Tugas
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: ElevatedButton(
-                      onPressed: _isCreating ? null : _submitTask,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kbpBlue900,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        disabledBackgroundColor: neutral300,
                       ),
-                      child: _isCreating
-                          ? Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 3,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  'Membuat Tugas...',
-                                  style: boldTextStyle(
-                                    color: Colors.white,
-                                    size: 16,
-                                  ),
-                                ),
-                              ],
-                            )
-                          : Text(
-                              'Buat Tugas Patroli',
-                              style: boldTextStyle(
-                                color: Colors.white,
-                                size: 16,
-                              ),
-                            ),
                     ),
                   ),
-
-                  const SizedBox(height: 24),
                 ],
               ),
-            ),
+            ],
           );
         },
       ),
     );
   }
 
-  // Ekstrak semua officers dari list cluster
   List<Officer> _getOfficersFromClusters(List<User> clusters) {
     List<Officer> allOfficers = [];
-
     for (var cluster in clusters) {
       if (cluster.officers != null && cluster.officers!.isNotEmpty) {
-        // Pastikan setiap officer mendapatkan clusterId jika belum ada
         for (var officer in cluster.officers!) {
           if (officer.clusterId.isEmpty) {
             final updatedOfficer = Officer(
               id: officer.id,
               name: officer.name,
-              type: officer.type, // Use the officer type
-              shift: officer.shift, // Use the officer shift
-              clusterId: cluster.id, // Set clusterId dari parent cluster
+              type: officer.type,
+              shift: officer.shift,
+              clusterId: cluster.id,
               photoUrl: officer.photoUrl,
             );
             allOfficers.add(updatedOfficer);
@@ -1496,95 +2501,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen> {
         }
       }
     }
-
     return allOfficers;
-  }
-
-  void _showStartTimePicker() async {
-    if (_selectedOfficer == null) {
-      showCustomSnackbar(
-        context: context,
-        title: 'Perhatian',
-        subtitle:
-            'Silakan pilih petugas terlebih dahulu untuk menentukan waktu patroli',
-        type: SnackbarType.warning,
-      );
-      return;
-    }
-
-    // Pilih tanggal terlebih dahulu
-    final selectedDate = await showDatePicker(
-      context: context,
-      initialDate: _assignedStartTime,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-
-    if (selectedDate != null) {
-      // Tentukan range waktu yang valid berdasarkan shift
-      TimeOfDay initialTime = TimeOfDay.fromDateTime(_assignedStartTime);
-
-      // Tampilkan time picker
-      final selectedTime = await showTimePicker(
-        context: context,
-        initialTime: initialTime,
-        builder: (BuildContext context, Widget? child) {
-          return MediaQuery(
-            data: MediaQuery.of(context).copyWith(
-              alwaysUse24HourFormat: true,
-            ),
-            child: child!,
-          );
-        },
-      );
-
-      if (selectedTime != null) {
-        // Validasi jam yang dipilih sesuai shift
-        bool isValidTime =
-            _isTimeInShiftRange(selectedTime, _selectedOfficer!.shift);
-
-        if (!isValidTime) {
-          if (mounted) {
-            showCustomSnackbar(
-              context: context,
-              title: 'Waktu Tidak Valid',
-              subtitle: _getShiftTimeRangeMessage(_selectedOfficer!.shift),
-              type: SnackbarType.danger,
-            );
-          }
-          return;
-        }
-
-        // PERBAIKAN: Gabungkan tanggal yang dipilih dengan waktu yang dipilih
-        final newStartDate = DateTime(
-          selectedDate.year,
-          selectedDate.month,
-          selectedDate.day,
-          selectedTime.hour,
-          selectedTime.minute,
-        );
-
-        // PERBAIKAN: Hanya tambahkan satu hari jika shift malam dan jam <7
-        DateTime finalStartDate = newStartDate;
-        if ((_selectedOfficer!.shift == ShiftType.malam ||
-                _selectedOfficer!.shift == ShiftType.malamPanjang) &&
-            selectedTime.hour < 7) {
-          // Untuk shift malam yang melewati tengah malam, tambahkan 1 hari jika jam < 7
-          finalStartDate = DateTime(
-            selectedDate.year,
-            selectedDate.month,
-            selectedDate.day,
-            selectedTime.hour,
-            selectedTime.minute,
-          );
-        }
-
-        setState(() {
-          _assignedStartTime = finalStartDate;
-          // Update juga waktu selesai
-          _updateEndTimeBasedOnStartTime();
-        });
-      }
-    }
   }
 }

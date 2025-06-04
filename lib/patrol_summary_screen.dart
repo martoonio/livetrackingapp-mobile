@@ -67,9 +67,11 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         if (clusterSnapshot.exists) {
           final clusterData = clusterSnapshot.value as Map<dynamic, dynamic>;
           setState(() {
-            _clusterValidationRadius = clusterData['checkpoint_validation_radius'] != null
-                ? (clusterData['checkpoint_validation_radius'] as num).toDouble()
-                : 50.0;
+            _clusterValidationRadius =
+                clusterData['checkpoint_validation_radius'] != null
+                    ? (clusterData['checkpoint_validation_radius'] as num)
+                        .toDouble()
+                    : 50.0;
           });
         }
       }
@@ -139,7 +141,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
 
   void _prepareRouteAndMarkers() {
     try {
-
       // Add assigned route markers and polyline
       if (widget.task.assignedRoute != null) {
         _addAssignedRouteMarkers();
@@ -150,12 +151,10 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
       if (widget.routePath.isNotEmpty) {
         _addActualRoutePath();
         _addStartEndMarkers();
-      } else {
-      }
+      } else {}
 
       setState(() {}); // Update UI
-    } catch (e, stackTrace) {
-    }
+    } catch (e, stackTrace) {}
   }
 
   void _addAssignedRouteMarkers() {
@@ -198,7 +197,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
         return LatLng(coord[0], coord[1]);
       }).toList();
 
-
       _polylines.add(
         Polyline(
           polylineId: const PolylineId('actual_route'),
@@ -208,9 +206,7 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
           visible: true, // Explicitly set visible
         ),
       );
-
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   void _addStartEndMarkers() {
@@ -218,7 +214,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
       if (widget.routePath.isEmpty) {
         return;
       }
-
 
       // Start marker
       _markers.add(
@@ -243,9 +238,7 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
           visible: true, // Explicitly set visible
         ),
       );
-
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   void _fitMapToRoute() {
@@ -258,13 +251,11 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
 
       mapController!
           .animateCamera(
-        CameraUpdate.newLatLngBounds(bounds, 100.0),
-      )
-          .then((_) {
-      }).catchError((e) {
-      });
-    } catch (e) {
-    }
+            CameraUpdate.newLatLngBounds(bounds, 100.0),
+          )
+          .then((_) {})
+          .catchError((e) {});
+    } catch (e) {}
   }
 
   LatLngBounds _calculateBounds() {
@@ -1037,8 +1028,8 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
                 _buildReportsSection(),
 
                 // Validation radius card (tambahan baru)
-                if (_clusterValidationRadius != null)
-                  _buildValidationRadiusCard(),
+                // if (_clusterValidationRadius != null)
+                //   _buildValidationRadiusCard(),
 
                 // Tampilkan foto final report jika ada
                 if (widget.finalReportPhotoUrl != null)
@@ -1117,80 +1108,6 @@ class _PatrolSummaryScreenState extends State<PatrolSummaryScreen> {
   }
 
   // Tambah method untuk build validation radius card
-  Widget _buildValidationRadiusCard() {
-    final radiusUsed = _clusterValidationRadius ?? 50.0;
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.gps_fixed, color: kbpBlue900),
-                const SizedBox(width: 8),
-                Text(
-                  'Radius Validasi Checkpoint',
-                  style: semiBoldTextStyle(size: 16),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [kbpBlue50, kbpBlue100],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: kbpBlue200),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        '${radiusUsed.toInt()}',
-                        style: boldTextStyle(size: 28, color: kbpBlue900),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'meter',
-                        style: mediumTextStyle(size: 14, color: kbpBlue700),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Toleransi jarak untuk validasi checkpoint pada patroli ini',
-                    style: regularTextStyle(size: 12, color: kbpBlue600),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   // Helper untuk mendapatkan batas peta
   LatLngBounds _getBounds(List<LatLng> points) {
