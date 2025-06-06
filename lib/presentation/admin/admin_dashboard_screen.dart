@@ -23,29 +23,210 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   DateTime? _filterStartDate;
   DateTime? _filterEndDate;
-  String _sortBy = 'assignedStartTime'; // 'assignedStartTime' atau 'createdAt'
-  bool _isDescending = true; // true = descending, false = ascending
+  String _sortBy = 'assignedStartTime';
+  bool _isDescending = true;
   bool _showFilterPanel = false;
 
   bool _isMultiSelectMode = false;
   Set<String> _selectedTaskIds = <String>{};
 
+  // PERBAIKAN: Simplify pagination variables
+  bool _isLoadingMore = false;
+  List<PatrolTask> _allLoadedTasks = [];
+
+  Map<String, int> _clusterTaskPages = {};
+  Map<String, bool> _clusterTaskLoading = {};
+  Map<String, List<PatrolTask>> _clusterTasksData = {};
+  Map<String, bool> _clusterHasMoreTasks = {};
+  Map<String, String?> _clusterLastKeys =
+      {}; // Tambahan untuk tracking last key
+  final int _tasksPerPage = 20;
+
+  Map<String, Map<String, int>> _clusterTaskCounts =
+      {}; // {clusterId: {active: x, cancelled: y}}
+  bool _isLoadingSummary = false;
+
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _initializeData();
   }
 
-  void _loadData() {
-    setState(() => _isLoading = true);
-    // Load clusters dan tasks
-    context.read<AdminBloc>().add(const LoadAllClusters());
+  void _initializeData() {
+    print('AdminDashboard: Initializing...');
     context.read<AdminBloc>().add(const LoadAllTasks());
-    setState(() => _isLoading = false);
+  }
+
+  // PERBAIKAN: Enhanced loadData with cluster tasks loading
+  void _loadData() {
+    if (mounted) {
+      setState(() => _isLoading = true);
+    }
+
+    // Clear semua data pagination dan summary
+    _clusterTasksData.clear();
+    _clusterTaskPages.clear();
+    _clusterHasMoreTasks.clear();
+    _clusterLastKeys.clear();
+    _clusterTaskLoading.clear();
+    _clusterTaskCounts.clear(); // Clear summary counts
+
+    // Trigger reload via bloc
+    context.read<AdminBloc>().add(const LoadAllTasks());
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadAllClusterSummaries(List<User> clusters) async {
+    if (_isLoadingSummary) return;
+
+    setState(() {
+      _isLoadingSummary = true;
+    });
+
+    try {
+      print('Loading task summary for ${clusters.length} clusters...');
+
+      // Load summary untuk semua cluster secara parallel
+      final futures =
+          clusters.map((cluster) => _loadClusterSummary(cluster.id));
+      await Future.wait(futures);
+
+      print('Completed loading all cluster summaries');
+    } catch (e) {
+      print('Error loading cluster summaries: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingSummary = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadClusterSummary(String clusterId) async {
+    try {
+      print('Loading summary for cluster: $clusterId');
+
+      // Fetch ALL tasks untuk cluster ini (tidak pakai pagination)
+      final allTasks = await context
+          .read<PatrolBloc>()
+          .repository
+          .getAllClusterTasks(clusterId);
+
+      // Filter dan hitung berdasarkan status
+      final activeTasks = allTasks
+          .where((task) => task.status.toLowerCase() == 'active')
+          .length;
+      final cancelledTasks = allTasks
+          .where((task) => task.status.toLowerCase() == 'cancelled')
+          .length;
+
+      if (mounted) {
+        setState(() {
+          _clusterTaskCounts[clusterId] = {
+            'active': activeTasks,
+            'cancelled': cancelledTasks,
+          };
+        });
+      }
+
+      print(
+          'Cluster $clusterId summary: $activeTasks active, $cancelledTasks cancelled');
+    } catch (e) {
+      print('Error loading summary for cluster $clusterId: $e');
+      // Set default counts jika error
+      if (mounted) {
+        setState(() {
+          _clusterTaskCounts[clusterId] = {
+            'active': 0,
+            'cancelled': 0,
+          };
+        });
+      }
+    }
+  }
+
+  Future<void> _loadClusterTasks(String clusterId,
+      {bool loadMore = false}) async {
+    if (_clusterTaskLoading[clusterId] == true) return;
+
+    setState(() {
+      _clusterTaskLoading[clusterId] = true;
+    });
+
+    try {
+      final currentPage = _clusterTaskPages[clusterId] ?? 0;
+      final newPage = loadMore ? currentPage + 1 : 0;
+      final lastKey = loadMore ? _clusterLastKeys[clusterId] : null;
+
+      print(
+          'Loading cluster tasks for $clusterId, page: $newPage, loadMore: $loadMore');
+
+      // PERBAIKAN: Single query dengan pagination yang proper
+      final tasks = await context.read<PatrolBloc>().repository.getClusterTasks(
+            clusterId,
+            limit: _tasksPerPage,
+            lastKey: lastKey, // Gunakan lastKey untuk pagination
+          );
+
+      // PERBAIKAN: Filter active dan cancelled di client side
+      final filteredTasks = tasks.where((task) {
+        return task.status.toLowerCase() == 'active' ||
+            task.status.toLowerCase() == 'cancelled';
+      }).toList();
+
+      print(
+          'Loaded ${tasks.length} tasks, filtered to ${filteredTasks.length} for cluster $clusterId');
+
+      if (mounted) {
+        setState(() {
+          if (loadMore) {
+            // Append to existing data
+            final currentTasks = _clusterTasksData[clusterId] ?? [];
+            _clusterTasksData[clusterId] = [...currentTasks, ...filteredTasks];
+          } else {
+            // Replace with new data
+            _clusterTasksData[clusterId] = filteredTasks;
+          }
+
+          _clusterTaskPages[clusterId] = newPage;
+
+          // PERBAIKAN: Proper hasMore detection
+          // Jika mendapat tasks kurang dari limit, berarti sudah habis
+          _clusterHasMoreTasks[clusterId] = tasks.length >= _tasksPerPage;
+
+          // Update last key untuk pagination berikutnya
+          if (tasks.isNotEmpty) {
+            _clusterLastKeys[clusterId] = tasks.last.taskId;
+          }
+
+          _clusterTaskLoading[clusterId] = false;
+        });
+      }
+
+      print(
+          'Updated state for cluster $clusterId: hasMore=${_clusterHasMoreTasks[clusterId]}, totalLoaded=${_clusterTasksData[clusterId]?.length ?? 0}');
+    } catch (e) {
+      print('Error loading cluster tasks for $clusterId: $e');
+      if (mounted) {
+        setState(() {
+          _clusterTaskLoading[clusterId] = false;
+        });
+      }
+    }
   }
 
   List<PatrolTask> _filterAndSortTasks(List<PatrolTask> tasks) {
     List<PatrolTask> filteredTasks = List.from(tasks);
+
+    // PERBAIKAN: Filter hanya task active dan cancelled
+    filteredTasks = filteredTasks.where((task) {
+      return task.status.toLowerCase() == 'active' ||
+          task.status.toLowerCase() == 'cancelled';
+    }).toList();
 
     // Filter berdasarkan tanggal
     if (_filterStartDate != null || _filterEndDate != null) {
@@ -118,37 +299,81 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       ),
       body: Column(
         children: [
-          if (_isMultiSelectMode) _buildMultiSelectInfoBar(),
+          if (_isMultiSelectMode)
+            Container(
+              height: 60, // Fixed height
+              child: _buildMultiSelectInfoBar(),
+            ),
+
+          // PERBAIKAN: Filter panel dengan height constraint
           AnimatedContainer(
             duration: const Duration(milliseconds: 300),
-            height: _showFilterPanel ? null : 0,
-            child: _showFilterPanel ? _buildFilterPanel() : null,
+            height: _showFilterPanel ? 300 : 0, // Fixed max height
+            child: _showFilterPanel
+                ? SingleChildScrollView(
+                    child: _buildFilterPanel(),
+                  )
+                : const SizedBox.shrink(),
           ),
+
+          // PERBAIKAN: Main content area dengan proper constraints
           Expanded(
-            child: BlocBuilder<AdminBloc, AdminState>(
+            child: BlocConsumer<AdminBloc, AdminState>(
+              listener: (context, state) {
+                // PERBAIKAN: Handle state changes
+                if (state is AdminError) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error: ${state.message}'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
               builder: (context, state) {
-                // if (state is AdminLoading || _isLoading) {
-                //   return Center(
-                //     child: Lottie.asset(
-                //       'assets/lottie/maps_loading.json',
-                //       width: 200,
-                //       height: 100,
-                //     ),
-                //   );
-                // }
+                // PERBAIKAN: Better state handling
+                if (state is AdminLoading) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize:
+                          MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
+                      children: [
+                        SizedBox(
+                          width: 200,
+                          height: 100,
+                          child: Lottie.asset(
+                            'assets/lottie/maps_loading.json',
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Memuat data dashboard...',
+                          style: mediumTextStyle(color: neutral600),
+                        ),
+                      ],
+                    ),
+                  );
+                }
 
                 if (state is AdminError) {
                   return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize:
+                          MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
                       children: [
                         const Icon(Icons.error_outline,
                             color: Colors.red, size: 48),
                         const SizedBox(height: 16),
-                        Text(
-                          'Error: ${state.message}',
-                          style: const TextStyle(color: Colors.red),
-                          textAlign: TextAlign.center,
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Text(
+                            'Error: ${state.message}',
+                            style: const TextStyle(color: Colors.red),
+                            textAlign: TextAlign.center,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         ElevatedButton(
@@ -164,38 +389,47 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   );
                 }
 
+                // PERBAIKAN: Handle AdminLoaded state
                 if (state is AdminLoaded) {
-                  final clusters = state.clusters;
-                  return Column(
-                    children: [
-                      _buildStatisticsCard(state),
-                      Expanded(
-                        child: clusters.isEmpty
-                            ? _buildEmptyState()
-                            : _buildClusterList(state),
-                      ),
-                    ],
+                  return RefreshIndicator(
+                    onRefresh: () async {
+                      _loadData();
+                    },
+                    child: _buildContent(state),
                   );
                 }
-                // else if (state is ClustersLoaded) {
-                //   // Jika hanya clusters yang sudah loaded, tampilkan UI khusus clusters
-                //   return Column(
-                //     children: [
-                //       _buildBasicStatisticsCard(state),
-                //       Expanded(
-                //         child: state.clusters.isEmpty
-                //             ? _buildEmptyState()
-                //             : _buildClusterListOnly(state.clusters),
-                //       ),
-                //     ],
-                //   );
-                // }
 
+                // PERBAIKAN: Handle ClustersLoaded state
+                if (state is ClustersLoaded) {
+                  return RefreshIndicator(
+                    onRefresh: () async {
+                      _loadData();
+                    },
+                    child: _buildClustersOnlyContent(state),
+                  );
+                }
+
+                // PERBAIKAN: Default loading state dengan constraints
                 return Center(
-                  child: Lottie.asset(
-                    'assets/lottie/maps_loading.json',
-                    width: 200,
-                    height: 100,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize:
+                        MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
+                    children: [
+                      SizedBox(
+                        width: 200,
+                        height: 100,
+                        child: Lottie.asset(
+                          'assets/lottie/maps_loading.json',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Menginisialisasi dashboard...',
+                        style: mediumTextStyle(color: neutral600),
+                      ),
+                    ],
                   ),
                 );
               },
@@ -217,6 +451,38 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               },
               child: const Icon(Icons.add, color: Colors.white),
             ),
+    );
+  }
+
+  // PERBAIKAN: Separate content builders
+  Widget _buildContent(AdminLoaded state) {
+    return CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        SliverToBoxAdapter(
+          child: _buildClusterList(state),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildClustersOnlyContent(ClustersLoaded state) {
+    return CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        SliverToBoxAdapter(
+          child: _buildBasicStatisticsCard(state),
+        ),
+        if (state.clusters.isEmpty)
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: _buildEmptyState(),
+          )
+        else
+          SliverToBoxAdapter(
+            child: _buildClusterListOnly(state.clusters),
+          ),
+      ],
     );
   }
 
@@ -266,9 +532,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     ];
   }
 
-  // TAMBAHAN: Multi-select info bar
   Widget _buildMultiSelectInfoBar() {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: kbpBlue50,
@@ -445,7 +711,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildClusterListOnly(List<User> clusters) {
+    if (clusters.isEmpty) {
+      return SizedBox(
+        height: 300, // Fixed height for empty state
+        child: _buildEmptyState(),
+      );
+    }
+
     return ListView.builder(
+      shrinkWrap: true, // PERBAIKAN: Add shrinkWrap
+      physics:
+          const NeverScrollableScrollPhysics(), // PERBAIKAN: Disable physics
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: clusters.length,
       itemBuilder: (context, index) {
@@ -461,25 +737,46 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildClusterList(AdminLoaded state) {
     final clusters = state.clusters;
+
+    if (clusters.isEmpty) {
+      return SizedBox(
+        height: 300,
+        child: _buildEmptyState(),
+      );
+    }
+
+    // TAMBAHAN: Load summary counts jika belum ada
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_clusterTaskCounts.isEmpty && !_isLoadingSummary) {
+        _loadAllClusterSummaries(clusters);
+      }
+    });
+
     return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: clusters.length,
       itemBuilder: (context, index) {
         final cluster = clusters[index];
 
-        // Filter tugas berdasarkan clusterId dan apply filter/sort
-        final clusterTasks = state.activeTasks
+        // Data untuk filter (dari AdminBloc state)
+        final clusterAllTasks = state.activeTasks
             .where((task) => task.clusterId == cluster.id)
             .toList();
 
-        final filteredActiveTasks = _filterAndSortTasks(clusterTasks);
+        final clusterActiveCancelledTasks = clusterAllTasks.where((task) {
+          return task.status.toLowerCase() == 'active' ||
+              task.status.toLowerCase() == 'cancelled';
+        }).toList();
 
-        return _buildClusterCard(
+        final filteredTasks = _filterAndSortTasks(clusterActiveCancelledTasks);
+
+        return _buildEnhancedClusterCard(
           cluster: cluster,
           index: index,
-          activeTasks: filteredActiveTasks,
-          totalActiveTasks:
-              clusterTasks.length, // TAMBAHAN: untuk menampilkan jumlah asli
+          summaryActiveTasks: filteredTasks,
+          totalActiveTasks: clusterActiveCancelledTasks.length,
         );
       },
     );
@@ -494,8 +791,848 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     });
   }
 
+  Widget _buildEnhancedClusterCard({
+    required User cluster,
+    required int index,
+    required List<PatrolTask> summaryActiveTasks,
+    int? totalActiveTasks,
+  }) {
+    final isExpanded = _expandedClusterIndex == index;
+    final officers = cluster.officers ?? [];
+    final isFiltered = _filterStartDate != null ||
+        _filterEndDate != null ||
+        _sortBy != 'assignedStartTime' ||
+        !_isDescending;
+
+    // Get paginated tasks for this cluster
+    final paginatedTasks = _clusterTasksData[cluster.id] ?? [];
+    final isLoadingTasks = _clusterTaskLoading[cluster.id] ?? false;
+    final hasMoreTasks = _clusterHasMoreTasks[cluster.id] ?? false;
+    final currentPage = _clusterTaskPages[cluster.id] ?? 0;
+
+    // PERBAIKAN: Gunakan summary count yang akurat
+    final clusterSummary = _clusterTaskCounts[cluster.id];
+    final actualActiveTasks = clusterSummary?['active'] ?? 0;
+    final actualCancelledTasks = clusterSummary?['cancelled'] ?? 0;
+    final totalTasks = actualActiveTasks + actualCancelledTasks;
+
+    // Calculate officer distribution
+    final organikOfficers =
+        officers.where((o) => o.type == OfficerType.organik).length;
+    final outsourceOfficers =
+        officers.where((o) => o.type == OfficerType.outsource).length;
+
+    // Calculate shift distribution
+    final pagiShift = officers.where((o) => o.shift == ShiftType.pagi).length;
+    final malamShift = officers.where((o) => o.shift == ShiftType.malam).length;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: isExpanded ? 4 : 2,
+      shadowColor: isExpanded
+          ? kbpBlue900.withOpacity(0.2)
+          : Colors.black.withOpacity(0.1),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: kbpBlue300,
+          width: 2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // PERBAIKAN: Header yang lebih menarik dan insightful
+          InkWell(
+            onTap: () {
+              setState(() {
+                if (_expandedClusterIndex == index) {
+                  _expandedClusterIndex = null;
+                } else {
+                  _expandedClusterIndex = index;
+                  // Load summary dan pagination data
+                  if (clusterSummary == null) {
+                    _loadClusterSummary(cluster.id);
+                  }
+                  if (_clusterTasksData[cluster.id] == null ||
+                      _clusterTasksData[cluster.id]!.isEmpty) {
+                    _loadClusterTasks(cluster.id);
+                  }
+                }
+              });
+            },
+            borderRadius: BorderRadius.vertical(
+              top: const Radius.circular(16),
+              bottom: isExpanded ? Radius.zero : const Radius.circular(16),
+            ),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: isExpanded
+                      ? [kbpBlue50, kbpBlue100.withOpacity(0.3)]
+                      : [Colors.white, neutralWhite],
+                ),
+                borderRadius: BorderRadius.vertical(
+                  top: const Radius.circular(16),
+                  bottom: isExpanded ? Radius.zero : const Radius.circular(16),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Top Row: Cluster name and actions
+                  Row(
+                    children: [
+                      // Cluster Icon & Name
+                      Expanded(
+                        child: Row(
+                          children: [
+                            // Dynamic cluster icon based on activity
+                            Container(
+                              width: 50,
+                              height: 50,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: _getClusterGradientColors(
+                                      actualActiveTasks, actualCancelledTasks),
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: _getClusterGradientColors(
+                                            actualActiveTasks,
+                                            actualCancelledTasks)[0]
+                                        .withOpacity(0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Icon(
+                                _getClusterIcon(
+                                    actualActiveTasks, actualCancelledTasks),
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+
+                            // Cluster name and subtitle
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    cluster.name,
+                                    style: boldTextStyle(
+                                        size: 16, color: neutral900),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _getClusterSubtitle(
+                                        officers.length, totalTasks),
+                                    style: mediumTextStyle(
+                                        size: 13, color: neutral600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Action buttons
+                      Row(
+                        children: [
+                          // View button
+                          // Container(
+                          //   decoration: BoxDecoration(
+                          //     color: kbpBlue50,
+                          //     borderRadius: BorderRadius.circular(12),
+                          //     border: Border.all(color: kbpBlue200),
+                          //   ),
+                          //   child: IconButton(
+                          //     icon: const Icon(Icons.visibility_outlined,
+                          //         color: kbpBlue700),
+                          //     onPressed: () {
+                          //       Navigator.push(
+                          //         context,
+                          //         MaterialPageRoute(
+                          //           builder: (_) => ClusterDetailScreen(
+                          //             clusterId: cluster.id,
+                          //             initialTab: 0,
+                          //           ),
+                          //         ),
+                          //       ).then((_) => _loadData());
+                          //     },
+                          //     tooltip: 'Lihat Detail',
+                          //   ),
+                          // ),
+                          // const SizedBox(width: 8),
+
+                          // Expand button
+                          Container(
+                            decoration: BoxDecoration(
+                              color: isExpanded ? kbpBlue100 : neutral200,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isExpanded ? kbpBlue300 : neutral300,
+                              ),
+                            ),
+                            child: IconButton(
+                              icon: AnimatedRotation(
+                                turns: isExpanded ? 0.5 : 0,
+                                duration: const Duration(milliseconds: 200),
+                                child: Icon(
+                                  Icons.keyboard_arrow_down,
+                                  color: isExpanded ? kbpBlue700 : neutral600,
+                                ),
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  if (_expandedClusterIndex == index) {
+                                    _expandedClusterIndex = null;
+                                  } else {
+                                    _expandedClusterIndex = index;
+                                    if (clusterSummary == null) {
+                                      _loadClusterSummary(cluster.id);
+                                    }
+                                    if (_clusterTasksData[cluster.id] == null ||
+                                        _clusterTasksData[cluster.id]!
+                                            .isEmpty) {
+                                      _loadClusterTasks(cluster.id);
+                                    }
+                                  }
+                                });
+                              },
+                              tooltip: isExpanded ? 'Tutup' : 'Buka Detail',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Statistics Row
+                  if (clusterSummary != null) ...[
+                    _buildClusterStatsRow(
+                      officers.length,
+                      organikOfficers,
+                      outsourceOfficers,
+                      actualActiveTasks,
+                      actualCancelledTasks,
+                      pagiShift,
+                      malamShift,
+                    ),
+                  ] else ...[
+                    // Loading state for statistics
+                    _buildLoadingStatsRow(),
+                  ],
+
+                  // Filter indicator (if active)
+                  if (isFiltered && summaryActiveTasks.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: warningY50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: warningY200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.filter_list, color: warningY300, size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Filter aktif: Menampilkan ${summaryActiveTasks.length} dari $totalTasks tugas',
+                              style:
+                                  mediumTextStyle(size: 12, color: warningY500),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  const SizedBox(height: 8),
+
+                  // Quick action hint
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: kbpBlue50.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          isExpanded
+                              ? Icons.keyboard_arrow_up
+                              : Icons.keyboard_arrow_down,
+                          color: kbpBlue600,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          isExpanded
+                              ? 'Tutup untuk menyembunyikan detail'
+                              : 'Ketuk untuk melihat detail tugas',
+                          style: mediumTextStyle(size: 11, color: kbpBlue600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Content - dengan info yang lebih detail
+          if (isExpanded) ...[
+            Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.transparent,
+                    kbpBlue200,
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+            // Bagian officer
+            Container(
+              color: neutral300,
+              padding: const EdgeInsets.all(16),
+              child: _buildOfficersSection(officers, cluster),
+            ),
+            // PERBAIKAN: Task section dengan summary dan pagination info
+            Container(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Tugas Aktif & Dibatalkan',
+                            style: semiBoldTextStyle(size: 16),
+                          ),
+                          // PERBAIKAN: Info yang lebih detail
+                          if (clusterSummary != null) ...[
+                            Text(
+                              'Total: $actualActiveTasks aktif, $actualCancelledTasks dibatalkan',
+                              style:
+                                  regularTextStyle(size: 12, color: neutral600),
+                            ),
+                            if (paginatedTasks.isNotEmpty) ...[
+                              Text(
+                                'Menampilkan ${paginatedTasks.length} tugas ${hasMoreTasks ? '(halaman ${currentPage + 1})' : '(semua)'}',
+                                style: regularTextStyle(
+                                    size: 11, color: neutral500),
+                              ),
+                            ],
+                          ],
+                          if (isLoadingTasks)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                'Memuat tugas...',
+                                style: regularTextStyle(
+                                    size: 12, color: kbpBlue600),
+                              ),
+                            ),
+                        ],
+                      ),
+                      Column(
+                        children: [
+                          TextButton.icon(
+                            onPressed: () => _loadClusterTasks(cluster.id),
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Refresh'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: kbpBlue900,
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const CreateTaskScreen(),
+                                ),
+                              ).then((_) => _loadData());
+                            },
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Tambah'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: kbpBlue900,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Summary info box dengan data akurat
+                  if (clusterSummary != null)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: kbpBlue50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: kbpBlue200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, color: kbpBlue600, size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: RichText(
+                              text: TextSpan(
+                                style: mediumTextStyle(
+                                    size: 12, color: kbpBlue700),
+                                children: [
+                                  const TextSpan(text: 'Total keseluruhan: '),
+                                  TextSpan(
+                                    text: '$actualActiveTasks aktif',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: successG300),
+                                  ),
+                                  const TextSpan(text: ', '),
+                                  TextSpan(
+                                    text: '$actualCancelledTasks dibatalkan',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: dangerR300),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Task list dengan pagination
+                  if (isLoadingTasks && paginatedTasks.isEmpty)
+                    Container(
+                      height: 100,
+                      child: const Center(
+                        child: CircularProgressIndicator(color: kbpBlue900),
+                      ),
+                    )
+                  else if (paginatedTasks.isEmpty)
+                    _buildEmptyTasksState(
+                        isFiltered: false, statusFilter: 'aktif dan dibatalkan')
+                  else
+                    Column(
+                      children: [
+                        // Task list
+                        ListView.builder(
+                          physics: const NeverScrollableScrollPhysics(),
+                          shrinkWrap: true,
+                          itemCount: paginatedTasks.length,
+                          itemBuilder: (context, taskIndex) {
+                            final task = paginatedTasks[taskIndex];
+                            final assignedOfficer =
+                                _findOfficerByUserId(officers, task.userId) ??
+                                    Officer(
+                                      id: task.userId ?? '',
+                                      name: task.officerName.isNotEmpty
+                                          ? task.officerName
+                                          : task.userId != null
+                                              ? 'Petugas ${task.userId!.substring(0, 4)}...'
+                                              : 'Tidak diketahui',
+                                      type: OfficerType.organik,
+                                      shift: ShiftType.pagi,
+                                      clusterId: cluster.id,
+                                    );
+
+                            return _buildEnhancedTaskCard(
+                                task, assignedOfficer);
+                          },
+                        ),
+
+                        // Load more section
+                        if (hasMoreTasks || isLoadingTasks)
+                          Container(
+                            margin: const EdgeInsets.symmetric(vertical: 12),
+                            child: Column(
+                              children: [
+                                Container(
+                                  height: 1,
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.transparent,
+                                        kbpBlue200,
+                                        Colors.transparent,
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                if (isLoadingTasks)
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          color: kbpBlue900,
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        'Memuat lebih banyak tugas...',
+                                        style: mediumTextStyle(
+                                            size: 12, color: kbpBlue600),
+                                      ),
+                                    ],
+                                  )
+                                else if (hasMoreTasks)
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () => _loadClusterTasks(
+                                          cluster.id,
+                                          loadMore: true),
+                                      icon: const Icon(Icons.expand_more,
+                                          size: 18),
+                                      label: Text(
+                                          'Lihat ${_tasksPerPage} Tugas Lagi'),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: kbpBlue900,
+                                        side: BorderSide(
+                                            color: kbpBlue300, width: 1.5),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 12),
+                                      ),
+                                    ),
+                                  ),
+                                if (hasMoreTasks)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: Text(
+                                      'Halaman ${currentPage + 1} • ${paginatedTasks.length} dari ${actualActiveTasks + actualCancelledTasks} total',
+                                      style: regularTextStyle(
+                                          size: 11, color: neutral500),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+
+                        // End of list indicator
+                        if (!hasMoreTasks &&
+                            paginatedTasks.isNotEmpty &&
+                            !isLoadingTasks)
+                          Container(
+                            margin: const EdgeInsets.symmetric(vertical: 12),
+                            child: Column(
+                              children: [
+                                Container(
+                                  height: 1,
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.transparent,
+                                        neutral300,
+                                        Colors.transparent,
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.check_circle_outline,
+                                        color: successG500, size: 16),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Menampilkan semua ${paginatedTasks.length} tugas',
+                                      style: mediumTextStyle(
+                                          size: 12, color: successG300),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  List<Color> _getClusterGradientColors(int activeTasks, int cancelledTasks) {
+    if (activeTasks > 0 && cancelledTasks == 0) {
+      // All active - green gradient
+      return [successG500, successG300];
+    } else if (activeTasks == 0 && cancelledTasks > 0) {
+      // All cancelled - red gradient
+      return [dangerR500, dangerR300];
+    } else if (activeTasks > 0 && cancelledTasks > 0) {
+      // Mixed - blue gradient
+      return [kbpBlue600, kbpBlue700];
+    } else {
+      // No tasks - neutral gradient
+      return [neutral500, neutral600];
+    }
+  }
+
+  IconData _getClusterIcon(int activeTasks, int cancelledTasks) {
+    if (activeTasks > 0 && cancelledTasks == 0) {
+      return Icons.trending_up; // All good
+    } else if (activeTasks == 0 && cancelledTasks > 0) {
+      return Icons.warning; // Issues
+    } else if (activeTasks > 0 && cancelledTasks > 0) {
+      return Icons.analytics; // Mixed status
+    } else {
+      return Icons.location_city; // Default
+    }
+  }
+
+  String _getClusterSubtitle(int officerCount, int totalTasks) {
+    if (officerCount == 0) {
+      return 'Belum ada petugas • Tidak ada tugas';
+    } else if (totalTasks == 0) {
+      return '$officerCount petugas • Belum ada tugas';
+    } else {
+      return '$officerCount petugas • $totalTasks tugas total';
+    }
+  }
+
+  Widget _buildClusterStatsRow(
+    int totalOfficers,
+    int organikOfficers,
+    int outsourceOfficers,
+    int activeTasks,
+    int cancelledTasks,
+    int pagiShift,
+    int malamShift,
+  ) {
+    return Row(
+      children: [
+        // Officer stats
+        Expanded(
+          child: _buildStatCard(
+            'Petugas',
+            totalOfficers.toString(),
+            '${organikOfficers}O • ${outsourceOfficers}S',
+            Icons.people,
+            kbpBlue600,
+          ),
+        ),
+        const SizedBox(width: 12),
+
+        // Task stats
+        Expanded(
+          child: _buildStatCard(
+            'Tugas',
+            '${activeTasks + cancelledTasks}',
+            '${activeTasks}A • ${cancelledTasks}D',
+            Icons.assignment,
+            activeTasks > cancelledTasks
+                ? successG500
+                : cancelledTasks > activeTasks
+                    ? dangerR500
+                    : neutral600,
+          ),
+        ),
+        // const SizedBox(width: 12),
+
+        // // Shift stats
+        // Expanded(
+        //   child: _buildStatCard(
+        //     'Shift',
+        //     totalOfficers > 0 ? '${pagiShift}:${malamShift}' : '0:0',
+        //     'Pagi:Malam',
+        //     Icons.schedule,
+        //     warningY500,
+        //   ),
+        // ),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(
+    String title,
+    String value,
+    String subtitle,
+    IconData icon,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 16),
+              const SizedBox(width: 4),
+              Text(
+                title,
+                style: mediumTextStyle(size: 11, color: color),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: boldTextStyle(size: 18, color: color),
+          ),
+          Text(
+            subtitle,
+            style: mediumTextStyle(size: 9, color: color.withOpacity(0.7)),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingStatsRow() {
+    return Row(
+      children: List.generate(
+        3,
+        (index) => Expanded(
+          child: Container(
+            margin: EdgeInsets.only(right: index < 2 ? 12 : 0),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: neutral300,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: neutral200),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: 60,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: neutral300,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: 40,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: neutral300,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  width: 50,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: neutral300,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoChip(String text, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 12),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: mediumTextStyle(size: 10, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // TAMBAHAN: Widget untuk menampilkan status count
+  Widget _buildStatusCount(String label, int count, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '$label: $count',
+          style: mediumTextStyle(size: 11, color: neutral600),
+        ),
+      ],
+    );
+  }
+
   Widget _buildFilterPanel() {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -508,6 +1645,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header
@@ -541,6 +1679,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             children: [
               Expanded(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
@@ -551,8 +1690,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     InkWell(
                       onTap: () => _selectStartDate(context),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                        height: 40, // PERBAIKAN: Fixed height
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
                           border: Border.all(color: neutral300),
                           borderRadius: BorderRadius.circular(8),
@@ -593,6 +1732,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
@@ -603,8 +1743,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     InkWell(
                       onTap: () => _selectEndDate(context),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                        height: 40, // PERBAIKAN: Fixed height
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
                           border: Border.all(color: neutral300),
                           borderRadius: BorderRadius.circular(8),
@@ -652,6 +1792,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             children: [
               Expanded(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
@@ -660,6 +1801,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                     const SizedBox(height: 4),
                     Container(
+                      height: 40, // PERBAIKAN: Fixed height
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
                         border: Border.all(color: neutral300),
@@ -716,6 +1858,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
               const SizedBox(width: 12),
               Column(
+                mainAxisSize: MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
@@ -753,6 +1896,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               _sortBy != 'assignedStartTime' ||
               !_isDescending)
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: kbpBlue50,
@@ -760,6 +1904,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 border: Border.all(color: kbpBlue200),
               ),
               child: Column(
+                mainAxisSize: MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
@@ -1907,7 +3052,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           decoration: BoxDecoration(
             color: isActive
                 ? color
-                : (isPassed ? color.withOpacity(0.3) : neutral300),
+                : (isPassed ? color.withOpacity(0.3) : kbpBlue800),
             shape: BoxShape.circle,
             border: Border.all(
               color: color,
@@ -1933,7 +3078,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             size: 14,
             color: isActive
                 ? color
-                : (isPassed ? color.withOpacity(0.7) : neutral500),
+                : (isPassed ? color.withOpacity(0.7) : kbpBlue800),
           ),
         ),
 
@@ -1942,7 +3087,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           label,
           style: mediumTextStyle(
             size: 11,
-            color: isActive ? color.withOpacity(0.8) : neutral500,
+            color: isActive ? color.withOpacity(0.8) : kbpBlue800,
           ),
         ),
 
@@ -1951,7 +3096,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           date,
           style: regularTextStyle(
             size: 10,
-            color: neutral600,
+            color: kbpBlue500,
           ),
         ),
       ],
@@ -2118,8 +3263,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // NEW: Empty tasks state
-  Widget _buildEmptyTasksState({bool isFiltered = false}) {
+  Widget _buildEmptyTasksState(
+      {bool isFiltered = false, String statusFilter = 'aktif'}) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -2138,7 +3283,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           Text(
             isFiltered
                 ? 'Tidak ada tugas yang sesuai filter'
-                : 'Tidak ada tugas aktif',
+                : 'Tidak ada tugas $statusFilter',
             style: mediumTextStyle(size: 14, color: neutral600),
           ),
           const SizedBox(height: 4),

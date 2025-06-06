@@ -14,6 +14,13 @@ class LoadAllTasks extends AdminEvent {
   const LoadAllTasks();
 }
 
+// PERBAIKAN: Tambahkan event untuk loaded tasks
+class UpdateLoadedTasks extends AdminEvent {
+  final List<PatrolTask> tasks;
+
+  const UpdateLoadedTasks(this.tasks);
+}
+
 class GetClusterDetail extends AdminEvent {
   final String clusterId;
 
@@ -155,7 +162,7 @@ class AdminLoading extends AdminState {}
 // Loading state khusus untuk cluster
 class ClustersLoading extends AdminState {}
 
-// Perbaikan definisi AdminLoaded state
+// PERBAIKAN: AdminLoaded state dengan copyWith method
 class AdminLoaded extends AdminState {
   final List<PatrolTask> activeTasks;
   final List<PatrolTask> completedTasks;
@@ -170,6 +177,23 @@ class AdminLoaded extends AdminState {
     required this.vehicles,
     required this.clusters,
   });
+
+  // PERBAIKAN: Tambahkan copyWith method
+  AdminLoaded copyWith({
+    List<PatrolTask>? activeTasks,
+    List<PatrolTask>? completedTasks,
+    int? totalOfficers,
+    List<String>? vehicles,
+    List<User>? clusters,
+  }) {
+    return AdminLoaded(
+      activeTasks: activeTasks ?? this.activeTasks,
+      completedTasks: completedTasks ?? this.completedTasks,
+      totalOfficers: totalOfficers ?? this.totalOfficers,
+      vehicles: vehicles ?? this.vehicles,
+      clusters: clusters ?? this.clusters,
+    );
+  }
 }
 
 class AdminError extends AdminState {
@@ -284,6 +308,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
   AdminBloc({required this.repository}) : super(AdminInitial()) {
     // Register all event handlers
     on<LoadAllTasks>(_onLoadAllTasks);
+    on<UpdateLoadedTasks>(_onUpdateLoadedTasks); // PERBAIKAN: Tambahkan handler
     on<CreateTask>(_onCreateTask);
     on<LoadOfficersAndVehicles>(_onLoadOfficersAndVehicles);
     on<GetClusterDetail>(_onGetClusterDetail);
@@ -302,45 +327,81 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     on<DeleteClusterEvent>(_onDeleteCluster);
   }
 
-  // Updated _onLoadAllTasks method
+  // PERBAIKAN: Handler untuk UpdateLoadedTasks
+  Future<void> _onUpdateLoadedTasks(
+    UpdateLoadedTasks event,
+    Emitter<AdminState> emit,
+  ) async {
+    final currentState = state;
+    if (currentState is AdminLoaded) {
+      emit(currentState.copyWith(
+        activeTasks: event.tasks
+            .where((t) =>
+                t.status == 'active' ||
+                t.status == 'ongoing' ||
+                t.status == 'in_progress')
+            .toList(),
+        completedTasks: event.tasks
+            .where((t) => t.status == 'finished' || t.status == 'completed')
+            .toList(),
+      ));
+    }
+  }
+
+  // PERBAIKAN: Enhanced _onLoadAllTasks with better data loading
   Future<void> _onLoadAllTasks(
     LoadAllTasks event,
     Emitter<AdminState> emit,
   ) async {
     try {
-      // Pertahankan state sebelumnya jika ada
-      final currentState = state;
-      if (currentState is AdminLoaded) {
-        emit(currentState); // Emit state sebelumnya
-      } else {
-        emit(AdminLoading());
-      }
+      emit(AdminLoading());
 
-      // Muat data baru
-      final tasks = await repository.getAllTasks();
+      print('AdminBloc: Starting to load all data...');
 
-      // Load officers dari semua cluster
-      final clusters = await repository.getAllClusters();
+      // PERBAIKAN: Load data secara parallel
+      final futures = await Future.wait([
+        repository.getActiveTasks(limit: 200),
+        repository.getAllClusters(),
+        repository.getAllVehicles(),
+      ]);
 
-      // Hitung total officers dari semua cluster
+      final activeTasks = futures[0] as List<PatrolTask>;
+      final clusters = futures[1] as List<User>;
+      final vehicles = futures[2] as List<String>;
+
+      print('AdminBloc: Loaded ${activeTasks.length} active tasks');
+      print('AdminBloc: Loaded ${clusters.length} clusters');
+      print('AdminBloc: Loaded ${vehicles.length} vehicles');
+
+      // Calculate total officers
       int totalOfficers = 0;
       for (var cluster in clusters) {
-        if (cluster.officers != null) {
-          totalOfficers += cluster.officers!.length;
-        }
+        totalOfficers += (cluster.officers?.length ?? 0);
       }
 
-      final vehicles = await repository.getAllVehicles();
+      // PERBAIKAN: Load recent completed tasks
+      final allRecentTasks = await repository.getRecentTasks(limit: 100);
+      final completedTasks = allRecentTasks
+          .where((t) =>
+              t.status.toLowerCase() == 'finished' ||
+              t.status.toLowerCase() == 'completed')
+          .toList();
+
+      print('AdminBloc: Loaded ${completedTasks.length} completed tasks');
 
       emit(AdminLoaded(
-        activeTasks: tasks.where((t) => t.status == 'active').toList(),
-        completedTasks: tasks.where((t) => t.status == 'finished').toList(),
+        activeTasks: activeTasks,
+        completedTasks: completedTasks,
         totalOfficers: totalOfficers,
         vehicles: vehicles,
         clusters: clusters,
       ));
-    } catch (e) {
-      emit(AdminError(e.toString()));
+
+      print('AdminBloc: Data loading completed successfully');
+    } catch (e, stackTrace) {
+      print('Error in _onLoadAllTasks: $e');
+      print('StackTrace: $stackTrace');
+      emit(AdminError('Failed to load data: $e'));
     }
   }
 

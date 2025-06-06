@@ -31,8 +31,33 @@ abstract class RouteRepository {
   // Watch for changes in finished tasks
   Stream<List<PatrolTask>> watchFinishedTasks(String userId);
 
-  // Get all tasks (admin only)
+  // PERBAIKAN: Tambahkan method yang hilang
   Future<List<PatrolTask>> getAllTasks();
+
+  // PERBAIKAN: Tambahkan method untuk pagination
+  Future<List<PatrolTask>> getRecentTasks({
+    int limit = 50,
+    String? lastKey,
+  });
+
+  Future<List<PatrolTask>> getAllClusterTasks(String clusterId);
+
+  Future<List<PatrolTask>> getActiveAndCancelledTasks(String clusterId,
+      {int limit = 20});
+
+  // PERBAIKAN: Tambahkan method untuk query optimized
+  Future<List<PatrolTask>> getActiveTasks({int limit = 50});
+
+  Future<List<PatrolTask>> getOngoingTasks({int limit = 50});
+
+  Future<List<PatrolTask>> getTasksByDateRange({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? status,
+    String? clusterId,
+    int limit = 50,
+    String? lastKey,
+  });
 
   // Create new task
   Future<String> createTask({
@@ -47,14 +72,16 @@ abstract class RouteRepository {
   });
 
   // Get tasks for a specific cluster
-  Future<List<PatrolTask>> getClusterTasks(String clusterId);
+  Future<List<PatrolTask>> getClusterTasks(
+    String clusterId, {
+    int limit = 50,
+    String? status,
+    String? lastKey,
+  });
 
   // ---------------------------------------------
   // USER & OFFICER MANAGEMENT
   // ---------------------------------------------
-
-  // Get all officers (legacy method for backward compatibility)
-  // Future<List<Officer>> getAllOfficers();
 
   // Get all available vehicles
   Future<List<String>> getAllVehicles();

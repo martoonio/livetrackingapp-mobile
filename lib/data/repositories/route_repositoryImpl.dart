@@ -400,101 +400,84 @@ class RouteRepositoryImpl implements RouteRepository {
 
     try {
       if (value is String) {
-        // Handle string with microseconds
-        if (value.contains('.')) {
-          final parts = value.split('.');
-          final mainPart = parts[0];
-          final microPart = parts[1];
-
-          // Limit microseconds to 6 digits
-          final cleanMicroPart =
-              microPart.length > 6 ? microPart.substring(0, 6) : microPart;
-
-          return DateTime.parse('$mainPart.$cleanMicroPart');
-        }
         return DateTime.parse(value);
       } else if (value is int) {
         return DateTime.fromMillisecondsSinceEpoch(value);
+      } else if (value is Map && value['_seconds'] != null) {
+        // Firestore Timestamp format
+        return DateTime.fromMillisecondsSinceEpoch(
+            (value['_seconds'] as int) * 1000);
       }
-    } catch (e) {}
+    } catch (e) {
+      print('Error parsing datetime: $value, error: $e');
+    }
+
+    return null;
+  }
+
+  // PERBAIKAN: Safe route coordinates parsing
+  List<List<double>>? _parseRouteCoordinates(dynamic value) {
+    if (value == null) return null;
+
+    try {
+      if (value is List) {
+        return value
+            .map<List<double>>((point) {
+              if (point is List && point.length >= 2) {
+                return [
+                  (point[0] as num).toDouble(),
+                  (point[1] as num).toDouble(),
+                ];
+              }
+              return <double>[];
+            })
+            .where((point) => point.isNotEmpty)
+            .toList();
+      }
+    } catch (e) {
+      print('Error parsing route coordinates: $e');
+    }
+
     return null;
   }
 
   // Perbaiki metode _convertToPatrolTask untuk menangani semua properti penting
 
-  PatrolTask _convertToPatrolTask(Map<dynamic, dynamic> data) {
-    // Debug print
-    try {
-      final startTime = _parseDateTime(data['startTime']);
-      final assignedStartTime = _parseDateTime(data['assignedStartTime']);
-      final assignedEndTime = _parseDateTime(data['assignedEndTime']);
-      final status = data['status']?.toString() ?? 'active';
-
-      String timeliness = data['timeliness']?.toString() ??
-          determineTimelinessStatus(
-              assignedStartTime, startTime, assignedEndTime, status);
-      final task = PatrolTask(
-        taskId: data['taskId']?.toString() ?? '',
-        userId: data['userId']?.toString() ?? '',
-        // vehicleId: data['vehicleId']?.toString() ?? '',
-        officerName:
-            data['officerName']?.toString(), // Support for officer name
-        officerPhotoUrl:
-            data['officerPhotoUrl']?.toString(), // Support for officer photo
-        assignedRoute: data['assigned_route'] != null
-            ? (data['assigned_route'] as List)
-                .map((point) => (point as List)
-                    .map((coord) => (coord as num).toDouble())
-                    .toList())
-                .toList()
-            : null,
-        status: data['status']?.toString() ?? 'active',
-        timeliness: timeliness,
-        distance: data['distance'] != null
-            ? (data['distance'] as num).toDouble()
-            : null,
-        routePath: data['route_path'] != null
-            ? Map<String, dynamic>.from(data['route_path'] as Map)
-            : null,
-        createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
-        expiredAt: _parseDateTime(data['expiredAt']),
-        cancelledAt: _parseDateTime(data['cancelledAt']),
-        startTime: _parseDateTime(data['startTime']),
-        endTime: _parseDateTime(data['endTime']),
-        assignedStartTime: _parseDateTime(data['assignedStartTime']),
-        assignedEndTime: _parseDateTime(data['assignedEndTime']),
-        clusterId: data['clusterId']?.toString() ?? '', // Add clusterId support
-        finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
-        finalReportNote: data['finalReportNote']?.toString(),
-        finalReportTime: _parseDateTime(data['finalReportTime']),
-        initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
-        initialReportNote: data['initialReportNote']?.toString(),
-        initialReportTime: _parseDateTime(data['initialReportTime']),
-        mockLocationDetected: data['mockLocationDetected'] == true,
-        mockLocationCount: data['mockLocationCount'] is num
-            ? (data['mockLocationCount'] as num).toInt()
-            : 0,
-      );
-
-      return task;
-    } catch (e, stackTrace) {
-      // Debug print
-
-      // Return a default task instead of rethrowing
-      return PatrolTask(
-        taskId: data['taskId']?.toString() ?? '',
-        userId: data['userId']?.toString() ?? '',
-        // vehicleId: data['vehicleId']?.toString() ?? '',
-        assignedStartTime: data['assignedStartTime'] != null
-            ? _parseDateTime(data['assignedStartTime'])
-            : null,
-        assignedEndTime: data['assignedEndTime'] != null
-            ? _parseDateTime(data['assignedEndTime'])
-            : null,
-        status: 'error',
-        createdAt: DateTime.now(),
-      );
-    }
+  PatrolTask _convertToPatrolTask(Map<String, dynamic> data) {
+    return PatrolTask(
+      taskId: data['taskId']?.toString() ?? '',
+      userId: data['userId']?.toString() ??
+          data['assignedOfficerId']?.toString() ??
+          '',
+      status: data['status']?.toString() ?? 'unknown',
+      assignedStartTime: _parseDateTime(data['assignedStartTime']),
+      assignedEndTime: _parseDateTime(data['assignedEndTime']),
+      startTime: _parseDateTime(data['startTime']),
+      endTime: _parseDateTime(data['endTime']),
+      distance:
+          data['distance'] != null ? (data['distance'] as num).toDouble() : 0.0,
+      createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
+      assignedRoute: _parseRouteCoordinates(
+          data['assigned_route'] ?? data['assignedRoute']),
+      routePath: data['route_path'] != null
+          ? Map<String, dynamic>.from(data['route_path'] as Map)
+          : null,
+      clusterId: data['clusterId']?.toString() ?? '',
+      mockLocationDetected: data['mockLocationDetected'] == true,
+      mockLocationCount: data['mockLocationCount'] is num
+          ? (data['mockLocationCount'] as num).toInt()
+          : 0,
+      // Additional fields
+      finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
+      finalReportNote: data['finalReportNote']?.toString(),
+      finalReportTime: _parseDateTime(data['finalReportTime']),
+      initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
+      initialReportNote: data['initialReportNote']?.toString(),
+      initialReportTime: _parseDateTime(data['initialReportTime']),
+      // Officer info
+      officerName: data['officerName']?.toString() ?? '',
+      clusterName: data['clusterName']?.toString() ?? '',
+    );
   }
 
   @override
@@ -590,27 +573,325 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<List<PatrolTask>> getAllTasks() async {
     try {
-      await _checkAuth();
       final snapshot = await _database.child('tasks').get();
 
-      if (!snapshot.exists) {
+      if (!snapshot.exists || snapshot.value == null) {
+        print('No tasks found in database');
         return [];
       }
 
-      final tasksMap = Map<String, dynamic>.from(snapshot.value as Map);
-      final tasks = tasksMap.entries.map((entry) {
-        return _convertToPatrolTask({
-          ...entry.value as Map<dynamic, dynamic>,
-          'taskId': entry.key,
-        });
-      }).toList();
+      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
+      print('Found ${tasksMap.length} tasks in database');
 
-      // Sort by creation date, most recent first
-      tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      return tasks;
+      return _convertMapToTaskList(tasksMap);
     } catch (e) {
-      throw Exception('Failed to get tasks: $e');
+      print('Error in getAllTasks: $e');
+      return [];
+    }
+  }
+
+  @override
+  Future<List<PatrolTask>> getActiveTasks({int limit = 50}) async {
+    try {
+      // Query untuk active status
+      final activeSnapshot = await _database
+          .child('tasks')
+          .orderByChild('status')
+          .equalTo('active')
+          .limitToLast(limit)
+          .get();
+
+      // Query untuk ongoing status
+      final ongoingSnapshot = await _database
+          .child('tasks')
+          .orderByChild('status')
+          .equalTo('ongoing')
+          .limitToLast(limit)
+          .get();
+
+      List<PatrolTask> allTasks = [];
+
+      if (activeSnapshot.exists && activeSnapshot.value != null) {
+        final activeTasksMap = activeSnapshot.value as Map<dynamic, dynamic>;
+        allTasks.addAll(_convertMapToTaskList(activeTasksMap));
+      }
+
+      if (ongoingSnapshot.exists && ongoingSnapshot.value != null) {
+        final ongoingTasksMap = ongoingSnapshot.value as Map<dynamic, dynamic>;
+        allTasks.addAll(_convertMapToTaskList(ongoingTasksMap));
+      }
+
+      // Remove duplicates berdasarkan taskId
+      final Map<String, PatrolTask> uniqueTasks = {};
+      for (var task in allTasks) {
+        uniqueTasks[task.taskId] = task;
+      }
+
+      return uniqueTasks.values.toList();
+    } catch (e) {
+      print('Error in getActiveTasks: $e');
+      return [];
+    }
+  }
+
+  @override
+  Future<List<PatrolTask>> getOngoingTasks({int limit = 50}) async {
+    try {
+      final snapshot = await _database
+          .child('tasks')
+          .orderByChild('status')
+          .equalTo('ongoing')
+          .limitToLast(limit)
+          .get();
+
+      if (!snapshot.exists) return [];
+
+      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
+      return _convertMapToTaskList(tasksMap);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  @override
+  Future<List<PatrolTask>> getTasksByDateRange({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? status,
+    String? clusterId,
+    int limit = 50,
+    String? lastKey,
+  }) async {
+    try {
+      Query query = _database.child('tasks');
+
+      // Filter by date range using timestamp
+      final startTimestamp = startDate.millisecondsSinceEpoch;
+      final endTimestamp = endDate.millisecondsSinceEpoch;
+
+      if (status != null) {
+        query = query.orderByChild('status').equalTo(status);
+      } else {
+        query = query.orderByChild('createdAt');
+      }
+
+      if (lastKey != null) {
+        query = query.startAfter(lastKey);
+      }
+
+      query = query.limitToFirst(limit);
+
+      final snapshot = await query.get();
+      if (!snapshot.exists) return [];
+
+      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
+      final tasks = _convertMapToTaskList(tasksMap);
+
+      // Filter by date range locally (more efficient than complex queries)
+      return tasks.where((task) {
+        final taskTimestamp = task.createdAt.millisecondsSinceEpoch;
+        return taskTimestamp >= startTimestamp && taskTimestamp <= endTimestamp;
+      }).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  @override
+  Future<List<PatrolTask>> getClusterTasks(
+    String clusterId, {
+    int limit = 20,
+    String? status,
+    String? lastKey,
+  }) async {
+    try {
+      print(
+          'getClusterTasks called: clusterId=$clusterId, limit=$limit, status=$status, lastKey=$lastKey');
+
+      Query query =
+          _database.child('tasks').orderByChild('clusterId').equalTo(clusterId);
+
+      final snapshot = await query.get();
+
+      if (!snapshot.exists || snapshot.value == null) {
+        print('No tasks found for cluster $clusterId');
+        return [];
+      }
+
+      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
+      final allTasks = _convertMapToTaskList(tasksMap);
+
+      print('Found ${allTasks.length} total tasks for cluster $clusterId');
+
+      // PERBAIKAN: Filter by status if provided
+      List<PatrolTask> filteredTasks = allTasks;
+      if (status != null) {
+        filteredTasks = allTasks
+            .where((task) => task.status.toLowerCase() == status.toLowerCase())
+            .toList();
+        print('Filtered to ${filteredTasks.length} tasks with status $status');
+      }
+
+      // Sort by creation date (newest first) untuk konsistensi
+      filteredTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+      // PERBAIKAN: Apply pagination dengan lastKey
+      if (lastKey != null) {
+        final lastIndex =
+            filteredTasks.indexWhere((task) => task.taskId == lastKey);
+        if (lastIndex != -1 && lastIndex + 1 < filteredTasks.length) {
+          // Ambil tasks setelah lastKey
+          filteredTasks = filteredTasks.skip(lastIndex + 1).toList();
+          print(
+              'Applied lastKey pagination, starting from index ${lastIndex + 1}');
+        } else {
+          // LastKey tidak ditemukan atau sudah di akhir, return empty
+          print('LastKey not found or at end, returning empty list');
+          return [];
+        }
+      }
+
+      // Take only up to limit
+      final paginatedTasks = filteredTasks.take(limit).toList();
+
+      print('Returning ${paginatedTasks.length} tasks for cluster $clusterId');
+      return paginatedTasks;
+    } catch (e) {
+      print('Error in getClusterTasks for $clusterId: $e');
+      return [];
+    }
+  }
+
+  @override
+  Future<List<PatrolTask>> getActiveAndCancelledTasks(String clusterId,
+      {int limit = 20}) async {
+    try {
+      final snapshot = await _database
+          .child('tasks')
+          .orderByChild('clusterId')
+          .equalTo(clusterId)
+          .get();
+
+      if (!snapshot.exists || snapshot.value == null) {
+        return [];
+      }
+
+      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
+      final allTasks = _convertMapToTaskList(tasksMap);
+
+      // Filter hanya active dan cancelled
+      final filteredTasks = allTasks
+          .where((task) =>
+              task.status.toLowerCase() == 'active' ||
+              task.status.toLowerCase() == 'cancelled')
+          .toList();
+
+      // Sort by creation date (newest first)
+      filteredTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+      return filteredTasks.take(limit).toList();
+    } catch (e) {
+      print('Error getting active and cancelled tasks for $clusterId: $e');
+      return [];
+    }
+  }
+
+  List<PatrolTask> _convertMapToTaskList(Map<dynamic, dynamic> tasksMap) {
+    final tasks = <PatrolTask>[];
+
+    tasksMap.forEach((key, value) {
+      if (value is Map) {
+        try {
+          final taskData = Map<String, dynamic>.from(value);
+          taskData['taskId'] = key.toString();
+
+          // PERBAIKAN: Validasi data sebelum konversi
+          if (_isValidTaskData(taskData)) {
+            final task = _convertToPatrolTask(taskData);
+            tasks.add(task);
+          } else {
+            print('Invalid task data for key $key: missing required fields');
+          }
+        } catch (e) {
+          print('Error converting task $key: $e');
+          // Skip invalid tasks instead of failing
+        }
+      }
+    });
+
+    // Sort by creation date descending untuk konsistensi
+    tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    return tasks;
+  }
+
+  // TAMBAHAN: Method untuk mendapatkan ALL tasks dari cluster (tanpa pagination)
+@override
+Future<List<PatrolTask>> getAllClusterTasks(String clusterId) async {
+  try {
+    print('getAllClusterTasks called for: $clusterId');
+    
+    final snapshot = await _database
+        .child('tasks')
+        .orderByChild('clusterId')
+        .equalTo(clusterId)
+        .get();
+
+    if (!snapshot.exists || snapshot.value == null) {
+      print('No tasks found for cluster $clusterId');
+      return [];
+    }
+
+    final tasksMap = snapshot.value as Map<dynamic, dynamic>;
+    final allTasks = _convertMapToTaskList(tasksMap);
+    
+    print('Found ${allTasks.length} total tasks for cluster $clusterId');
+    return allTasks;
+  } catch (e) {
+    print('Error in getAllClusterTasks for $clusterId: $e');
+    return [];
+  }
+}
+
+  // PERBAIKAN: Enhanced validation
+  bool _isValidTaskData(Map<String, dynamic> taskData) {
+    return taskData['taskId'] != null &&
+        taskData['taskId'].toString().isNotEmpty &&
+        taskData['clusterId'] != null &&
+        taskData['clusterId'].toString().isNotEmpty;
+  }
+
+  // PERBAIKAN: Hapus getAllTasks() dan ganti dengan pagination
+  @override
+  Future<List<PatrolTask>> getRecentTasks({
+    int limit = 50,
+    String? lastKey,
+  }) async {
+    try {
+      print('getRecentTasks called: limit=$limit, lastKey=$lastKey');
+
+      Query query = _database.child('tasks').orderByKey();
+
+      if (lastKey != null) {
+        query = query.endBefore(lastKey);
+      }
+
+      query = query.limitToLast(limit);
+
+      final snapshot = await query.get();
+
+      if (!snapshot.exists || snapshot.value == null) {
+        print('No recent tasks found');
+        return [];
+      }
+
+      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
+      print('Found ${tasksMap.length} recent tasks');
+
+      return _convertMapToTaskList(tasksMap);
+    } catch (e) {
+      print('Error in getRecentTasks: $e');
+      return [];
     }
   }
 
@@ -994,24 +1275,6 @@ class RouteRepositoryImpl implements RouteRepository {
   }
 
 // Metode untuk mendapatkan semua tugas yang terkait dengan cluster tertentu
-  @override
-  Future<List<PatrolTask>> getClusterTasks(String clusterId) async {
-    try {
-      // Dapatkan semua petugas dari cluster
-      final officers = await getClusterOfficers(clusterId);
-      final officerIds = officers.map((o) => o.id).toList();
-
-      // Dapatkan semua tugas
-      final allTasks = await getAllTasks();
-
-      // Filter tugas berdasarkan petugas dalam cluster
-      return allTasks
-          .where((task) => officerIds.contains(task.userId))
-          .toList();
-    } catch (e) {
-      throw Exception('Failed to get cluster tasks: $e');
-    }
-  }
 
 // Metode untuk mencari cluster berdasarkan nama
   @override

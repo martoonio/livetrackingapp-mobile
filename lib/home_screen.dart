@@ -54,6 +54,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadUserData();
   }
 
+  
+
   void _startRefreshTimer() {
     // PERBAIKAN: Cancel timer sebelumnya dan cek mounted
     _refreshTimer?.cancel();
@@ -377,6 +379,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .child('tasks')
           .orderByChild('clusterId')
           .equalTo(clusterId)
+          .limitToLast(100)
           .get();
 
       // PERBAIKAN: Cek mounted setelah operasi async kedua

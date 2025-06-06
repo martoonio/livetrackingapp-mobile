@@ -115,17 +115,14 @@ class AdminMapScreenState extends State<AdminMapScreen> {
           _clusterFilters[clusterId] = true;
         }
       });
-
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Future<void> _loadMarkerIcons() async {
     try {
       _defaultIcon = await _getBitmapDescriptorFromAssetBytes(
           'assets/markers/default_marker.png', 120);
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   Future<BitmapDescriptor> _getBitmapDescriptorFromAssetBytes(
@@ -159,46 +156,48 @@ class AdminMapScreenState extends State<AdminMapScreen> {
     }
 
     final authState = context.read<AuthBloc>().state;
-    if (authState is! AuthAuthenticated) {
-      return;
-    }
+    if (authState is! AuthAuthenticated) return;
 
     try {
       _lastRefresh = DateTime.now();
 
-      final snapshot = await FirebaseDatabase.instance
+      // PERBAIKAN: Query hanya ongoing tasks
+      final ongoingSnapshot = await FirebaseDatabase.instance
           .ref()
           .child('tasks')
           .orderByChild('status')
           .equalTo('ongoing')
+          .limitToLast(100) // Limit untuk performa
           .get();
 
-      if (!snapshot.exists ||
-          (snapshot.value as Map<dynamic, dynamic>).isEmpty) {
-
-        final inProgressSnapshot = await FirebaseDatabase.instance
-            .ref()
-            .child('tasks')
-            .orderByChild('status')
-            .equalTo('in_progress')
-            .get();
-
-        if (inProgressSnapshot.exists && inProgressSnapshot.value != null) {
-          await _processTaskSnapshot(inProgressSnapshot);
-          return;
-        }
-
-        setState(() {
-          _isLoading = false;
-          _activeTasks.clear();
-          _markers.clear();
-          _polylines.clear();
-        });
+      if (ongoingSnapshot.exists && ongoingSnapshot.value != null) {
+        await _processTaskSnapshot(ongoingSnapshot);
         return;
       }
 
-      await _processTaskSnapshot(snapshot);
+      // Fallback ke in_progress jika tidak ada ongoing
+      final inProgressSnapshot = await FirebaseDatabase.instance
+          .ref()
+          .child('tasks')
+          .orderByChild('status')
+          .equalTo('in_progress')
+          .limitToLast(100)
+          .get();
+
+      if (inProgressSnapshot.exists && inProgressSnapshot.value != null) {
+        await _processTaskSnapshot(inProgressSnapshot);
+        return;
+      }
+
+      // Clear jika tidak ada data
+      setState(() {
+        _isLoading = false;
+        _activeTasks.clear();
+        _markers.clear();
+        _polylines.clear();
+      });
     } catch (e) {
+      print('Error loading active tasks: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -243,8 +242,7 @@ class AdminMapScreenState extends State<AdminMapScreen> {
             _taskRoutes[taskId] = routePath;
           }
         }
-      } catch (e) {
-      }
+      } catch (e) {}
     });
 
     if (mounted) {
@@ -340,8 +338,7 @@ class AdminMapScreenState extends State<AdminMapScreen> {
           }
         }
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   DateTime? _parseDateTime(dynamic value) {
@@ -362,8 +359,7 @@ class AdminMapScreenState extends State<AdminMapScreen> {
       } else if (value is int) {
         return DateTime.fromMillisecondsSinceEpoch(value);
       }
-    } catch (e) {
-    }
+    } catch (e) {}
     return null;
   }
 
@@ -528,8 +524,8 @@ class AdminMapScreenState extends State<AdminMapScreen> {
                                   Center(
                                 child: Text(
                                   task.officerName
-                                          .substring(0, 1)
-                                          .toUpperCase(),
+                                      .substring(0, 1)
+                                      .toUpperCase(),
                                   style: boldTextStyle(
                                       size: 18, color: kbpBlue900),
                                 ),
