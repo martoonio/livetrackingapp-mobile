@@ -39,6 +39,9 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _lifecycleListener = AppLifecycleListener(
       onStateChange: (state) {
+        // PERBAIKAN: Cek mounted sebelum operasi
+        if (!mounted) return;
+
         if (state == AppLifecycleState.resumed) {
           _startRefreshTimer();
         } else if (state == AppLifecycleState.paused) {
@@ -52,10 +55,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _startRefreshTimer() {
+    // PERBAIKAN: Cancel timer sebelumnya dan cek mounted
     _refreshTimer?.cancel();
+    if (!mounted) return;
+
     _refreshTimer = Timer.periodic(const Duration(seconds: 300), (timer) {
+      // PERBAIKAN: Cek mounted di dalam callback timer
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      _loadUserData();
+
+      // PERBAIKAN: Cek mounted sebelum show snackbar
       if (mounted) {
-        _loadUserData();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -77,13 +91,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    // PERBAIKAN: Proper cleanup di dispose
     _refreshTimer?.cancel();
+    _refreshTimer = null;
+    _taskSubscription?.cancel();
+    _taskSubscription = null;
     _lifecycleListener.dispose();
     super.dispose();
   }
 
+  // PERBAIKAN: Safe setState wrapper
+  void _safeSetState(VoidCallback fn) {
+    if (mounted) {
+      setState(fn);
+    }
+  }
+
   void _toggleOfficerExpanded(String officerId) {
-    setState(() {
+    _safeSetState(() {
       if (_expandedOfficers.contains(officerId)) {
         _expandedOfficers.remove(officerId);
       } else {
@@ -93,10 +118,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadUserData() async {
+    // PERBAIKAN: Early return jika widget sudah di-dispose
+    if (!mounted) return;
+
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) return;
 
-    setState(() {
+    _safeSetState(() {
       _isLoading = true;
     });
 
@@ -106,9 +134,15 @@ class _HomeScreenState extends State<HomeScreen> {
       if (_currentUser!.role == 'patrol') {
         await _loadClusterOfficerTasks();
 
+        // PERBAIKAN: Cek mounted sebelum operasi async lanjutan
+        if (!mounted) return;
+
         // Tambahkan pengecekan untuk task yang expired
         await _checkForExpiredTasks();
       } else {
+        // PERBAIKAN: Cek mounted sebelum bloc operations
+        if (!mounted) return;
+
         context
             .read<PatrolBloc>()
             .add(LoadPatrolHistory(userId: _currentUser!.id));
@@ -117,6 +151,9 @@ class _HomeScreenState extends State<HomeScreen> {
             .read<PatrolBloc>()
             .repository
             .getCurrentTask(_currentUser!.id);
+
+        // PERBAIKAN: Cek mounted setelah operasi async
+        if (!mounted) return;
 
         if (currentTask != null) {
           // Cek apakah task sudah melewati batas waktu
@@ -127,35 +164,44 @@ class _HomeScreenState extends State<HomeScreen> {
             // Update status task menjadi expired
             await _markTaskAsExpired(currentTask);
           } else {
-            context
-                .read<PatrolBloc>()
-                .add(UpdateCurrentTask(task: currentTask));
+            if (mounted) {
+              context
+                  .read<PatrolBloc>()
+                  .add(UpdateCurrentTask(task: currentTask));
 
-            if (currentTask.status == 'ongoing' ||
-                currentTask.status == 'in_progress' ||
-                currentTask.status == 'active') {
-              context.read<PatrolBloc>().add(ResumePatrol(
-                    task: currentTask,
-                    startTime: currentTask.startTime ?? DateTime.now(),
-                    currentDistance: currentTask.distance ?? 0.0,
-                  ));
+              if (currentTask.status == 'ongoing' ||
+                  currentTask.status == 'in_progress' ||
+                  currentTask.status == 'active') {
+                context.read<PatrolBloc>().add(ResumePatrol(
+                      task: currentTask,
+                      startTime: currentTask.startTime ?? DateTime.now(),
+                      currentDistance: currentTask.distance ?? 0.0,
+                    ));
+              }
             }
           }
-        } else {}
+        }
 
-        _startTaskStream();
+        // PERBAIKAN: Cek mounted sebelum start stream
+        if (mounted) {
+          _startTaskStream();
+        }
       }
     } catch (e, stack) {
+      // PERBAIKAN: Log error dengan lebih detail
+      print('Error in _loadUserData: $e');
+      print('Stack trace: $stack');
     } finally {
-      setState(() {
+      // PERBAIKAN: Safe setState untuk loading
+      _safeSetState(() {
         _isLoading = false;
       });
     }
   }
 
-// Metode baru untuk pengecekan expired tasks (untuk command center)
+  // PERBAIKAN: Check expired tasks dengan mounted check
   Future<void> _checkForExpiredTasks() async {
-    if (_currentUser?.role != 'patrol') return;
+    if (!mounted || _currentUser?.role != 'patrol') return;
 
     final now = DateTime.now();
     List<PatrolTask> expiredTasks = [];
@@ -171,6 +217,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // Update status di database
         try {
+          if (!mounted) return;
+
           await context.read<PatrolBloc>().repository.updateTask(
             task.taskId,
             {
@@ -185,18 +233,22 @@ class _HomeScreenState extends State<HomeScreen> {
             body:
                 'Petugas ${task.officerName} telah melewati batas waktu tugas',
           );
-        } catch (e) {}
+        } catch (e) {
+          print('Error updating expired task: $e');
+        }
       }
     }
 
     // Refresh task list jika ada yang expired
-    if (expiredTasks.isNotEmpty) {
+    if (expiredTasks.isNotEmpty && mounted) {
       await _loadClusterOfficerTasks();
     }
   }
 
-// Metode baru untuk menandai task sebagai expired (untuk officer)
+  // PERBAIKAN: Mark task as expired dengan mounted check
   Future<void> _markTaskAsExpired(PatrolTask task) async {
+    if (!mounted) return;
+
     final now = DateTime.now();
 
     try {
@@ -208,6 +260,8 @@ class _HomeScreenState extends State<HomeScreen> {
           'expiredAt': now.toIso8601String(),
         },
       );
+
+      if (!mounted) return;
 
       // Update task di bloc
       final updatedTask = task.copyWith(status: 'expired');
@@ -227,11 +281,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       }
-    } catch (e) {}
+    } catch (e) {
+      print('Error marking task as expired: $e');
+    }
   }
 
   Future<void> _loadClusterOfficerTasks() async {
-    if (_currentUser == null) {
+    if (!mounted || _currentUser == null) {
       return;
     }
 
@@ -243,8 +299,11 @@ class _HomeScreenState extends State<HomeScreen> {
           .child('users/$clusterId/officers')
           .get();
 
+      // PERBAIKAN: Cek mounted setelah operasi async
+      if (!mounted) return;
+
       if (!officerSnapshot.exists) {
-        setState(() {
+        _safeSetState(() {
           _upcomingTasks = [];
           _historyTasks = [];
           _isLoading = false;
@@ -264,7 +323,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
       } else {
-        setState(() {
+        _safeSetState(() {
           _upcomingTasks = [];
           _historyTasks = [];
           _isLoading = false;
@@ -309,7 +368,9 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           });
         }
-      } catch (e) {}
+      } catch (e) {
+        print('Error parsing officer data: $e');
+      }
 
       final taskSnapshot = await FirebaseDatabase.instance
           .ref()
@@ -317,6 +378,9 @@ class _HomeScreenState extends State<HomeScreen> {
           .orderByChild('clusterId')
           .equalTo(clusterId)
           .get();
+
+      // PERBAIKAN: Cek mounted setelah operasi async kedua
+      if (!mounted) return;
 
       List<PatrolTask> allHistoryTasks = [];
       List<PatrolTask> allUpcomingTasks = [];
@@ -327,7 +391,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (taskSnapshot.value is Map) {
           tasksData = taskSnapshot.value as Map<dynamic, dynamic>;
         } else {
-          setState(() {
+          _safeSetState(() {
             _upcomingTasks = [];
             _historyTasks = [];
             _isLoading = false;
@@ -379,7 +443,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 task.officerName = officerInfo[userId]!['name'].toString();
                 task.officerPhotoUrl =
                     officerInfo[userId]!['photo_url'].toString();
-              } else {}
+              }
 
               // Important: Check for active AND ongoing status
               if (status.toLowerCase() == 'finished' ||
@@ -392,10 +456,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   status.toLowerCase() == 'in_progress') {
                 allUpcomingTasks.add(task);
               }
-            } catch (e, stack) {}
+            } catch (e, stack) {
+              print('Error parsing task $taskId: $e');
+            }
           }
         });
-      } else {}
+      }
+
+      // PERBAIKAN: Cek mounted sebelum sorting dan setState
+      if (!mounted) return;
 
       // Sort tasks
       allHistoryTasks.sort((a, b) =>
@@ -405,42 +474,28 @@ class _HomeScreenState extends State<HomeScreen> {
           .compareTo(b.assignedStartTime ?? DateTime.now()));
 
       // Update state
-      setState(() {
+      _safeSetState(() {
         _historyTasks = allHistoryTasks;
         _upcomingTasks = allUpcomingTasks;
         _isLoading = false;
       });
     } catch (e, stack) {
-      setState(() {
+      print('Error in _loadClusterOfficerTasks: $e');
+      print('Stack trace: $stack');
+
+      _safeSetState(() {
         _isLoading = false;
       });
     }
   }
 
-  DateTime? _parseDateTime(dynamic value) {
-    if (value == null) return null;
-
-    try {
-      if (value is String) {
-        if (value.contains('.')) {
-          final parts = value.split('.');
-          final mainPart = parts[0];
-          final microPart = parts[1];
-
-          final cleanMicroPart =
-              microPart.length > 6 ? microPart.substring(0, 6) : microPart;
-
-          return DateTime.parse('$mainPart.$cleanMicroPart');
-        }
-        return DateTime.parse(value);
-      } else if (value is int) {
-        return DateTime.fromMillisecondsSinceEpoch(value);
-      }
-    } catch (e) {}
-    return null;
-  }
-
+  // PERBAIKAN: Start task stream dengan proper cleanup
   void _startTaskStream() {
+    // PERBAIKAN: Cancel existing subscription sebelum buat yang baru
+    _taskSubscription?.cancel();
+
+    if (!mounted) return;
+
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) {
       return;
@@ -455,118 +510,36 @@ class _HomeScreenState extends State<HomeScreen> {
     _taskSubscription =
         context.read<PatrolBloc>().repository.watchCurrentTask(userId).listen(
       (task) {
+        // PERBAIKAN: Cek mounted di dalam callback stream
         if (task != null && mounted) {
           _handleNewTask(task);
         }
       },
       onError: (error) {
+        print('Task stream error: $error');
         _taskSubscription?.cancel();
+        _taskSubscription = null;
+      },
+      onDone: () {
+        print('Task stream completed');
         _taskSubscription = null;
       },
     );
   }
 
   void _handleNewTask(PatrolTask task) {
+    if (!mounted) return;
+
     if (task.status == 'active') {
       _showTaskDialog(task);
     }
   }
 
-  void _showTaskDialog(PatrolTask task) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => TaskDetailDialog(
-        task: task,
-        onStart: () => _navigateToMap(task),
-      ),
-    );
-  }
-
-  void _navigateToMap(PatrolTask task) {
-    Navigator.pop(context);
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MapScreen(
-          task: task,
-          onStart: () {
-            context.read<PatrolBloc>().add(StartPatrol(
-                  task: task,
-                  startTime: DateTime.now(),
-                ));
-          },
-        ),
-      ),
-    );
-  }
-
-  // Perbaiki fungsi _showPatrolSummary untuk memastikan finalReportPhotoUrl diambil dengan benar
-  void _showPatrolSummary(PatrolTask task) {
-    try {
-      List<List<double>> convertedPath = [];
-
-      if (task.routePath != null && task.routePath is Map) {
-        final map = task.routePath as Map;
-
-        // Sort entries by timestamp
-        final sortedEntries = map.entries.toList()
-          ..sort((a, b) => (a.value['timestamp'] as String)
-              .compareTo(b.value['timestamp'] as String));
-
-        // Convert coordinates - KEEP SAME ORDER as MapScreen
-        convertedPath = sortedEntries.map((entry) {
-          final coordinates = entry.value['coordinates'] as List;
-          return [
-            (coordinates[0] as num).toDouble(), // latitude comes first
-            (coordinates[1] as num).toDouble(), // longitude comes second
-          ];
-        }).toList();
-
-        if (convertedPath.isNotEmpty) {}
-      }
-
-      if (convertedPath.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No route data available')),
-        );
-        return;
-      }
-
-      // PERBAIKAN: Tampilkan debug info dan ambil data finalReportPhotoUrl dari database secara langsung jika null
-      log('photo url summary: ${task.finalReportPhotoUrl}');
-
-      // PERBAIKAN: Refresh task dari database untuk memastikan data terbaru
-      _refreshTaskDataForSummary(task).then((updatedTask) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => PatrolSummaryScreen(
-              task:
-                  updatedTask ?? task, // Gunakan data yang diperbarui jika ada
-              routePath: convertedPath,
-              startTime:
-                  updatedTask?.startTime ?? task.startTime ?? DateTime.now(),
-              endTime: updatedTask?.endTime ?? task.endTime ?? DateTime.now(),
-              distance: updatedTask?.distance ?? task.distance ?? 0,
-              finalReportPhotoUrl:
-                  updatedTask?.finalReportPhotoUrl ?? task.finalReportPhotoUrl,
-              initialReportPhotoUrl: updatedTask?.initialReportPhotoUrl ??
-                  task.initialReportPhotoUrl,
-            ),
-          ),
-        );
-      });
-    } catch (e, stackTrace) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading patrol summary: $e')),
-      );
-    }
-  }
-
-// TAMBAHKAN: Fungsi baru untuk refresh data task langsung dari database
+  // PERBAIKAN: Tambahkan mounted check di refresh functions
   Future<PatrolTask?> _refreshTaskDataForSummary(
       PatrolTask originalTask) async {
+    if (!mounted) return null;
+
     try {
       // Ambil data task langsung dari Firebase
       final snapshot = await FirebaseDatabase.instance
@@ -575,56 +548,57 @@ class _HomeScreenState extends State<HomeScreen> {
           .child(originalTask.taskId)
           .get();
 
-      if (snapshot.exists) {
-        final data = snapshot.value as Map<dynamic, dynamic>;
+      if (!mounted || !snapshot.exists) return null;
 
-        // Cek apakah ada finalReportPhotoUrl
-        if (data.containsKey('finalReportPhotoUrl')) {
-        } else {}
+      final data = snapshot.value as Map<dynamic, dynamic>;
 
-        // Konversi data ke PatrolTask
-        final updatedTask = PatrolTask(
-          taskId: originalTask.taskId,
-          userId: data['userId']?.toString() ?? '',
-          // vehicleId: data['vehicleId']?.toString() ?? '',
-          status: data['status']?.toString() ?? '',
-          assignedStartTime: _parseDateTime(data['assignedStartTime']),
-          assignedEndTime: _parseDateTime(data['assignedEndTime']),
-          startTime: _parseDateTime(data['startTime']),
-          endTime: _parseDateTime(data['endTime']),
-          distance: data['distance'] != null
-              ? (data['distance'] as num).toDouble()
-              : null,
-          createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
-          assignedRoute: data['assigned_route'] != null
-              ? (data['assigned_route'] as List)
-                  .map((point) => (point as List)
-                      .map((coord) => (coord as num).toDouble())
-                      .toList())
-                  .toList()
-              : null,
-          routePath: data['route_path'] != null
-              ? Map<String, dynamic>.from(data['route_path'] as Map)
-              : null,
-          clusterId: data['clusterId']?.toString() ?? '',
-          // Tambahkan field baru yang dibutuhkan
-          finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
-          finalReportNote: data['finalReportNote']?.toString(),
-          finalReportTime: _parseDateTime(data['finalReportTime']),
-          initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
-          initialReportNote: data['initialReportNote']?.toString(),
-          initialReportTime: _parseDateTime(data['initialReportTime']),
-        );
+      // Cek apakah ada finalReportPhotoUrl
+      if (data.containsKey('finalReportPhotoUrl')) {
+      } else {}
 
-        // Set properti tambahan
-        updatedTask.officerName = originalTask.officerName;
-        updatedTask.officerPhotoUrl = originalTask.officerPhotoUrl;
+      // Konversi data ke PatrolTask
+      final updatedTask = PatrolTask(
+        taskId: originalTask.taskId,
+        userId: data['userId']?.toString() ?? '',
+        // vehicleId: data['vehicleId']?.toString() ?? '',
+        status: data['status']?.toString() ?? '',
+        assignedStartTime: _parseDateTime(data['assignedStartTime']),
+        assignedEndTime: _parseDateTime(data['assignedEndTime']),
+        startTime: _parseDateTime(data['startTime']),
+        endTime: _parseDateTime(data['endTime']),
+        distance: data['distance'] != null
+            ? (data['distance'] as num).toDouble()
+            : null,
+        createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
+        assignedRoute: data['assigned_route'] != null
+            ? (data['assigned_route'] as List)
+                .map((point) => (point as List)
+                    .map((coord) => (coord as num).toDouble())
+                    .toList())
+                .toList()
+            : null,
+        routePath: data['route_path'] != null
+            ? Map<String, dynamic>.from(data['route_path'] as Map)
+            : null,
+        clusterId: data['clusterId']?.toString() ?? '',
+        // Tambahkan field baru yang dibutuhkan
+        finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
+        finalReportNote: data['finalReportNote']?.toString(),
+        finalReportTime: _parseDateTime(data['finalReportTime']),
+        initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
+        initialReportNote: data['initialReportNote']?.toString(),
+        initialReportTime: _parseDateTime(data['initialReportTime']),
+      );
 
-        return updatedTask;
-      }
-    } catch (e) {}
+      // Set properti tambahan
+      updatedTask.officerName = originalTask.officerName;
+      updatedTask.officerPhotoUrl = originalTask.officerPhotoUrl;
 
-    return null;
+      return updatedTask;
+    } catch (e) {
+      print('Error refreshing task data: $e');
+      return null;
+    }
   }
 
   String _formatDuration(Duration duration) {
@@ -679,29 +653,33 @@ class _HomeScreenState extends State<HomeScreen> {
               _loadUserData();
               _startTaskStream();
 
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'Memperbarui data...',
-                    style: mediumTextStyle(color: Colors.white),
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Memperbarui data...',
+                      style: mediumTextStyle(color: Colors.white),
+                    ),
+                    backgroundColor: kbpBlue800,
+                    duration: const Duration(seconds: 1),
+                    behavior: SnackBarBehavior.floating,
+                    margin: const EdgeInsets.all(16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
-                  backgroundColor: kbpBlue800,
-                  duration: const Duration(seconds: 1),
-                  behavior: SnackBarBehavior.floating,
-                  margin: const EdgeInsets.all(16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              );
+                );
+              }
             },
           ),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: () async {
-          _loadUserData();
-          _startTaskStream();
+          if (mounted) {
+            _loadUserData();
+            _startTaskStream();
+          }
         },
         color: kbpBlue900,
         child: _isLoading
@@ -1289,7 +1267,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return successG500;
       case 'late':
         return warningY500;
-      case 'pastDue':
+      case 'pastdue':
         return dangerR500;
       default:
         return neutral500;
@@ -1302,7 +1280,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'Tepat Waktu';
       case 'late':
         return timeliness!;
-      case 'pastDue':
+      case 'pastdue':
         return 'Melewati Batas';
       default:
         return 'Belum Dimulai';
@@ -1751,6 +1729,121 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  void _showTaskDialog(PatrolTask task) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => TaskDetailDialog(
+        task: task,
+        onStart: () => _navigateToMap(task),
+      ),
+    );
+  }
+
+  void _navigateToMap(PatrolTask task) {
+    Navigator.pop(context);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MapScreen(
+          task: task,
+          onStart: () {
+            context.read<PatrolBloc>().add(StartPatrol(
+                  task: task,
+                  startTime: DateTime.now(),
+                ));
+          },
+        ),
+      ),
+    );
+  }
+
+  // Perbaiki fungsi _showPatrolSummary untuk memastikan finalReportPhotoUrl diambil dengan benar
+  void _showPatrolSummary(PatrolTask task) {
+    try {
+      List<List<double>> convertedPath = [];
+
+      if (task.routePath != null && task.routePath is Map) {
+        final map = task.routePath as Map;
+
+        // Sort entries by timestamp
+        final sortedEntries = map.entries.toList()
+          ..sort((a, b) => (a.value['timestamp'] as String)
+              .compareTo(b.value['timestamp'] as String));
+
+        // Convert coordinates - KEEP SAME ORDER as MapScreen
+        convertedPath = sortedEntries.map((entry) {
+          final coordinates = entry.value['coordinates'] as List;
+          return [
+            (coordinates[0] as num).toDouble(), // latitude comes first
+            (coordinates[1] as num).toDouble(), // longitude comes second
+          ];
+        }).toList();
+
+        if (convertedPath.isNotEmpty) {}
+      }
+
+      if (convertedPath.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No route data available')),
+        );
+        return;
+      }
+
+      // PERBAIKAN: Tampilkan debug info dan ambil data finalReportPhotoUrl dari database secara langsung jika null
+      log('photo url summary: ${task.finalReportPhotoUrl}');
+
+      // PERBAIKAN: Refresh task dari database untuk memastikan data terbaru
+      _refreshTaskDataForSummary(task).then((updatedTask) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PatrolSummaryScreen(
+              task:
+                  updatedTask ?? task, // Gunakan data yang diperbarui jika ada
+              routePath: convertedPath,
+              startTime:
+                  updatedTask?.startTime ?? task.startTime ?? DateTime.now(),
+              endTime: updatedTask?.endTime ?? task.endTime ?? DateTime.now(),
+              distance: updatedTask?.distance ?? task.distance ?? 0,
+              finalReportPhotoUrl:
+                  updatedTask?.finalReportPhotoUrl ?? task.finalReportPhotoUrl,
+              initialReportPhotoUrl: updatedTask?.initialReportPhotoUrl ??
+                  task.initialReportPhotoUrl,
+            ),
+          ),
+        );
+      });
+    } catch (e, stackTrace) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading patrol summary: $e')),
+      );
+    }
+  }
+
+  DateTime? _parseDateTime(dynamic value) {
+    if (value == null) return null;
+
+    try {
+      if (value is String) {
+        if (value.contains('.')) {
+          final parts = value.split('.');
+          final mainPart = parts[0];
+          final microPart = parts[1];
+
+          final cleanMicroPart =
+              microPart.length > 6 ? microPart.substring(0, 6) : microPart;
+
+          return DateTime.parse('$mainPart.$cleanMicroPart');
+        }
+        return DateTime.parse(value);
+      } else if (value is int) {
+        return DateTime.fromMillisecondsSinceEpoch(value);
+      }
+    } catch (e) {}
+    return null;
   }
 
   void _showExpiredTaskDetails(PatrolTask task) {

@@ -1344,6 +1344,278 @@ class NotificationAccessToken {
   }
 }
 
+// --- FITUR BARU: HANDLER PENGINGAT CHARGE HP ---
+Future<bool> sendLowBatteryChargeReminderNotification({
+  required String officerId,
+  required String officerName,
+  required String clusterName,
+  required int batteryLevel,
+  required String batteryState,
+}) async {
+  try {
+    log('Sending low battery charge reminder to officer: $officerId (Battery: $batteryLevel%)');
+
+    // Ambil push token petugas dari Realtime Database
+    final DatabaseReference officerRef =
+        FirebaseDatabase.instance.ref('users/$officerId');
+    final DataSnapshot snapshot = await officerRef.get();
+
+    if (!snapshot.exists) {
+      log('Officer not found: $officerId');
+      return false;
+    }
+
+    final officerData = Map<String, dynamic>.from(snapshot.value as Map);
+    String? officerPushToken = officerData['push_token'];
+
+    if (officerPushToken == null || officerPushToken.isEmpty) {
+      log('Officer $officerId does not have a valid push token');
+      return false;
+    }
+
+    // Ambil admin bearer token
+    final bearerToken = await NotificationAccessToken.getToken;
+    if (bearerToken == null) {
+      log('Failed to get admin access token');
+      return false;
+    }
+
+    // Buat pesan notifikasi berdasarkan level battery dan state
+    final notificationContent = _buildLowBatteryNotificationContent(
+      batteryLevel: batteryLevel,
+      batteryState: batteryState,
+      officerName: officerName,
+    );
+
+    // Data untuk di-passing saat notifikasi diklik
+    Map<String, String> notificationData = {
+      'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+      'type': 'low_battery_reminder',
+      'officer_id': officerId,
+      'officer_name': officerName,
+      'cluster_name': clusterName,
+      'battery_level': batteryLevel.toString(),
+      'battery_state': batteryState,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+
+    // PERBAIKAN: Struktur JSON FCM yang benar
+    final fcmPayload = {
+      "message": {
+        "token": officerPushToken,
+        "notification": {
+          "title": notificationContent['title'],
+          "body": notificationContent['body'],
+        },
+        "data": notificationData,
+        "android": {
+          "priority":
+              "high", // Priority di level android, bukan android.notification
+          "notification": {
+            "channel_id": "battery_reminder",
+            "default_sound": true,
+            "default_vibrate_timings": true,
+            "notification_priority":
+                "PRIORITY_HIGH", // Gunakan notification_priority
+            "icon": "@mipmap/ic_launcher",
+            "color": "#FF8F00", // Warning color untuk battery
+          }
+        },
+        "apns": {
+          "headers": {
+            "apns-priority": "10", // High priority untuk iOS
+          },
+          "payload": {
+            "aps": {
+              "alert": {
+                "title": notificationContent['title'],
+                "body": notificationContent['body'],
+              },
+              "sound": "default",
+              "badge": 1,
+              "category": "BATTERY_REMINDER",
+            }
+          }
+        }
+      },
+    };
+
+    // Kirim notifikasi menggunakan Firebase Cloud Messaging
+    final response = await http.post(
+      Uri.parse(
+          'https://fcm.googleapis.com/v1/projects/trackingsystem-kbp/messages:send'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $bearerToken',
+      },
+      body: jsonEncode(fcmPayload),
+    );
+
+    if (response.statusCode == 200) {
+      log('Low battery charge reminder sent successfully to officer: $officerId');
+
+      // Simpan log notifikasi ke database
+      // await _saveLowBatteryNotificationLog(
+      //   officerId: officerId,
+      //   officerName: officerName,
+      //   clusterName: clusterName,
+      //   batteryLevel: batteryLevel,
+      //   batteryState: batteryState,
+      // );
+
+      return true;
+    } else {
+      log('FCM Error for low battery reminder: ${response.body}');
+      return false;
+    }
+  } catch (e) {
+    log('Error sending low battery charge reminder: $e');
+    return false;
+  }
+}
+
+// TAMBAHAN: Helper function untuk membuat konten notifikasi berdasarkan kondisi battery
+Map<String, String> _buildLowBatteryNotificationContent({
+  required int batteryLevel,
+  required String batteryState,
+  required String officerName,
+}) {
+  String title;
+  String body;
+
+  // Sesuaikan pesan berdasarkan level dan state battery
+  if (batteryLevel <= 15) {
+    title = '🔋 Battery Kritis!';
+    if (batteryState.toLowerCase() == 'charging') {
+      body =
+          'Hi $officerName, battery HP Anda tinggal $batteryLevel% dan sedang charging. Pastikan tetap terhubung dengan charger hingga mencapai minimal 50%.';
+    } else {
+      body =
+          'Hi $officerName, battery HP Anda sangat rendah ($batteryLevel%)! Segera charge untuk memastikan sistem tracking tetap aktif selama patroli.';
+    }
+  } else if (batteryLevel <= 25) {
+    title = '⚠️ Battery Rendah';
+    if (batteryState.toLowerCase() == 'charging') {
+      body =
+          'Hi $officerName, battery HP Anda $batteryLevel% dan sedang charging. Biarkan charging hingga minimal 70% sebelum patroli.';
+    } else {
+      body =
+          'Hi $officerName, battery HP Anda tinggal $batteryLevel%. Disarankan untuk charge sebelum memulai patroli berikutnya.';
+    }
+  } else {
+    title = '🔋 Pengingat Charge';
+    if (batteryState.toLowerCase() == 'charging') {
+      body =
+          'Hi $officerName, battery HP Anda $batteryLevel% dan sedang charging. Lanjutkan charging untuk performa optimal.';
+    } else {
+      body =
+          'Hi $officerName, battery HP Anda $batteryLevel%. Sebaiknya charge sekarang untuk memastikan HP siap untuk tugas berikutnya.';
+    }
+  }
+
+  return {
+    'title': title,
+    'body': body,
+  };
+}
+
+// TAMBAHAN: Simpan log notifikasi battery ke database
+Future<void> _saveLowBatteryNotificationLog({
+  required String officerId,
+  required String officerName,
+  required String clusterName,
+  required int batteryLevel,
+  required String batteryState,
+}) async {
+  try {
+    final database = FirebaseDatabase.instance.ref();
+    final notificationLogData = {
+      'type': 'low_battery_reminder',
+      'officerId': officerId,
+      'officerName': officerName,
+      'clusterName': clusterName,
+      'batteryLevel': batteryLevel,
+      'batteryState': batteryState,
+      'timestamp': ServerValue.timestamp,
+      'sentAt': DateTime.now().toIso8601String(),
+    };
+
+    // Simpan ke node logs untuk tracking
+    await database
+        .child('notification_logs/battery_reminders')
+        .push()
+        .set(notificationLogData);
+
+    // Update last notification time di user profile
+    await database.child('users/$officerId').update({
+      'lastBatteryNotificationSent': DateTime.now().toIso8601String(),
+    });
+
+    log('Low battery notification log saved successfully');
+  } catch (e) {
+    log('Error saving low battery notification log: $e');
+  }
+}
+
+// TAMBAHAN: Fungsi untuk mengecek apakah boleh mengirim notifikasi battery lagi
+Future<bool> canSendBatteryNotification(String officerId) async {
+  try {
+    final userRef = FirebaseDatabase.instance.ref('users/$officerId');
+    final snapshot = await userRef.get();
+
+    if (!snapshot.exists) return true;
+
+    final userData = Map<String, dynamic>.from(snapshot.value as Map);
+    final lastNotificationStr =
+        userData['lastBatteryNotificationSent'] as String?;
+
+    if (lastNotificationStr == null) return true;
+
+    final lastNotification = DateTime.parse(lastNotificationStr);
+    final now = DateTime.now();
+    final difference = now.difference(lastNotification);
+
+    // Hanya boleh kirim notifikasi battery lagi setelah 30 menit
+    return difference.inMinutes >= 30;
+  } catch (e) {
+    log('Error checking battery notification cooldown: $e');
+    return true; // Default allow jika ada error
+  }
+}
+
+// TAMBAHAN: Fungsi untuk mengirim notifikasi battery otomatis (untuk background service)
+Future<void> sendAutomaticLowBatteryNotification({
+  required String officerId,
+  required String officerName,
+  required String clusterName,
+  required int batteryLevel,
+  required String batteryState,
+}) async {
+  try {
+    // Cek apakah boleh kirim notifikasi (cooldown check)
+    final canSend = await canSendBatteryNotification(officerId);
+    if (!canSend) {
+      log('Battery notification for $officerId is on cooldown, skipping');
+      return;
+    }
+
+    // Hanya kirim otomatis jika battery <= 20% dan tidak sedang charging
+    if (batteryLevel <= 20 && batteryState.toLowerCase() != 'charging') {
+      await sendLowBatteryChargeReminderNotification(
+        officerId: officerId,
+        officerName: officerName,
+        clusterName: clusterName,
+        batteryLevel: batteryLevel,
+        batteryState: batteryState,
+      );
+
+      log('Automatic low battery notification sent to $officerId');
+    }
+  } catch (e) {
+    log('Error in automatic low battery notification: $e');
+  }
+}
+
 // --- FITUR BARU: FUNGSI PENGIRIMAN NOTIFIKASI LAPORAN ---
 Future<void> sendReportNotificationToCommandCenter({
   required String reportId,

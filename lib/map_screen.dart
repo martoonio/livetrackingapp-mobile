@@ -2508,7 +2508,7 @@ class _MapScreenState extends State<MapScreen> {
                                                         const SizedBox(
                                                             height: 16),
                                                         Text(
-                                                          'Menyiapkan ringkasan patroli...',
+                                                          ' patroli...',
                                                           style:
                                                               mediumTextStyle(),
                                                         ),
