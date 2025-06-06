@@ -21,6 +21,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _isLoading = false;
   int? _expandedClusterIndex;
 
+  DateTime? _filterStartDate;
+  DateTime? _filterEndDate;
+  String _sortBy = 'assignedStartTime'; // 'assignedStartTime' atau 'createdAt'
+  bool _isDescending = true; // true = descending, false = ascending
+  bool _showFilterPanel = false;
+
+  bool _isMultiSelectMode = false;
+  Set<String> _selectedTaskIds = <String>{};
+
   @override
   void initState() {
     super.initState();
@@ -35,102 +44,259 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     setState(() => _isLoading = false);
   }
 
+  List<PatrolTask> _filterAndSortTasks(List<PatrolTask> tasks) {
+    List<PatrolTask> filteredTasks = List.from(tasks);
+
+    // Filter berdasarkan tanggal
+    if (_filterStartDate != null || _filterEndDate != null) {
+      filteredTasks = filteredTasks.where((task) {
+        if (task.assignedStartTime == null) return false;
+
+        final taskDate = DateTime(
+          task.assignedStartTime!.year,
+          task.assignedStartTime!.month,
+          task.assignedStartTime!.day,
+        );
+
+        bool matchesStartDate = _filterStartDate == null ||
+            taskDate
+                .isAfter(_filterStartDate!.subtract(const Duration(days: 1)));
+        bool matchesEndDate = _filterEndDate == null ||
+            taskDate.isBefore(_filterEndDate!.add(const Duration(days: 1)));
+
+        return matchesStartDate && matchesEndDate;
+      }).toList();
+    }
+
+    // Sort berdasarkan pilihan
+    filteredTasks.sort((a, b) {
+      DateTime? aDate;
+      DateTime? bDate;
+
+      if (_sortBy == 'assignedStartTime') {
+        aDate = a.assignedStartTime;
+        bDate = b.assignedStartTime;
+      } else {
+        aDate = a.createdAt;
+        bDate = b.createdAt;
+      }
+
+      // Handle null values
+      if (aDate == null && bDate == null) return 0;
+      if (aDate == null) return _isDescending ? 1 : -1;
+      if (bDate == null) return _isDescending ? -1 : 1;
+
+      int comparison = aDate.compareTo(bDate);
+      return _isDescending ? -comparison : comparison;
+    });
+
+    return filteredTasks;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: Text(
-          'Command Center Dashboard',
+          _isMultiSelectMode
+              ? '${_selectedTaskIds.length} tugas dipilih'
+              : 'Command Center Dashboard',
           style: boldTextStyle(color: neutralWhite, size: 20),
         ),
         backgroundColor: kbpBlue900,
         foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
+        leading: _isMultiSelectMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _exitMultiSelectMode,
+              )
+            : null,
+        actions: _isMultiSelectMode
+            ? _buildMultiSelectActions()
+            : _buildNormalActions(),
+      ),
+      body: Column(
+        children: [
+          if (_isMultiSelectMode) _buildMultiSelectInfoBar(),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            height: _showFilterPanel ? null : 0,
+            child: _showFilterPanel ? _buildFilterPanel() : null,
+          ),
+          Expanded(
+            child: BlocBuilder<AdminBloc, AdminState>(
+              builder: (context, state) {
+                // if (state is AdminLoading || _isLoading) {
+                //   return Center(
+                //     child: Lottie.asset(
+                //       'assets/lottie/maps_loading.json',
+                //       width: 200,
+                //       height: 100,
+                //     ),
+                //   );
+                // }
+
+                if (state is AdminError) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline,
+                            color: Colors.red, size: 48),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Error: ${state.message}',
+                          style: const TextStyle(color: Colors.red),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _loadData,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kbpBlue900,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Coba Lagi'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                if (state is AdminLoaded) {
+                  final clusters = state.clusters;
+                  return Column(
+                    children: [
+                      _buildStatisticsCard(state),
+                      Expanded(
+                        child: clusters.isEmpty
+                            ? _buildEmptyState()
+                            : _buildClusterList(state),
+                      ),
+                    ],
+                  );
+                }
+                // else if (state is ClustersLoaded) {
+                //   // Jika hanya clusters yang sudah loaded, tampilkan UI khusus clusters
+                //   return Column(
+                //     children: [
+                //       _buildBasicStatisticsCard(state),
+                //       Expanded(
+                //         child: state.clusters.isEmpty
+                //             ? _buildEmptyState()
+                //             : _buildClusterListOnly(state.clusters),
+                //       ),
+                //     ],
+                //   );
+                // }
+
+                return Center(
+                  child: Lottie.asset(
+                    'assets/lottie/maps_loading.json',
+                    width: 200,
+                    height: 100,
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
-      body: BlocBuilder<AdminBloc, AdminState>(
-        builder: (context, state) {
-          if (state is AdminLoading || _isLoading) {
-            return Center(
-              child: Lottie.asset(
-                'assets/lottie/maps_loading.json',
-                width: 200,
-                height: 100,
-              ),
-            );
-          }
-
-          if (state is AdminError) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, color: Colors.red, size: 48),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error: ${state.message}',
-                    style: const TextStyle(color: Colors.red),
-                    textAlign: TextAlign.center,
+      floatingActionButton: _isMultiSelectMode
+          ? null
+          : FloatingActionButton(
+              backgroundColor: kbpBlue900,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CreateTaskScreen(),
                   ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: _loadData,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kbpBlue900,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Coba Lagi'),
+                ).then((_) => _loadData());
+              },
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
+    );
+  }
+
+  List<Widget> _buildNormalActions() {
+    return [
+      IconButton(
+        icon: Stack(
+          children: [
+            const Icon(Icons.filter_list),
+            if (_filterStartDate != null || _filterEndDate != null)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: warningY300,
+                    shape: BoxShape.circle,
                   ),
-                ],
+                ),
               ),
-            );
-          }
-
-          if (state is AdminLoaded) {
-            final clusters = state.clusters;
-            return Column(
-              children: [
-                _buildStatisticsCard(state),
-                Expanded(
-                  child: clusters.isEmpty
-                      ? _buildEmptyState()
-                      : _buildClusterList(state),
-                ),
-              ],
-            );
-          } else if (state is ClustersLoaded) {
-            // Jika hanya clusters yang sudah loaded, tampilkan UI khusus clusters
-            return Column(
-              children: [
-                _buildBasicStatisticsCard(state),
-                Expanded(
-                  child: state.clusters.isEmpty
-                      ? _buildEmptyState()
-                      : _buildClusterListOnly(state.clusters),
-                ),
-              ],
-            );
-          }
-
-          return const Center(child: Text('Memuat data...'));
+          ],
+        ),
+        onPressed: () {
+          setState(() {
+            _showFilterPanel = !_showFilterPanel;
+          });
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: kbpBlue900,
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const CreateTaskScreen(),
+      IconButton(
+        icon: const Icon(Icons.refresh),
+        onPressed: _loadData,
+      ),
+    ];
+  }
+
+  // TAMBAHAN: Multi-select actions untuk AppBar
+  List<Widget> _buildMultiSelectActions() {
+    return [
+      if (_selectedTaskIds.isNotEmpty)
+        IconButton(
+          icon: const Icon(Icons.delete_sweep),
+          onPressed: _showBulkCancelDialog,
+          tooltip: 'Batalkan Terpilih',
+        ),
+    ];
+  }
+
+  // TAMBAHAN: Multi-select info bar
+  Widget _buildMultiSelectInfoBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: kbpBlue50,
+        border: Border(
+          bottom: BorderSide(color: kbpBlue200, width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, color: kbpBlue600, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _selectedTaskIds.isEmpty
+                  ? 'Pilih tugas yang ingin dibatalkan'
+                  : '${_selectedTaskIds.length} tugas dipilih untuk dibatalkan',
+              style: mediumTextStyle(size: 14, color: kbpBlue700),
             ),
-          ).then((_) => _loadData());
-        },
-        child: const Icon(Icons.add, color: Colors.white),
+          ),
+          if (_selectedTaskIds.isNotEmpty)
+            TextButton(
+              onPressed: _clearSelection,
+              child: Text(
+                'Bersihkan',
+                style: mediumTextStyle(size: 14, color: kbpBlue600),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -301,27 +467,481 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       itemBuilder: (context, index) {
         final cluster = clusters[index];
 
-        // Filter tugas berdasarkan clusterId
-        final activeTasks = state.activeTasks
+        // Filter tugas berdasarkan clusterId dan apply filter/sort
+        final clusterTasks = state.activeTasks
             .where((task) => task.clusterId == cluster.id)
             .toList();
+
+        final filteredActiveTasks = _filterAndSortTasks(clusterTasks);
 
         return _buildClusterCard(
           cluster: cluster,
           index: index,
-          activeTasks: activeTasks,
+          activeTasks: filteredActiveTasks,
+          totalActiveTasks:
+              clusterTasks.length, // TAMBAHAN: untuk menampilkan jumlah asli
         );
       },
     );
+  }
+
+  void _resetFilters() {
+    setState(() {
+      _filterStartDate = null;
+      _filterEndDate = null;
+      _sortBy = 'assignedStartTime';
+      _isDescending = true;
+    });
+  }
+
+  Widget _buildFilterPanel() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              Icon(Icons.filter_list, color: kbpBlue900, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Filter & Urutkan Tugas',
+                style: boldTextStyle(size: 16, color: kbpBlue900),
+              ),
+              const Spacer(),
+              if (_filterStartDate != null ||
+                  _filterEndDate != null ||
+                  _sortBy != 'assignedStartTime' ||
+                  !_isDescending)
+                TextButton(
+                  onPressed: _resetFilters,
+                  child: Text(
+                    'Reset',
+                    style: mediumTextStyle(size: 14, color: dangerR500),
+                  ),
+                ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Date Range Filter
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tanggal Mulai',
+                      style: mediumTextStyle(size: 14, color: neutral700),
+                    ),
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: () => _selectStartDate(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: neutral300),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.calendar_today,
+                                size: 16, color: neutral600),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _filterStartDate != null
+                                    ? formatDateFromString(
+                                        _filterStartDate.toString())
+                                    : 'Pilih tanggal',
+                                style: regularTextStyle(
+                                  size: 14,
+                                  color: _filterStartDate != null
+                                      ? neutral800
+                                      : neutral500,
+                                ),
+                              ),
+                            ),
+                            if (_filterStartDate != null)
+                              GestureDetector(
+                                onTap: () =>
+                                    setState(() => _filterStartDate = null),
+                                child: Icon(Icons.clear,
+                                    size: 16, color: neutral500),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tanggal Akhir',
+                      style: mediumTextStyle(size: 14, color: neutral700),
+                    ),
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: () => _selectEndDate(context),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: neutral300),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.calendar_today,
+                                size: 16, color: neutral600),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _filterEndDate != null
+                                    ? formatDateFromString(
+                                        _filterEndDate.toString())
+                                    : 'Pilih tanggal',
+                                style: regularTextStyle(
+                                  size: 14,
+                                  color: _filterEndDate != null
+                                      ? neutral800
+                                      : neutral500,
+                                ),
+                              ),
+                            ),
+                            if (_filterEndDate != null)
+                              GestureDetector(
+                                onTap: () =>
+                                    setState(() => _filterEndDate = null),
+                                child: Icon(Icons.clear,
+                                    size: 16, color: neutral500),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Sort Options
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Urutkan Berdasarkan',
+                      style: mediumTextStyle(size: 14, color: neutral700),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: neutral300),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _sortBy,
+                          isExpanded: true,
+                          icon: Icon(Icons.keyboard_arrow_down,
+                              color: neutral600),
+                          onChanged: (String? newValue) {
+                            if (newValue != null) {
+                              setState(() {
+                                _sortBy = newValue;
+                              });
+                            }
+                          },
+                          items: [
+                            DropdownMenuItem(
+                              value: 'assignedStartTime',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.schedule,
+                                      size: 16, color: kbpBlue600),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Waktu Mulai',
+                                    style: regularTextStyle(size: 14),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'createdAt',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.add_circle,
+                                      size: 16, color: successG300),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Waktu Dibuat',
+                                    style: regularTextStyle(size: 14),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Urutan',
+                    style: mediumTextStyle(size: 14, color: neutral700),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      _buildSortButton(
+                        'Terlama',
+                        Icons.arrow_downward,
+                        _isDescending,
+                        () => setState(() => _isDescending = true),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildSortButton(
+                        'Terbaru',
+                        Icons.arrow_upward,
+                        !_isDescending,
+                        () => setState(() => _isDescending = false),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Filter Summary
+          if (_filterStartDate != null ||
+              _filterEndDate != null ||
+              _sortBy != 'assignedStartTime' ||
+              !_isDescending)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: kbpBlue50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: kbpBlue200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Filter Aktif:',
+                    style: semiBoldTextStyle(size: 12, color: kbpBlue800),
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      if (_filterStartDate != null || _filterEndDate != null)
+                        _buildFilterChip(
+                          'Tanggal: ${_getDateRangeText()}',
+                          Icons.date_range,
+                        ),
+                      _buildFilterChip(
+                        'Urut: ${_getSortText()}',
+                        _isDescending
+                            ? Icons.arrow_downward
+                            : Icons.arrow_upward,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // TAMBAHAN: Sort Button Widget
+  Widget _buildSortButton(
+      String label, IconData icon, bool isSelected, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? kbpBlue900 : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? kbpBlue900 : neutral300,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 14,
+              color: isSelected ? Colors.white : neutral600,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: mediumTextStyle(
+                size: 12,
+                color: isSelected ? Colors.white : neutral600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // TAMBAHAN: Filter Chip Widget
+  Widget _buildFilterChip(String label, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: kbpBlue100,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: kbpBlue700),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: mediumTextStyle(size: 11, color: kbpBlue700),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // TAMBAHAN: Date Picker Methods
+  Future<void> _selectStartDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _filterStartDate ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: kbpBlue900,
+              onPrimary: Colors.white,
+              surface: Colors.white,
+              onSurface: Colors.black,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _filterStartDate = picked;
+        // Ensure end date is not before start date
+        if (_filterEndDate != null && _filterEndDate!.isBefore(picked)) {
+          _filterEndDate = picked;
+        }
+      });
+    }
+  }
+
+  Future<void> _selectEndDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _filterEndDate ??
+          (_filterStartDate?.add(const Duration(days: 7)) ?? DateTime.now()),
+      firstDate: _filterStartDate ?? DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: kbpBlue900,
+              onPrimary: Colors.white,
+              surface: Colors.white,
+              onSurface: Colors.black,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _filterEndDate = picked;
+      });
+    }
+  }
+
+  String _getDateRangeText() {
+    if (_filterStartDate != null && _filterEndDate != null) {
+      return '${formatDateFromString(_filterStartDate.toString())} - ${formatDateFromString(_filterEndDate.toString())}';
+    } else if (_filterStartDate != null) {
+      return 'Dari ${formatDateFromString(_filterStartDate.toString())}';
+    } else if (_filterEndDate != null) {
+      return 'Sampai ${formatDateFromString(_filterEndDate.toString())}';
+    }
+    return '';
+  }
+
+  String _getSortText() {
+    String sortByText =
+        _sortBy == 'assignedStartTime' ? 'Waktu Mulai' : 'Waktu Dibuat';
+    String orderText = _isDescending ? 'Terbaru' : 'Terlama';
+    return '$sortByText ($orderText)';
   }
 
   Widget _buildClusterCard({
     required User cluster,
     required int index,
     required List<PatrolTask> activeTasks,
+    int? totalActiveTasks, // TAMBAHAN: parameter opsional
   }) {
     final isExpanded = _expandedClusterIndex == index;
     final officers = cluster.officers ?? [];
+    final isFiltered = _filterStartDate != null ||
+        _filterEndDate != null ||
+        _sortBy != 'assignedStartTime' ||
+        !_isDescending;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -364,13 +984,43 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           style: boldTextStyle(size: 18),
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          'Petugas: ${officers.length} · Tugas Aktif: ${activeTasks.length}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: neutral600,
+                        // MODIFIKASI: Tampilkan informasi filter jika ada
+                        if (isFiltered && totalActiveTasks != null)
+                          Row(
+                            children: [
+                              Text(
+                                'Petugas: ${officers.length} · Tugas: ${activeTasks.length}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: neutral600,
+                                ),
+                              ),
+                              if (activeTasks.length != totalActiveTasks) ...[
+                                Text(
+                                  ' dari $totalActiveTasks',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: neutral500,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.filter_list,
+                                  size: 14,
+                                  color: kbpBlue600,
+                                ),
+                              ],
+                            ],
+                          )
+                        else
+                          Text(
+                            'Petugas: ${officers.length} · Tugas Aktif: ${activeTasks.length}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: neutral600,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -430,9 +1080,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        'Tugas Aktif (${activeTasks.length})',
-                        style: semiBoldTextStyle(size: 16),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Tugas Aktif (${activeTasks.length})',
+                            style: semiBoldTextStyle(size: 16),
+                          ),
+                          // TAMBAHAN: Filter indicator
+                          if (isFiltered &&
+                              totalActiveTasks != null &&
+                              activeTasks.length != totalActiveTasks)
+                            Text(
+                              'Menampilkan ${activeTasks.length} dari $totalActiveTasks tugas',
+                              style:
+                                  regularTextStyle(size: 12, color: kbpBlue600),
+                            ),
+                        ],
                       ),
                       TextButton.icon(
                         onPressed: () {
@@ -453,7 +1117,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                   const SizedBox(height: 8),
                   activeTasks.isEmpty
-                      ? _buildEmptyTasksState()
+                      ? _buildEmptyTasksState(isFiltered: isFiltered)
                       : ListView.builder(
                           physics: const NeverScrollableScrollPhysics(),
                           shrinkWrap: true,
@@ -485,243 +1149,629 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // NEW: Enhanced task card dengan assigned start/end time
   Widget _buildEnhancedTaskCard(PatrolTask task, Officer assignedOfficer) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 1,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: neutral200),
-      ),
-      child: Column(
-        children: [
-          // Header dengan status dan ID
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: Row(
-              children: [
-                // Status indicator dengan animasi
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        _getStatusColor(task.status),
-                        _getStatusColor(task.status).withOpacity(0.7),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _getStatusColor(task.status).withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.task_alt_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 12),
+    final isSelected = _selectedTaskIds.contains(task.taskId);
+    final canCancel = _canCancelTask(task);
 
-                // Task info
+    return GestureDetector(
+      onLongPress: () {
+        if (canCancel && !_isMultiSelectMode) {
+          _enterMultiSelectMode(task.taskId);
+        }
+      },
+      onTap: () {
+        if (_isMultiSelectMode && canCancel) {
+          _toggleTaskSelection(task.taskId);
+        }
+      },
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        elevation: 1,
+        color: isSelected ? kbpBlue50 : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isSelected ? kbpBlue300 : neutral200,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            // Header dengan status dan ID
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Row(
+                children: [
+                  // TAMBAHAN: Checkbox untuk multi-select
+                  if (_isMultiSelectMode && canCancel) ...[
+                    Checkbox(
+                      value: isSelected,
+                      onChanged: (bool? value) {
+                        _toggleTaskSelection(task.taskId);
+                      },
+                      activeColor: kbpBlue900,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ] else if (_isMultiSelectMode && !canCancel) ...[
+                    // Placeholder untuk alignment
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: neutral300,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Icon(
+                        Icons.block,
+                        color: neutral400,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+
+                  // Status indicator dengan animasi
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          _getStatusColor(task.status),
+                          _getStatusColor(task.status).withOpacity(0.7),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _getStatusColor(task.status).withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.task_alt_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+
+                  // Task info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              'Tugas #${_getSafeTaskIdPreview(task.taskId)}',
+                              style: boldTextStyle(size: 12),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _getStatusColor(task.status)
+                                    .withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: _getStatusColor(task.status)
+                                      .withOpacity(0.3),
+                                ),
+                              ),
+                              child: Text(
+                                _getStatusText(task.status),
+                                style: TextStyle(
+                                  color: _getStatusColor(task.status),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          assignedOfficer.name,
+                          style: mediumTextStyle(size: 14, color: neutral600),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Menu aksi (hanya tampil jika tidak dalam multi-select mode)
+                  if (!_isMultiSelectMode)
+                    PopupMenuButton<String>(
+                      icon: const Icon(
+                        Icons.more_vert,
+                        size: 20,
+                        color: neutral600,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 8,
+                      position: PopupMenuPosition.under,
+                      tooltip: 'Opsi Tugas',
+                      color: Colors.white,
+                      onSelected: (value) {
+                        if (value == 'view') {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PatrolHistoryScreen(task: task),
+                            ),
+                          );
+                        } else if (value == 'cancel') {
+                          _showCancelConfirmationDialog(context, task,
+                              User(id: '', email: '', name: '', role: ''));
+                        } else if (value == 'multi_select') {
+                          _enterMultiSelectMode(task.taskId);
+                        }
+                      },
+                      itemBuilder: (BuildContext context) => [
+                        PopupMenuItem<String>(
+                          value: 'view',
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.visibility_outlined,
+                                color: kbpBlue600,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                'Lihat Detail',
+                                style: mediumTextStyle(color: neutral800),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (canCancel) ...[
+                          PopupMenuItem<String>(
+                            value: 'multi_select',
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.checklist,
+                                  color: kbpBlue600,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Pilih Multiple',
+                                  style: mediumTextStyle(color: neutral800),
+                                ),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'cancel',
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.cancel_outlined,
+                                  color: dangerR500,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Batalkan Tugas',
+                                  style: mediumTextStyle(color: dangerR500),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            8.height,
+            Row(
+              children: [
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          Text(
-                            // PERBAIKAN: Safe substring untuk taskId
-                            'Tugas #${_getSafeTaskIdPreview(task.taskId)}',
-                            style: boldTextStyle(size: 12),
-                          ),
-                          const SizedBox(width: 8),
+                          // Type badge
                           Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
+                              horizontal: 6,
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color:
-                                  _getStatusColor(task.status).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: _getStatusColor(task.status)
-                                    .withOpacity(0.3),
-                              ),
+                              color: assignedOfficer.type == OfficerType.organik
+                                  ? successG50
+                                  : warningY50,
+                              borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              _getStatusText(task.status),
-                              style: TextStyle(
-                                color: _getStatusColor(task.status),
-                                fontWeight: FontWeight.w600,
-                                fontSize: 10,
+                              assignedOfficer.type == OfficerType.organik
+                                  ? 'Organik'
+                                  : 'Outsource',
+                              style: mediumTextStyle(
+                                size: 10,
+                                color:
+                                    assignedOfficer.type == OfficerType.organik
+                                        ? successG300
+                                        : warningY300,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+
+                          // Shift badge
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: kbpBlue50,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              getShortShiftText(assignedOfficer.shift),
+                              style: mediumTextStyle(
+                                size: 10,
+                                color: kbpBlue600,
                               ),
                             ),
                           ),
                         ],
-                      ),
-                      Text(
-                        assignedOfficer.name,
-                        style: mediumTextStyle(size: 14, color: neutral600),
                       ),
                     ],
                   ),
                 ),
 
-                // Menu aksi
-                PopupMenuButton<String>(
-                  icon: const Icon(
-                    Icons.more_vert,
-                    size: 20,
-                    color: neutral600,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 8,
-                  position: PopupMenuPosition.under,
-                  tooltip: 'Opsi Tugas',
-                  color: Colors.white,
-                  onSelected: (value) {
-                    if (value == 'view') {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => PatrolHistoryScreen(task: task),
-                        ),
-                      );
-                    } else if (value == 'cancel') {
-                      _showCancelConfirmationDialog(
-                          context,
-                          task,
-                          User(
-                              id: '',
-                              email: '',
-                              name: '',
-                              role: '')); // Dummy user
-                    }
-                  },
-                  itemBuilder: (BuildContext context) => [
-                    PopupMenuItem<String>(
-                      value: 'view',
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.visibility_outlined,
-                            color: kbpBlue600,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Lihat Detail',
-                            style: mediumTextStyle(color: neutral800),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (_canCancelTask(task))
-                      PopupMenuItem<String>(
-                        value: 'cancel',
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.cancel_outlined,
-                              color: dangerR500,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Batalkan Tugas',
-                              style: mediumTextStyle(color: dangerR500),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
+                // Task timing status
+                _buildTimingStatus(task),
+              ],
+            ).paddingSymmetric(horizontal: 16),
+            8.height,
+            // NEW: Assigned Time Section
+            if (task.assignedStartTime != null) _buildAssignedTimeSection(task),
+            16.height,
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _enterMultiSelectMode(String initialTaskId) {
+    setState(() {
+      _isMultiSelectMode = true;
+      _selectedTaskIds.clear();
+      _selectedTaskIds.add(initialTaskId);
+    });
+  }
+
+  void _exitMultiSelectMode() {
+    setState(() {
+      _isMultiSelectMode = false;
+      _selectedTaskIds.clear();
+    });
+  }
+
+  void _toggleTaskSelection(String taskId) {
+    setState(() {
+      if (_selectedTaskIds.contains(taskId)) {
+        _selectedTaskIds.remove(taskId);
+      } else {
+        _selectedTaskIds.add(taskId);
+      }
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectedTaskIds.clear();
+    });
+  }
+
+  void _selectAllVisibleTasks() {
+    setState(() {
+      // Get all visible cancellable tasks from current state
+      final currentState = context.read<AdminBloc>().state;
+      if (currentState is AdminLoaded) {
+        for (final cluster in currentState.clusters) {
+          final clusterTasks = currentState.activeTasks
+              .where((task) => task.clusterId == cluster.id)
+              .toList();
+
+          final filteredTasks = _filterAndSortTasks(clusterTasks);
+
+          for (final task in filteredTasks) {
+            if (_canCancelTask(task)) {
+              _selectedTaskIds.add(task.taskId);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // TAMBAHAN: Bulk cancel dialog
+  void _showBulkCancelDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.rectangle,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 10.0,
+                offset: Offset(0.0, 10.0),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon warning
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  color: dangerR50,
+                  shape: BoxShape.circle,
                 ),
+                child: const Icon(
+                  Icons.delete_sweep,
+                  size: 40,
+                  color: dangerR500,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Title
+              Text(
+                'Batalkan Multiple Tugas',
+                style: boldTextStyle(size: 18),
+              ),
+              const SizedBox(height: 8),
+
+              // Message
+              Text(
+                'Apakah Anda yakin ingin membatalkan ${_selectedTaskIds.length} tugas yang dipilih? Tindakan ini tidak dapat dipulihkan.',
+                textAlign: TextAlign.center,
+                style: regularTextStyle(color: neutral700),
+              ),
+              const SizedBox(height: 16),
+
+              // Selected tasks preview
+              Container(
+                height: 200,
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      Text(
+                        'Tugas yang akan dibatalkan:',
+                        style: mediumTextStyle(size: 12, color: neutral600),
+                      ),
+                      const SizedBox(height: 8),
+                      ...(_selectedTaskIds.take(5).map((taskId) => Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            margin: const EdgeInsets.only(bottom: 4),
+                            decoration: BoxDecoration(
+                              color: dangerR50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: dangerR200),
+                            ),
+                            child: Text(
+                              'Tugas #${_getSafeTaskIdPreview(taskId)}',
+                              style:
+                                  mediumTextStyle(size: 11, color: dangerR300),
+                            ),
+                          ))),
+                      if (_selectedTaskIds.length > 5)
+                        Text(
+                          '... dan ${_selectedTaskIds.length - 5} tugas lainnya',
+                          style: regularTextStyle(size: 11, color: neutral500),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Action buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: neutral700,
+                        side: const BorderSide(color: neutral400),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text('Batal'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.of(context).pop();
+                        await _performBulkCancel();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: dangerR500,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text('Batalkan ${_selectedTaskIds.length} Tugas'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // TAMBAHAN: Bulk cancel implementation
+  Future<void> _performBulkCancel() async {
+    final selectedTasks = List<String>.from(_selectedTaskIds);
+    int successCount = 0;
+    int failCount = 0;
+
+    // Show progress dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => Dialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Progress indicator
+                SizedBox(
+                  width: 60,
+                  height: 60,
+                  child: CircularProgressIndicator(
+                    value: (successCount + failCount) / selectedTasks.length,
+                    color: kbpBlue900,
+                    backgroundColor: kbpBlue100,
+                    strokeWidth: 4,
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Text
+                Text(
+                  'Membatalkan tugas...',
+                  style: mediumTextStyle(size: 16),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${successCount + failCount} dari ${selectedTasks.length} tugas',
+                  style: regularTextStyle(color: neutral600, size: 14),
+                  textAlign: TextAlign.center,
+                ),
+                if (failCount > 0) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '$failCount tugas gagal dibatalkan',
+                    style: regularTextStyle(color: dangerR500, size: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ],
             ),
           ),
-          8.height,
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        // Type badge
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: assignedOfficer.type == OfficerType.organik
-                                ? successG50
-                                : warningY50,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            assignedOfficer.type == OfficerType.organik
-                                ? 'Organik'
-                                : 'Outsource',
-                            style: mediumTextStyle(
-                              size: 10,
-                              color: assignedOfficer.type == OfficerType.organik
-                                  ? successG300
-                                  : warningY300,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-
-                        // Shift badge
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: kbpBlue50,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            getShortShiftText(assignedOfficer.shift),
-                            style: mediumTextStyle(
-                              size: 10,
-                              color: kbpBlue600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              // Task timing status
-              _buildTimingStatus(task),
-            ],
-          ).paddingSymmetric(horizontal: 16),
-          8.height,
-          // NEW: Assigned Time Section
-          if (task.assignedStartTime != null) _buildAssignedTimeSection(task),
-          16.height,
-        ],
+        ),
       ),
     );
+
+    // Process cancellations
+    for (final taskId in selectedTasks) {
+      try {
+        await context.read<PatrolBloc>().repository.updateTask(
+          taskId,
+          {
+            'status': 'cancelled',
+            'cancelledAt': DateTime.now().toIso8601String(),
+          },
+        );
+        successCount++;
+      } catch (e) {
+        print('Error cancelling task $taskId: $e');
+        failCount++;
+      }
+
+      // Update progress dialog
+      // Note: In a real implementation, you might want to use a more sophisticated state management
+    }
+
+    // Close progress dialog
+    if (context.mounted) Navigator.of(context).pop();
+
+    // Exit multi-select mode
+    _exitMultiSelectMode();
+
+    // Refresh data
+    _loadData();
+
+    // Show result feedback
+    if (context.mounted) {
+      if (successCount == selectedTasks.length) {
+        showCustomSnackbar(
+          context: context,
+          title: 'Berhasil',
+          subtitle: '$successCount tugas berhasil dibatalkan',
+          type: SnackbarType.success,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Pembatalan selesai',
+                  style: boldTextStyle(color: Colors.white, size: 14),
+                ),
+                Text(
+                  'Berhasil: $successCount, Gagal: $failCount',
+                  style: regularTextStyle(color: Colors.white, size: 12),
+                ),
+              ],
+            ),
+            backgroundColor: failCount == 0 ? successG500 : warningY500,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            margin: const EdgeInsets.all(8),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
   }
 
   // NEW: Assigned time section dengan visual timeline
@@ -1069,7 +2119,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   // NEW: Empty tasks state
-  Widget _buildEmptyTasksState() {
+  Widget _buildEmptyTasksState({bool isFiltered = false}) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1080,20 +2130,35 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       child: Column(
         children: [
           Icon(
-            Icons.assignment_outlined,
+            isFiltered ? Icons.filter_list_off : Icons.assignment_outlined,
             size: 48,
             color: neutral400,
           ),
           const SizedBox(height: 12),
           Text(
-            'Tidak ada tugas aktif',
+            isFiltered
+                ? 'Tidak ada tugas yang sesuai filter'
+                : 'Tidak ada tugas aktif',
             style: mediumTextStyle(size: 14, color: neutral600),
           ),
           const SizedBox(height: 4),
           Text(
-            'Buat tugas baru untuk cluster ini',
+            isFiltered
+                ? 'Coba ubah kriteria filter atau buat tugas baru'
+                : 'Buat tugas baru untuk cluster ini',
             style: regularTextStyle(size: 12, color: neutral500),
+            textAlign: TextAlign.center,
           ),
+          if (isFiltered) ...[
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: _resetFilters,
+              child: Text(
+                'Reset Filter',
+                style: mediumTextStyle(size: 12, color: kbpBlue600),
+              ),
+            ),
+          ],
         ],
       ),
     );
