@@ -701,7 +701,7 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     try {
       emit(ClustersLoading());
       final cluster = await repository.getClusterById(event.clusterId);
-      final tasks = await repository.getClusterTasks(event.clusterId);
+      final tasks = await repository.getAllClusterTasks(event.clusterId);
       emit(ClusterTasksLoaded(
           clusterId: event.clusterId, tasks: tasks, cluster: cluster));
     } catch (e) {

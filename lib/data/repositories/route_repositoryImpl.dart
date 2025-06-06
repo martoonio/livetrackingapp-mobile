@@ -825,33 +825,32 @@ class RouteRepositoryImpl implements RouteRepository {
     return tasks;
   }
 
-  // TAMBAHAN: Method untuk mendapatkan ALL tasks dari cluster (tanpa pagination)
-@override
-Future<List<PatrolTask>> getAllClusterTasks(String clusterId) async {
-  try {
-    print('getAllClusterTasks called for: $clusterId');
-    
-    final snapshot = await _database
-        .child('tasks')
-        .orderByChild('clusterId')
-        .equalTo(clusterId)
-        .get();
+  @override
+  Future<List<PatrolTask>> getAllClusterTasks(String clusterId) async {
+    try {
+      print('getAllClusterTasks called for: $clusterId');
 
-    if (!snapshot.exists || snapshot.value == null) {
-      print('No tasks found for cluster $clusterId');
+      final snapshot = await _database
+          .child('tasks')
+          .orderByChild('clusterId')
+          .equalTo(clusterId)
+          .get();
+
+      if (!snapshot.exists || snapshot.value == null) {
+        print('No tasks found for cluster $clusterId');
+        return [];
+      }
+
+      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
+      final allTasks = _convertMapToTaskList(tasksMap);
+
+      print('Found ${allTasks.length} total tasks for cluster $clusterId');
+      return allTasks;
+    } catch (e) {
+      print('Error in getAllClusterTasks for $clusterId: $e');
       return [];
     }
-
-    final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-    final allTasks = _convertMapToTaskList(tasksMap);
-    
-    print('Found ${allTasks.length} total tasks for cluster $clusterId');
-    return allTasks;
-  } catch (e) {
-    print('Error in getAllClusterTasks for $clusterId: $e');
-    return [];
   }
-}
 
   // PERBAIKAN: Enhanced validation
   bool _isValidTaskData(Map<String, dynamic> taskData) {
