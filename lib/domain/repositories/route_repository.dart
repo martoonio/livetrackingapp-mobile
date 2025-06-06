@@ -40,6 +40,10 @@ abstract class RouteRepository {
     String? lastKey,
   });
 
+  Future<void> checkAndFixTaskIntegrity(String taskId);
+  Future<void> fixCorruptedTasks();
+  Future<bool> validateTaskIntegrity(String taskId);
+
   Future<List<PatrolTask>> getAllClusterTasks(String clusterId);
 
   Future<List<PatrolTask>> getActiveAndCancelledTasks(String clusterId,

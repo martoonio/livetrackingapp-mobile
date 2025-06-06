@@ -1043,6 +1043,115 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
+  @override
+  Future<void> checkAndFixTaskIntegrity(String taskId) async {
+    try {
+      final task = await getTaskById(taskId: taskId);
+      if (task == null) return;
+
+      bool needsUpdate = false;
+      Map<String, dynamic> fixes = {};
+
+      // Check 1: Has endTime but no startTime
+      if (task.endTime != null && task.startTime == null) {
+        print('Found corrupted task $taskId: has endTime but no startTime');
+        
+        // Option 1: Reset to active state
+        fixes['endTime'] = null;
+        fixes['status'] = 'active';
+        fixes['distance'] = null;
+        fixes['corruptionFixed'] = true;
+        fixes['fixedAt'] = DateTime.now().toIso8601String();
+        needsUpdate = true;
+      }
+
+      // Check 2: Has initialReportTime but wrong timing
+      if (task.initialReportTime != null && task.assignedStartTime != null) {
+        final reportTime = task.initialReportTime!;
+        final scheduledTime = task.assignedStartTime!;
+        
+        // If report was made significantly before scheduled time
+        if (reportTime.isBefore(scheduledTime.subtract(Duration(hours: 1)))) {
+          print('Warning: Task $taskId has early initial report');
+          fixes['earlyReportDetected'] = true;
+          needsUpdate = true;
+        }
+      }
+
+      // Check 3: Status inconsistency
+      if (task.status == 'finished' && task.startTime == null) {
+        print('Found status inconsistency in task $taskId');
+        fixes['status'] = 'active';
+        fixes['statusInconsistencyFixed'] = true;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        await updateTask(taskId, fixes);
+        print('Fixed data integrity issues for task $taskId');
+      }
+    } catch (e) {
+      print('Error checking task integrity for $taskId: $e');
+    }
+  }
+
+  @override
+  Future<void> fixCorruptedTasks() async {
+    try {
+      final snapshot = await _database.child('tasks').get();
+      if (!snapshot.exists) return;
+
+      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
+      int fixedCount = 0;
+      
+      for (var entry in tasksMap.entries) {
+        final taskId = entry.key;
+        final taskData = entry.value as Map<dynamic, dynamic>;
+        
+        // Find corrupted tasks
+        if (taskData['endTime'] != null && taskData['startTime'] == null) {
+          print('Fixing corrupted task: $taskId');
+          
+          await _database.child('tasks').child(taskId).update({
+            'endTime': null,
+            'status': 'active',
+            'distance': null,
+            'corruptionFixed': true,
+            'fixedAt': ServerValue.timestamp,
+            'originalEndTime': taskData['endTime'], // Backup original data
+          });
+          
+          fixedCount++;
+        }
+      }
+      
+      print('Fixed $fixedCount corrupted tasks');
+    } catch (e) {
+      print('Error fixing corrupted tasks: $e');
+    }
+  }
+
+  @override
+  Future<bool> validateTaskIntegrity(String taskId) async {
+    try {
+      final task = await getTaskById(taskId: taskId);
+      if (task == null) return false;
+
+      // Check for corruption signs
+      if (task.endTime != null && task.startTime == null) {
+        return false;
+      }
+      
+      if (task.status == 'finished' && task.startTime == null) {
+        return false;
+      }
+      
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
 // Tambahkan method helper untuk generate string random
 
   @override

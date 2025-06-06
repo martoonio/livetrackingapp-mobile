@@ -1278,7 +1278,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Icon(Icons.play_circle, size: 14, color: successG400),
                 const SizedBox(width: 8),
                 Text(
-                  'Menampilkan ${_displayedOngoingTasks.length} dari ${_allOngoingTasks.length} patroli berlangsung',
+                  'Tolong selesaikan tugas patroli ini terlebih dahulu',
                   style: mediumTextStyle(size: 12, color: successG500),
                 ),
                 if (_hasMoreOngoingTasks) ...[
@@ -1473,35 +1473,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               ],
                             ),
                           ),
-
-                          // Live tracking button
-                          Container(
-                            decoration: BoxDecoration(
-                              color: successG100,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: successG300),
-                            ),
-                            child: IconButton(
-                              icon: const Icon(Icons.gps_fixed,
-                                  color: successG500),
-                              onPressed: () {
-                                // Navigate to live tracking or map view
-                                final task = officerTasks.first;
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => MapScreen(
-                                      task: task,
-                                      onStart: () {
-                                        // Task already started, just navigate
-                                      },
-                                    ),
-                                  ),
-                                );
-                              },
-                              tooltip: 'Pantau Langsung',
-                            ),
-                          ),
                         ],
                       ),
                     ),
@@ -1517,6 +1488,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         return _buildOngoingTaskItem(officerTasks[taskIndex]);
                       },
                     ),
+                    8.height,
                   ],
                 ),
               ),
@@ -1741,7 +1713,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                   icon: const Icon(Icons.map, size: 16),
                   label: Text(
-                    'Pantau Live',
+                    'Lanjutkan Patroli',
                     style: mediumTextStyle(size: 12, color: Colors.white),
                   ),
                   style: ElevatedButton.styleFrom(

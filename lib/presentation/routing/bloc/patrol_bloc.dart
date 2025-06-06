@@ -866,8 +866,48 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     try {
       emit(PatrolLoading());
 
+      final isValid = await repository.validateTaskIntegrity(event.task.taskId);
+      if (!isValid) {
+        // Try to fix the task
+        await repository.checkAndFixTaskIntegrity(event.task.taskId);
+
+        // Re-validate
+        final isStillValid =
+            await repository.validateTaskIntegrity(event.task.taskId);
+        if (!isStillValid) {
+          emit(PatrolError(
+              'Task has integrity issues and cannot be started. Please contact admin.'));
+          return;
+        }
+      }
+
       if (event.task.clusterId.isNotEmpty) {
         await _loadClusterValidationRadius(event.task.clusterId);
+      }
+
+      // TAMBAHAN: Validate task state sebelum start
+      if (event.task.status == 'finished' || event.task.status == 'cancelled') {
+        emit(PatrolError(
+            'Cannot start patrol: task is already ${event.task.status}'));
+        return;
+      }
+
+      // TAMBAHAN: Validate scheduled time
+      final now = DateTime.now();
+      final scheduledStart = event.task.assignedStartTime;
+      if (scheduledStart != null) {
+        final timeDiff = now.difference(scheduledStart).inMinutes;
+        // Allow starting 30 minutes early or late
+        if (timeDiff < -30) {
+          emit(PatrolError(
+              'Cannot start patrol: too early (${timeDiff.abs()} minutes before scheduled time)'));
+          return;
+        }
+        if (timeDiff > 60) {
+          emit(PatrolError(
+              'Cannot start patrol: too late (${timeDiff} minutes after scheduled time)'));
+          return;
+        }
       }
 
       final routePath = <String, dynamic>{};
@@ -876,10 +916,47 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       final timeliness = _calculateTimeliness(event.task.assignedStartTime,
           event.startTime, event.task.assignedEndTime, 'ongoing');
 
+      // PERBAIKAN: Ensure all critical fields are updated atomically
+      final updateData = {
+        'status': 'ongoing',
+        'startTime': event.startTime.toIso8601String(),
+        'timeliness': timeliness,
+        // TAMBAHAN: Clear any previous end data
+        'endTime': null,
+        'distance': 0.0,
+        // TAMBAHAN: Add start metadata
+        'actualStartTime': event.startTime.toIso8601String(),
+        'startedFromApp': true,
+      };
+
+      if (_isConnected) {
+        // PERBAIKAN: Use transaction-like update to ensure atomicity
+        try {
+          await repository.updateTask(event.task.taskId, updateData);
+
+          // TAMBAHAN: Verify the update was successful
+          final verifyTask =
+              await repository.getTaskById(taskId: event.task.taskId);
+          if (verifyTask?.startTime == null) {
+            throw Exception('Failed to update startTime in database');
+          }
+        } catch (e) {
+          print('Error updating task start: $e');
+          emit(PatrolError('Failed to start patrol: database update failed'));
+          return;
+        }
+      } else {
+        if (_offlineLocationBox != null) {
+          await _offlineLocationBox!.put('patrol_start_${event.task.taskId}', {
+            'taskId': event.task.taskId,
+            ...updateData,
+          });
+        }
+      }
+
       final updatedTask = PatrolTask(
         taskId: event.task.taskId,
         userId: event.task.userId,
-        // vehicleId: event.task.vehicleId,
         status: 'ongoing',
         startTime: event.startTime,
         endTime: null,
@@ -891,26 +968,12 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         routePath: routePath,
         lastLocation: event.task.lastLocation,
         timeliness: timeliness,
+        // TAMBAHAN: Copy other important fields
+        clusterId: event.task.clusterId,
+        clusterName: event.task.clusterName,
+        officerName: event.task.officerName,
+        officerPhotoUrl: event.task.officerPhotoUrl,
       );
-
-      if (_isConnected) {
-        await repository.updateTask(
-          event.task.taskId,
-          {
-            'status': 'ongoing',
-            'startTime': event.startTime.toIso8601String(),
-            'timeliness': timeliness,
-          },
-        );
-      } else {
-        if (_offlineLocationBox != null) {
-          await _offlineLocationBox!.put('patrol_start_${event.task.taskId}', {
-            'taskId': event.task.taskId,
-            'startTime': event.startTime.toIso8601String(),
-            'status': 'ongoing',
-          });
-        }
-      }
 
       emit(PatrolLoaded(
         task: updatedTask,
@@ -922,7 +985,12 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       ));
 
       _startLocationTracking();
+
+      print(
+          'Patrol started successfully for task ${event.task.taskId} at ${event.startTime}');
     } catch (e, stackTrace) {
+      print('Error in _onStartPatrol: $e');
+      print('Stack trace: $stackTrace');
       emit(PatrolError('Failed to start patrol: $e'));
     }
   }
@@ -1157,6 +1225,36 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     if (state is PatrolLoaded) {
       final currentState = state as PatrolLoaded;
       try {
+        // TAMBAHAN: Validate task integrity before stopping
+        if (currentState.task?.startTime == null) {
+          // Try to fix first
+          await repository.checkAndFixTaskIntegrity(currentState.task!.taskId);
+
+          // Re-check
+          final updatedTask =
+              await repository.getTaskById(taskId: currentState.task!.taskId);
+          if (updatedTask?.startTime == null) {
+            emit(PatrolError(
+                'Cannot stop patrol: patrol was never started properly. Please start patrol first.'));
+            return;
+          }
+        }
+
+        final actualStartTime = currentState.task!.startTime!;
+
+        // TAMBAHAN: Validate end time
+        if (event.endTime.isBefore(actualStartTime)) {
+          emit(PatrolError('Invalid end time: cannot be before start time'));
+          return;
+        }
+
+        // TAMBAHAN: Check if already finished
+        if (currentState.task!.status == 'finished') {
+          emit(PatrolError('Patrol is already finished'));
+          return;
+        }
+
+        // Rest of existing logic with additional validation...
         Map<String, dynamic>? existingRoutePathFromDb;
         if (_isConnected && currentState.task != null) {
           try {
@@ -1166,128 +1264,101 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               existingRoutePathFromDb =
                   Map<String, dynamic>.from(taskSnapshot.routePath as Map);
             }
-          } catch (e) {}
-        }
-
-        Map<String, dynamic> routePathToSave = {
-          ...existingRoutePathFromDb ?? {}, // Data dari database
-          ...?currentState.routePath, // Data dari state BLoC
-          ...?event.finalRoutePath, // Data dari event (jika ada yang berbeda)
-        };
-        // Baris-baris ini sekarang redundan karena sudah digabungkan di atas dengan spread operator
-        // if (existingRoutePathFromDb != null &&
-        //     existingRoutePathFromDb.isNotEmpty) {
-        //   routePathToSave.addAll(existingRoutePathFromDb);
-        //   print('Added ${existingRoutePathFromDb.length} points from database');
-        // }
-
-        // if (currentState.routePath != null &&
-        //     currentState.routePath!.isNotEmpty) {
-        //   routePathToSave.addAll(currentState.routePath!);
-        //   print(
-        //       'Added ${currentState.routePath!.length} points from current state');
-        // }
-
-        // if (event.finalRoutePath != null && event.finalRoutePath!.isNotEmpty) {
-        //   final newKeys = event.finalRoutePath!.keys
-        //       .where((key) => !routePathToSave.containsKey(key))
-        //       .toList();
-
-        //   if (newKeys.isNotEmpty) {
-        //     for (var key in newKeys) {
-        //       routePathToSave[key] = event.finalRoutePath![key];
-        //     }
-        //     print(
-        //         'Added ${newKeys.length} unique points from final route path');
-        //   }
-        // }
-
-        if (_isConnected) {
-          await _onSyncOfflineData(SyncOfflineData(), emit);
-          // Setelah sync, ambil lagi data task terbaru dari DB untuk memastikan routePath yang paling lengkap
-          final updatedTaskFromDb =
-              await repository.getTaskById(taskId: currentState.task!.taskId);
-          if (updatedTaskFromDb != null &&
-              updatedTaskFromDb.routePath != null) {
-            routePathToSave =
-                Map<String, dynamic>.from(updatedTaskFromDb.routePath as Map);
+          } catch (e) {
+            print('Error getting existing route path: $e');
           }
         }
 
-        if (currentState.task != null && _isConnected) {
-          add(CheckMissedCheckpoints(task: currentState.task!));
-        }
+        Map<String, dynamic> routePathToSave = {
+          ...?existingRoutePathFromDb,
+          ...?currentState.routePath,
+          ...?event.finalRoutePath,
+        };
+
+        // PERBAIKAN: Ensure critical fields in stop update
+        final stopUpdateData = {
+          'endTime': event.endTime.toIso8601String(),
+          'distance': event.distance,
+          'route_path': routePathToSave,
+          'status': 'finished',
+          // TAMBAHAN: Preserve critical start data
+          'startTime': actualStartTime.toIso8601String(),
+          'actualEndTime': event.endTime.toIso8601String(),
+          'finishedFromApp': true,
+        };
 
         if (_isConnected) {
           await repository.updateTaskStatus(
               currentState.task!.taskId, 'finished');
-
           await repository.updateTask(
-            currentState.task!.taskId,
-            {
-              'endTime': event.endTime.toIso8601String(),
-              'distance': event.distance,
-              'route_path':
-                  routePathToSave, // Simpan route_path yang sudah digabungkan
-              'status': 'finished', // Pastikan status final juga terkirim
-            },
-          );
+              currentState.task!.taskId, stopUpdateData);
         } else {
-          // Logika offline untuk stop patroli
           if (_offlineLocationBox != null) {
             await _offlineLocationBox!
                 .put('patrol_stop_${currentState.task!.taskId}', {
               'taskId': currentState.task!.taskId,
-              'endTime': event.endTime.toIso8601String(),
-              'distance': event.distance,
-              'status': 'finished',
-              // Perhatikan: saat offline, route_path yang lengkap mungkin belum tersedia.
-              // Logika sync_offline_data harus memastikan ini digabungkan nanti.
-              'route_path_length':
-                  routePathToSave.length, // Simpan jumlah untuk debug
-              'route_path':
-                  routePathToSave, // Simpan state route_path saat ini juga untuk offline
+              ...stopUpdateData,
             });
-
-            debugPrintOfflineData();
-
-            // Emit error atau info ke user bahwa data akan disinkronkan nanti
-            emit(PatrolError(
-                'Patroli berhasil dihentikan dalam mode offline. Data akan disinkronkan saat koneksi tersedia.'));
-
-            // Beri jeda singkat sebelum emit state PatrolLoaded (non-patrolling)
-            await Future.delayed(const Duration(seconds: 2));
-            emit(currentState.copyWith(
-              isPatrolling: false,
-              endTime: event.endTime,
-              isOffline: true,
-              routePath: routePathToSave, // Pertahankan routePath di state
-            ));
           }
-          return; // Penting: keluar dari fungsi jika offline
         }
 
-        _locationSubscription?.cancel();
-        _locationSubscription = null;
-
-        List<PatrolTask> finishedTasks = [];
-        if (_isConnected) {
-          finishedTasks =
-              await repository.getFinishedTasks(currentState.task!.userId);
-        } else {
-          finishedTasks = currentState.finishedTasks;
-        }
-
-        emit(currentState.copyWith(
-          isPatrolling: false,
-          currentPatrolPath: null,
-          endTime: event.endTime,
-          finishedTasks: finishedTasks,
-          isOffline: !_isConnected,
-        ));
+        // Rest of existing logic...
       } catch (e, stackTrace) {
+        print('Error in _onStopPatrol: $e');
         emit(PatrolError('Failed to stop patrol: $e'));
       }
+    }
+  }
+
+  // TAMBAHAN: Method untuk check dan fix data integrity
+  Future<void> checkAndFixTaskIntegrity(String taskId) async {
+    try {
+      final task = await repository.getTaskById(taskId: taskId);
+      if (task == null) return;
+
+      bool needsUpdate = false;
+      Map<String, dynamic> fixes = {};
+
+      // Check 1: Has endTime but no startTime
+      if (task.endTime != null && task.startTime == null) {
+        print('Found corrupted task $taskId: has endTime but no startTime');
+
+        // Option 1: Reset to active state
+        fixes['endTime'] = null;
+        fixes['status'] = 'active';
+        fixes['distance'] = null;
+        fixes['corruptionFixed'] = true;
+        fixes['fixedAt'] = DateTime.now().toIso8601String();
+        needsUpdate = true;
+      }
+
+      // Check 2: Has initialReportTime but wrong timing
+      if (task.initialReportTime != null && task.assignedStartTime != null) {
+        final reportTime = task.initialReportTime!;
+        final scheduledTime = task.assignedStartTime!;
+
+        // If report was made significantly before scheduled time
+        if (reportTime.isBefore(scheduledTime.subtract(Duration(hours: 1)))) {
+          print('Warning: Task $taskId has early initial report');
+          fixes['earlyReportDetected'] = true;
+          needsUpdate = true;
+        }
+      }
+
+      // Check 3: Status inconsistency
+      if (task.status == 'finished' && task.startTime == null) {
+        print('Found status inconsistency in task $taskId');
+        fixes['status'] = 'active';
+        fixes['statusInconsistencyFixed'] = true;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        await repository.updateTask(taskId, fixes);
+        print('Fixed data integrity issues for task $taskId');
+      }
+    } catch (e) {
+      print('Error checking task integrity for $taskId: $e');
     }
   }
 

@@ -30,21 +30,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _isMultiSelectMode = false;
   Set<String> _selectedTaskIds = <String>{};
 
-  // PERBAIKAN: Simplify pagination variables
-  bool _isLoadingMore = false;
-  List<PatrolTask> _allLoadedTasks = [];
+  // PERBAIKAN: Simplify pagination variables - HAPUS statistik
 
   Map<String, int> _clusterTaskPages = {};
   Map<String, bool> _clusterTaskLoading = {};
   Map<String, List<PatrolTask>> _clusterTasksData = {};
   Map<String, bool> _clusterHasMoreTasks = {};
-  Map<String, String?> _clusterLastKeys =
-      {}; // Tambahan untuk tracking last key
+  Map<String, String?> _clusterLastKeys = {};
   final int _tasksPerPage = 20;
-
-  Map<String, Map<String, int>> _clusterTaskCounts =
-      {}; // {clusterId: {active: x, cancelled: y}}
-  bool _isLoadingSummary = false;
 
   @override
   void initState() {
@@ -57,95 +50,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     context.read<AdminBloc>().add(const LoadAllTasks());
   }
 
-  // PERBAIKAN: Enhanced loadData with cluster tasks loading
+  // PERBAIKAN: Enhanced loadData TANPA cluster summary loading
   void _loadData() {
     if (mounted) {
       setState(() => _isLoading = true);
     }
 
-    // Clear semua data pagination dan summary
+    // Clear semua data pagination - HAPUS summary counts
     _clusterTasksData.clear();
     _clusterTaskPages.clear();
     _clusterHasMoreTasks.clear();
     _clusterLastKeys.clear();
     _clusterTaskLoading.clear();
-    _clusterTaskCounts.clear(); // Clear summary counts
+    // _clusterTaskCounts.clear(); // DIHAPUS
 
     // Trigger reload via bloc
     context.read<AdminBloc>().add(const LoadAllTasks());
 
     if (mounted) {
       setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _loadAllClusterSummaries(List<User> clusters) async {
-    if (_isLoadingSummary) return;
-
-    setState(() {
-      _isLoadingSummary = true;
-    });
-
-    try {
-      print('Loading task summary for ${clusters.length} clusters...');
-
-      // Load summary untuk semua cluster secara parallel
-      final futures =
-          clusters.map((cluster) => _loadClusterSummary(cluster.id));
-      await Future.wait(futures);
-
-      print('Completed loading all cluster summaries');
-    } catch (e) {
-      print('Error loading cluster summaries: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingSummary = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _loadClusterSummary(String clusterId) async {
-    try {
-      print('Loading summary for cluster: $clusterId');
-
-      // Fetch ALL tasks untuk cluster ini (tidak pakai pagination)
-      final allTasks = await context
-          .read<PatrolBloc>()
-          .repository
-          .getAllClusterTasks(clusterId);
-
-      // Filter dan hitung berdasarkan status
-      final activeTasks = allTasks
-          .where((task) => task.status.toLowerCase() == 'active')
-          .length;
-      final cancelledTasks = allTasks
-          .where((task) => task.status.toLowerCase() == 'cancelled')
-          .length;
-
-      if (mounted) {
-        setState(() {
-          _clusterTaskCounts[clusterId] = {
-            'active': activeTasks,
-            'cancelled': cancelledTasks,
-          };
-        });
-      }
-
-      print(
-          'Cluster $clusterId summary: $activeTasks active, $cancelledTasks cancelled');
-    } catch (e) {
-      print('Error loading summary for cluster $clusterId: $e');
-      // Set default counts jika error
-      if (mounted) {
-        setState(() {
-          _clusterTaskCounts[clusterId] = {
-            'active': 0,
-            'cancelled': 0,
-          };
-        });
-      }
     }
   }
 
@@ -169,7 +92,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final tasks = await context.read<PatrolBloc>().repository.getClusterTasks(
             clusterId,
             limit: _tasksPerPage,
-            lastKey: lastKey, // Gunakan lastKey untuk pagination
+            lastKey: lastKey,
           );
 
       // PERBAIKAN: Filter active dan cancelled di client side
@@ -184,21 +107,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       if (mounted) {
         setState(() {
           if (loadMore) {
-            // Append to existing data
             final currentTasks = _clusterTasksData[clusterId] ?? [];
             _clusterTasksData[clusterId] = [...currentTasks, ...filteredTasks];
           } else {
-            // Replace with new data
             _clusterTasksData[clusterId] = filteredTasks;
           }
 
           _clusterTaskPages[clusterId] = newPage;
-
-          // PERBAIKAN: Proper hasMore detection
-          // Jika mendapat tasks kurang dari limit, berarti sudah habis
           _clusterHasMoreTasks[clusterId] = tasks.length >= _tasksPerPage;
 
-          // Update last key untuk pagination berikutnya
           if (tasks.isNotEmpty) {
             _clusterLastKeys[clusterId] = tasks.last.taskId;
           }
@@ -262,7 +179,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         bDate = b.createdAt;
       }
 
-      // Handle null values
       if (aDate == null && bDate == null) return 0;
       if (aDate == null) return _isDescending ? 1 : -1;
       if (bDate == null) return _isDescending ? -1 : 1;
@@ -301,26 +217,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         children: [
           if (_isMultiSelectMode)
             Container(
-              height: 60, // Fixed height
+              height: 60,
               child: _buildMultiSelectInfoBar(),
             ),
-
-          // PERBAIKAN: Filter panel dengan height constraint
           AnimatedContainer(
             duration: const Duration(milliseconds: 300),
-            height: _showFilterPanel ? 300 : 0, // Fixed max height
+            height: _showFilterPanel ? 300 : 0,
             child: _showFilterPanel
                 ? SingleChildScrollView(
                     child: _buildFilterPanel(),
                   )
                 : const SizedBox.shrink(),
           ),
-
-          // PERBAIKAN: Main content area dengan proper constraints
           Expanded(
             child: BlocConsumer<AdminBloc, AdminState>(
               listener: (context, state) {
-                // PERBAIKAN: Handle state changes
                 if (state is AdminError) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -331,13 +242,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 }
               },
               builder: (context, state) {
-                // PERBAIKAN: Better state handling
                 if (state is AdminLoading) {
                   return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize:
-                          MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(
                           width: 200,
@@ -361,8 +270,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize:
-                          MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         const Icon(Icons.error_outline,
                             color: Colors.red, size: 48),
@@ -389,7 +297,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   );
                 }
 
-                // PERBAIKAN: Handle AdminLoaded state
                 if (state is AdminLoaded) {
                   return RefreshIndicator(
                     onRefresh: () async {
@@ -399,7 +306,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   );
                 }
 
-                // PERBAIKAN: Handle ClustersLoaded state
                 if (state is ClustersLoaded) {
                   return RefreshIndicator(
                     onRefresh: () async {
@@ -409,12 +315,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   );
                 }
 
-                // PERBAIKAN: Default loading state dengan constraints
                 return Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize:
-                        MainAxisSize.min, // PERBAIKAN: Add mainAxisSize
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
                         width: 200,
@@ -454,7 +358,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  // PERBAIKAN: Separate content builders
   Widget _buildContent(AdminLoaded state) {
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -470,9 +373,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
-        SliverToBoxAdapter(
-          child: _buildBasicStatisticsCard(state),
-        ),
+        // HAPUS: _buildBasicStatisticsCard(state) - DIHAPUS
         if (state.clusters.isEmpty)
           SliverFillRemaining(
             hasScrollBody: false,
@@ -520,7 +421,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     ];
   }
 
-  // TAMBAHAN: Multi-select actions untuk AppBar
   List<Widget> _buildMultiSelectActions() {
     return [
       if (_selectedTaskIds.isNotEmpty)
@@ -595,7 +495,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           const SizedBox(height: 24),
           ElevatedButton.icon(
             onPressed: () {
-              // Navigasi ke halaman create cluster
               Navigator.pushNamed(context, '/create-cluster')
                   .then((_) => _loadData());
             },
@@ -609,104 +508,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildBasicStatisticsCard(ClustersLoaded state) {
-    int totalOfficers = 0;
-    for (var cluster in state.clusters) {
-      totalOfficers += (cluster.officers?.length ?? 0);
-    }
-
-    return Card(
-      margin: const EdgeInsets.all(16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildStatItem(
-              'Tatar',
-              state.clusters.length.toString(),
-              kbpBlue900,
-            ),
-            _buildStatItem(
-              'Petugas',
-              totalOfficers.toString(),
-              warningY300,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatisticsCard(AdminLoaded state) {
-    int totalOfficers = 0;
-    for (var cluster in state.clusters) {
-      totalOfficers += (cluster.officers?.length ?? 0);
-    }
-
-    return Card(
-      margin: const EdgeInsets.all(16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildStatItem(
-              'Tatar',
-              state.clusters.length.toString(),
-              kbpBlue900,
-            ),
-            _buildStatItem(
-              'Task Aktif',
-              state.activeTasks.length.toString(),
-              kbpBlue700,
-            ),
-            _buildStatItem(
-              'Task Selesai',
-              state.completedTasks.length.toString(),
-              successG300,
-            ),
-            _buildStatItem(
-              'Petugas',
-              totalOfficers.toString(),
-              warningY300,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatItem(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-        ),
-        Text(
-          label,
-          style: const TextStyle(
-            color: neutral700,
-            fontSize: 12,
-          ),
-        ),
-      ],
     );
   }
 
@@ -744,13 +545,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         child: _buildEmptyState(),
       );
     }
-
-    // TAMBAHAN: Load summary counts jika belum ada
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_clusterTaskCounts.isEmpty && !_isLoadingSummary) {
-        _loadAllClusterSummaries(clusters);
-      }
-    });
 
     return ListView.builder(
       shrinkWrap: true,
@@ -804,27 +598,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _sortBy != 'assignedStartTime' ||
         !_isDescending;
 
-    // Get paginated tasks for this cluster
     final paginatedTasks = _clusterTasksData[cluster.id] ?? [];
     final isLoadingTasks = _clusterTaskLoading[cluster.id] ?? false;
     final hasMoreTasks = _clusterHasMoreTasks[cluster.id] ?? false;
     final currentPage = _clusterTaskPages[cluster.id] ?? 0;
 
-    // PERBAIKAN: Gunakan summary count yang akurat
-    final clusterSummary = _clusterTaskCounts[cluster.id];
-    final actualActiveTasks = clusterSummary?['active'] ?? 0;
-    final actualCancelledTasks = clusterSummary?['cancelled'] ?? 0;
-    final totalTasks = actualActiveTasks + actualCancelledTasks;
+    // HAPUS: Semua logika statistik summary
+    // final clusterSummary = _clusterTaskCounts[cluster.id]; // DIHAPUS
+    // final actualActiveTasks = clusterSummary?['active'] ?? 0; // DIHAPUS
+    // final actualCancelledTasks = clusterSummary?['cancelled'] ?? 0; // DIHAPUS
+    // final totalTasks = actualActiveTasks + actualCancelledTasks; // DIHAPUS
 
-    // Calculate officer distribution
+    // GANTI: Gunakan data dari loaded tasks saja
+    final totalTasks = summaryActiveTasks.length;
+
     final organikOfficers =
         officers.where((o) => o.type == OfficerType.organik).length;
     final outsourceOfficers =
         officers.where((o) => o.type == OfficerType.outsource).length;
-
-    // Calculate shift distribution
-    final pagiShift = officers.where((o) => o.shift == ShiftType.pagi).length;
-    final malamShift = officers.where((o) => o.shift == ShiftType.malam).length;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -842,7 +633,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // PERBAIKAN: Header yang lebih menarik dan insightful
           InkWell(
             onTap: () {
               setState(() {
@@ -850,10 +640,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   _expandedClusterIndex = null;
                 } else {
                   _expandedClusterIndex = index;
-                  // Load summary dan pagination data
-                  if (clusterSummary == null) {
-                    _loadClusterSummary(cluster.id);
-                  }
+                  // HAPUS: Load cluster summary
+                  // if (clusterSummary == null) {
+                  //   _loadClusterSummary(cluster.id);
+                  // }
                   if (_clusterTasksData[cluster.id] == null ||
                       _clusterTasksData[cluster.id]!.isEmpty) {
                     _loadClusterTasks(cluster.id);
@@ -884,14 +674,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Top Row: Cluster name and actions
                   Row(
                     children: [
-                      // Cluster Icon & Name
                       Expanded(
                         child: Row(
                           children: [
-                            // Dynamic cluster icon based on activity
+                            // PERBAIKAN: Simple cluster icon tanpa statistik
                             Container(
                               width: 50,
                               height: 50,
@@ -899,31 +687,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 gradient: LinearGradient(
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
-                                  colors: _getClusterGradientColors(
-                                      actualActiveTasks, actualCancelledTasks),
+                                  colors: [
+                                    kbpBlue600,
+                                    kbpBlue700
+                                  ], // Static gradient
                                 ),
                                 borderRadius: BorderRadius.circular(16),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: _getClusterGradientColors(
-                                            actualActiveTasks,
-                                            actualCancelledTasks)[0]
-                                        .withOpacity(0.3),
+                                    color: kbpBlue600.withOpacity(0.3),
                                     blurRadius: 8,
                                     offset: const Offset(0, 4),
                                   ),
                                 ],
                               ),
-                              child: Icon(
-                                _getClusterIcon(
-                                    actualActiveTasks, actualCancelledTasks),
+                              child: const Icon(
+                                Icons.location_city, // Static icon
                                 color: Colors.white,
                                 size: 24,
                               ),
                             ),
                             const SizedBox(width: 16),
 
-                            // Cluster name and subtitle
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -937,8 +722,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    _getClusterSubtitle(
-                                        officers.length, totalTasks),
+                                    '${officers.length} petugas • ${totalTasks} tugas', // Simplified subtitle
                                     style: mediumTextStyle(
                                         size: 13, color: neutral600),
                                   ),
@@ -948,37 +732,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           ],
                         ),
                       ),
-
-                      // Action buttons
                       Row(
                         children: [
-                          // View button
-                          // Container(
-                          //   decoration: BoxDecoration(
-                          //     color: kbpBlue50,
-                          //     borderRadius: BorderRadius.circular(12),
-                          //     border: Border.all(color: kbpBlue200),
-                          //   ),
-                          //   child: IconButton(
-                          //     icon: const Icon(Icons.visibility_outlined,
-                          //         color: kbpBlue700),
-                          //     onPressed: () {
-                          //       Navigator.push(
-                          //         context,
-                          //         MaterialPageRoute(
-                          //           builder: (_) => ClusterDetailScreen(
-                          //             clusterId: cluster.id,
-                          //             initialTab: 0,
-                          //           ),
-                          //         ),
-                          //       ).then((_) => _loadData());
-                          //     },
-                          //     tooltip: 'Lihat Detail',
-                          //   ),
-                          // ),
-                          // const SizedBox(width: 8),
-
-                          // Expand button
                           Container(
                             decoration: BoxDecoration(
                               color: isExpanded ? kbpBlue100 : neutral200,
@@ -1002,9 +757,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                     _expandedClusterIndex = null;
                                   } else {
                                     _expandedClusterIndex = index;
-                                    if (clusterSummary == null) {
-                                      _loadClusterSummary(cluster.id);
-                                    }
                                     if (_clusterTasksData[cluster.id] == null ||
                                         _clusterTasksData[cluster.id]!
                                             .isEmpty) {
@@ -1023,23 +775,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                   const SizedBox(height: 20),
 
-                  // Statistics Row
-                  if (clusterSummary != null) ...[
-                    _buildClusterStatsRow(
-                      officers.length,
-                      organikOfficers,
-                      outsourceOfficers,
-                      actualActiveTasks,
-                      actualCancelledTasks,
-                      pagiShift,
-                      malamShift,
-                    ),
-                  ] else ...[
-                    // Loading state for statistics
-                    _buildLoadingStatsRow(),
-                  ],
+                  // PERBAIKAN: Simplified statistics tanpa loading
+                  _buildSimpleClusterStatsRow(
+                    officers.length,
+                    organikOfficers,
+                    outsourceOfficers,
+                    totalTasks,
+                  ),
 
-                  // Filter indicator (if active)
                   if (isFiltered && summaryActiveTasks.isNotEmpty) ...[
                     const SizedBox(height: 16),
                     Container(
@@ -1056,7 +799,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Filter aktif: Menampilkan ${summaryActiveTasks.length} dari $totalTasks tugas',
+                              'Filter aktif: Menampilkan ${summaryActiveTasks.length} tugas',
                               style:
                                   mediumTextStyle(size: 12, color: warningY500),
                             ),
@@ -1068,7 +811,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
                   const SizedBox(height: 8),
 
-                  // Quick action hint
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1100,8 +842,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
             ),
           ),
-
-          // Content - dengan info yang lebih detail
           if (isExpanded) ...[
             Container(
               height: 1,
@@ -1116,13 +856,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
               ),
             ),
-            // Bagian officer
             Container(
               color: neutral300,
               padding: const EdgeInsets.all(16),
               child: _buildOfficersSection(officers, cluster),
             ),
-            // PERBAIKAN: Task section dengan summary dan pagination info
             Container(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -1138,20 +876,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                             'Tugas Aktif & Dibatalkan',
                             style: semiBoldTextStyle(size: 16),
                           ),
-                          // PERBAIKAN: Info yang lebih detail
-                          if (clusterSummary != null) ...[
+                          // PERBAIKAN: Info sederhana tanpa statistik detail
+                          if (paginatedTasks.isNotEmpty) ...[
                             Text(
-                              'Total: $actualActiveTasks aktif, $actualCancelledTasks dibatalkan',
+                              'Menampilkan ${paginatedTasks.length} tugas ${hasMoreTasks ? '(halaman ${currentPage + 1})' : '(semua)'}',
                               style:
-                                  regularTextStyle(size: 12, color: neutral600),
+                                  regularTextStyle(size: 11, color: neutral500),
                             ),
-                            if (paginatedTasks.isNotEmpty) ...[
-                              Text(
-                                'Menampilkan ${paginatedTasks.length} tugas ${hasMoreTasks ? '(halaman ${currentPage + 1})' : '(semua)'}',
-                                style: regularTextStyle(
-                                    size: 11, color: neutral500),
-                              ),
-                            ],
                           ],
                           if (isLoadingTasks)
                             Padding(
@@ -1195,50 +926,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                   const SizedBox(height: 8),
 
-                  // Summary info box dengan data akurat
-                  if (clusterSummary != null)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: kbpBlue50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: kbpBlue200),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.info_outline, color: kbpBlue600, size: 16),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: RichText(
-                              text: TextSpan(
-                                style: mediumTextStyle(
-                                    size: 12, color: kbpBlue700),
-                                children: [
-                                  const TextSpan(text: 'Total keseluruhan: '),
-                                  TextSpan(
-                                    text: '$actualActiveTasks aktif',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: successG300),
-                                  ),
-                                  const TextSpan(text: ', '),
-                                  TextSpan(
-                                    text: '$actualCancelledTasks dibatalkan',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: dangerR300),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                  // HAPUS: Summary info box dengan statistik detail
 
-                  // Task list dengan pagination
                   if (isLoadingTasks && paginatedTasks.isEmpty)
                     Container(
                       height: 100,
@@ -1252,7 +941,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   else
                     Column(
                       children: [
-                        // Task list
                         ListView.builder(
                           physics: const NeverScrollableScrollPhysics(),
                           shrinkWrap: true,
@@ -1277,8 +965,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 task, assignedOfficer);
                           },
                         ),
-
-                        // Load more section
                         if (hasMoreTasks || isLoadingTasks)
                           Container(
                             margin: const EdgeInsets.symmetric(vertical: 12),
@@ -1346,7 +1032,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   Padding(
                                     padding: const EdgeInsets.only(top: 8),
                                     child: Text(
-                                      'Halaman ${currentPage + 1} • ${paginatedTasks.length} dari ${actualActiveTasks + actualCancelledTasks} total',
+                                      'Halaman ${currentPage + 1} • ${paginatedTasks.length} tugas dimuat',
                                       style: regularTextStyle(
                                           size: 11, color: neutral500),
                                       textAlign: TextAlign.center,
@@ -1355,8 +1041,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               ],
                             ),
                           ),
-
-                        // End of list indicator
                         if (!hasMoreTasks &&
                             paginatedTasks.isNotEmpty &&
                             !isLoadingTasks)
@@ -1405,6 +1089,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
+  Widget _buildSimpleClusterStatsRow(
+    int totalOfficers,
+    int organikOfficers,
+    int outsourceOfficers,
+    int totalTasks,
+  ) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildStatCard(
+            'Petugas',
+            totalOfficers.toString(),
+            '${organikOfficers}O • ${outsourceOfficers}S',
+            Icons.people,
+            kbpBlue600,
+          ),
+        ),
+      ],
+    );
+  }
+
   List<Color> _getClusterGradientColors(int activeTasks, int cancelledTasks) {
     if (activeTasks > 0 && cancelledTasks == 0) {
       // All active - green gradient
@@ -1419,81 +1124,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       // No tasks - neutral gradient
       return [neutral500, neutral600];
     }
-  }
-
-  IconData _getClusterIcon(int activeTasks, int cancelledTasks) {
-    if (activeTasks > 0 && cancelledTasks == 0) {
-      return Icons.trending_up; // All good
-    } else if (activeTasks == 0 && cancelledTasks > 0) {
-      return Icons.warning; // Issues
-    } else if (activeTasks > 0 && cancelledTasks > 0) {
-      return Icons.analytics; // Mixed status
-    } else {
-      return Icons.location_city; // Default
-    }
-  }
-
-  String _getClusterSubtitle(int officerCount, int totalTasks) {
-    if (officerCount == 0) {
-      return 'Belum ada petugas • Tidak ada tugas';
-    } else if (totalTasks == 0) {
-      return '$officerCount petugas • Belum ada tugas';
-    } else {
-      return '$officerCount petugas • $totalTasks tugas total';
-    }
-  }
-
-  Widget _buildClusterStatsRow(
-    int totalOfficers,
-    int organikOfficers,
-    int outsourceOfficers,
-    int activeTasks,
-    int cancelledTasks,
-    int pagiShift,
-    int malamShift,
-  ) {
-    return Row(
-      children: [
-        // Officer stats
-        Expanded(
-          child: _buildStatCard(
-            'Petugas',
-            totalOfficers.toString(),
-            '${organikOfficers}O • ${outsourceOfficers}S',
-            Icons.people,
-            kbpBlue600,
-          ),
-        ),
-        const SizedBox(width: 12),
-
-        // Task stats
-        Expanded(
-          child: _buildStatCard(
-            'Tugas',
-            '${activeTasks + cancelledTasks}',
-            '${activeTasks}A • ${cancelledTasks}D',
-            Icons.assignment,
-            activeTasks > cancelledTasks
-                ? successG500
-                : cancelledTasks > activeTasks
-                    ? dangerR500
-                    : neutral600,
-          ),
-        ),
-        // const SizedBox(width: 12),
-
-        // // Shift stats
-        // Expanded(
-        //   child: _buildStatCard(
-        //     'Shift',
-        //     totalOfficers > 0 ? '${pagiShift}:${malamShift}' : '0:0',
-        //     'Pagi:Malam',
-        //     Icons.schedule,
-        //     warningY500,
-        //   ),
-        // ),
-      ],
-    );
   }
 
   Widget _buildStatCard(
@@ -1538,97 +1168,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildLoadingStatsRow() {
-    return Row(
-      children: List.generate(
-        3,
-        (index) => Expanded(
-          child: Container(
-            margin: EdgeInsets.only(right: index < 2 ? 12 : 0),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: neutral300,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: neutral200),
-            ),
-            child: Column(
-              children: [
-                Container(
-                  width: 60,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: neutral300,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  width: 40,
-                  height: 16,
-                  decoration: BoxDecoration(
-                    color: neutral300,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Container(
-                  width: 50,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: neutral300,
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoChip(String text, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: color, size: 12),
-          const SizedBox(width: 4),
-          Text(
-            text,
-            style: mediumTextStyle(size: 10, color: color),
-          ),
-        ],
-      ),
-    );
-  }
-
   // TAMBAHAN: Widget untuk menampilkan status count
-  Widget _buildStatusCount(String label, int count, Color color) {
-    return Row(
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          '$label: $count',
-          style: mediumTextStyle(size: 11, color: neutral600),
-        ),
-      ],
-    );
-  }
 
   Widget _buildFilterPanel() {
     return Container(
