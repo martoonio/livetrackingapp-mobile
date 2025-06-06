@@ -26,70 +26,801 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _taskSubscription;
   User? _currentUser;
+
+  // TAMBAHAN: Pagination variables untuk upcoming tasks
+  List<PatrolTask> _allUpcomingTasks = [];
+  List<PatrolTask> _displayedUpcomingTasks = [];
+  int _upcomingCurrentPage = 0;
+  final int _upcomingItemsPerPage = 10;
+  bool _hasMoreUpcomingTasks = false;
+  bool _isLoadingMoreUpcoming = false;
+
+  // TAMBAHAN: Pagination variables untuk history tasks
+  List<PatrolTask> _allHistoryTasks = [];
+  List<PatrolTask> _displayedHistoryTasks = [];
+  int _historyCurrentPage = 0;
+  final int _historyItemsPerPage = 10;
+  bool _hasMoreHistoryTasks = false;
+  bool _isLoadingMoreHistory = false;
+
+  // Legacy variables - akan diupdate dengan pagination
   List<PatrolTask> _upcomingTasks = [];
   List<PatrolTask> _historyTasks = [];
   bool _isLoading = true;
   final Set<String> _expandedOfficers = {};
 
-  late AppLifecycleListener _lifecycleListener;
+  List<PatrolTask> _allOngoingTasks = [];
+  List<PatrolTask> _displayedOngoingTasks = [];
+  int _ongoingCurrentPage = 0;
+  final int _ongoingItemsPerPage = 10;
+  bool _hasMoreOngoingTasks = false;
+  bool _isLoadingMoreOngoing = false;
+
+  bool _isUpcomingExpanded = false;
+  final int _upcomingPreviewLimit = 5;
+
+  // late AppLifecycleListener _lifecycleListener;
   Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
-    _lifecycleListener = AppLifecycleListener(
-      onStateChange: (state) {
-        // PERBAIKAN: Cek mounted sebelum operasi
-        if (!mounted) return;
+    // _lifecycleListener = AppLifecycleListener(
+    //   onStateChange: (state) {
+    //     if (!mounted) return;
 
-        if (state == AppLifecycleState.resumed) {
-          _startRefreshTimer();
-        } else if (state == AppLifecycleState.paused) {
-          _refreshTimer?.cancel();
-          _refreshTimer = null;
-        }
-      },
-    );
-    _startRefreshTimer();
+    //     if (state == AppLifecycleState.resumed) {
+    //       _startRefreshTimer();
+    //     } else if (state == AppLifecycleState.paused) {
+    //       _refreshTimer?.cancel();
+    //       _refreshTimer = null;
+    //     }
+    //   },
+    // );
+    // _startRefreshTimer();
     _loadUserData();
   }
 
-  
+  void _toggleUpcomingExpanded() {
+    setState(() {
+      _isUpcomingExpanded = !_isUpcomingExpanded;
 
-  void _startRefreshTimer() {
-    // PERBAIKAN: Cancel timer sebelumnya dan cek mounted
-    _refreshTimer?.cancel();
-    if (!mounted) return;
-
-    _refreshTimer = Timer.periodic(const Duration(seconds: 300), (timer) {
-      // PERBAIKAN: Cek mounted di dalam callback timer
-      if (!mounted) {
-        timer.cancel();
-        return;
+      if (_isUpcomingExpanded) {
+        // Expand: load first page of items
+        _displayedUpcomingTasks =
+            _allUpcomingTasks.take(_upcomingItemsPerPage).toList();
+        _upcomingCurrentPage = 0;
+      } else {
+        // Collapse: back to preview
+        _displayedUpcomingTasks =
+            _allUpcomingTasks.take(_upcomingPreviewLimit).toList();
+        _upcomingCurrentPage = 0;
       }
 
-      _loadUserData();
-
-      // PERBAIKAN: Cek mounted sebelum show snackbar
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Memperbarui data...',
-              style: mediumTextStyle(color: Colors.white),
-            ),
-            backgroundColor: kbpBlue800,
-            duration: const Duration(seconds: 1),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.all(16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        );
-      }
+      _hasMoreUpcomingTasks =
+          _displayedUpcomingTasks.length < _allUpcomingTasks.length;
+      _isLoadingMoreUpcoming = false;
+      _upcomingTasks = List.from(_displayedUpcomingTasks);
     });
   }
+
+  // PERBAIKAN: Reset pagination data - update untuk upcoming state
+  void _resetPaginationData() {
+    _allUpcomingTasks.clear();
+    _displayedUpcomingTasks.clear();
+    _upcomingCurrentPage = 0;
+    _hasMoreUpcomingTasks = false;
+    _isLoadingMoreUpcoming = false;
+    _isUpcomingExpanded = false; // TAMBAHAN: Reset expand state
+
+    // Reset other pagination data...
+    _allOngoingTasks.clear();
+    _displayedOngoingTasks.clear();
+    _ongoingCurrentPage = 0;
+    _hasMoreOngoingTasks = false;
+    _isLoadingMoreOngoing = false;
+
+    _allHistoryTasks.clear();
+    _displayedHistoryTasks.clear();
+    _historyCurrentPage = 0;
+    _hasMoreHistoryTasks = false;
+    _isLoadingMoreHistory = false;
+
+    // Legacy lists
+    _upcomingTasks.clear();
+    _historyTasks.clear();
+  }
+
+  Widget _buildUpcomingPatrolsContent() {
+    if (_displayedUpcomingTasks.isEmpty && !_isLoadingMoreUpcoming) {
+      return _buildEmptyStateCard(
+        icon: 'assets/state/noTask.svg',
+        message: 'Belum ada tugas patroli\nyang dijadwalkan',
+      );
+    }
+
+    final now = DateTime.now();
+
+    return Column(
+      children: [
+        // TAMBAHAN: Smart info bar
+        if (_displayedUpcomingTasks.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: kbpBlue50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: kbpBlue200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.schedule, size: 14, color: kbpBlue600),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _isUpcomingExpanded
+                        ? 'Menampilkan ${_displayedUpcomingTasks.length} dari ${_allUpcomingTasks.length} tugas mendatang'
+                        : 'Menampilkan ${_displayedUpcomingTasks.length} tugas terdekat dari ${_allUpcomingTasks.length} total',
+                    style: mediumTextStyle(size: 12, color: kbpBlue700),
+                  ),
+                ),
+                if (!_isUpcomingExpanded &&
+                    _allUpcomingTasks.length > _upcomingPreviewLimit)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: kbpBlue100,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '+${_allUpcomingTasks.length - _upcomingPreviewLimit}',
+                      style: boldTextStyle(size: 10, color: kbpBlue700),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+        // TAMBAHAN: Priority tasks indicator (tasks yang bisa dimulai sekarang)
+        if (_displayedUpcomingTasks.isNotEmpty)
+          _buildPriorityTasksIndicator(now),
+
+        // Main task list card
+        Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: kbpBlue200, width: 1),
+          ),
+          color: Colors.white,
+          child: Column(
+            children: [
+              // Tasks list
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _displayedUpcomingTasks.length,
+                separatorBuilder: (context, index) =>
+                    const Divider(height: 1, color: kbpBlue100),
+                itemBuilder: (context, index) {
+                  final task = _displayedUpcomingTasks[index];
+                  final isUrgent = _isTaskUrgent(task, now);
+                  return _buildUpcomingTaskItem(task, index, isUrgent);
+                },
+              ),
+
+              // TAMBAHAN: Load more section
+              if (_isUpcomingExpanded &&
+                  (_hasMoreUpcomingTasks || _isLoadingMoreUpcoming)) ...[
+                const Divider(height: 1, color: kbpBlue200),
+                if (_isLoadingMoreUpcoming)
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: kbpBlue600,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Memuat tugas lainnya...',
+                          style: mediumTextStyle(size: 14, color: kbpBlue600),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _loadMoreUpcomingTasks,
+                        icon: const Icon(Icons.expand_more, size: 16),
+                        label: Text('Muat ${_upcomingItemsPerPage} Tugas Lagi'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: kbpBlue700,
+                          side: BorderSide(color: kbpBlue300, width: 1.5),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+
+              // TAMBAHAN: Expand/Collapse button
+              if (_allUpcomingTasks.length > _upcomingPreviewLimit) ...[
+                if (!_isUpcomingExpanded || !_hasMoreUpcomingTasks)
+                  const Divider(height: 1, color: kbpBlue200),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: TextButton.icon(
+                      onPressed: _toggleUpcomingExpanded,
+                      icon: AnimatedRotation(
+                        turns: _isUpcomingExpanded ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 200),
+                        child: const Icon(Icons.keyboard_arrow_down, size: 18),
+                      ),
+                      label: Text(
+                        _isUpcomingExpanded
+                            ? 'Tampilkan Lebih Sedikit'
+                            : 'Lihat Semua ${_allUpcomingTasks.length} Tugas',
+                        style: mediumTextStyle(size: 14, color: kbpBlue700),
+                      ),
+                      style: TextButton.styleFrom(
+                        foregroundColor: kbpBlue700,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // TAMBAHAN: Priority tasks indicator
+  Widget _buildPriorityTasksIndicator(DateTime now) {
+    final urgentTasks = _displayedUpcomingTasks
+        .where((task) => _isTaskUrgent(task, now))
+        .length;
+
+    if (urgentTasks == 0) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: warningY50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: warningY300),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.priority_high, size: 16, color: warningY400),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$urgentTasks tugas siap dimulai (dalam 10 menit ke depan)',
+              style: semiBoldTextStyle(size: 12, color: warningY500),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: warningY400,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '$urgentTasks',
+              style: boldTextStyle(size: 10, color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // TAMBAHAN: Check if task is urgent (can be started within 10 minutes)
+  bool _isTaskUrgent(PatrolTask task, DateTime now) {
+    if (task.assignedStartTime == null) return false;
+    final timeDifference = task.assignedStartTime!.difference(now);
+    return timeDifference.inMinutes <= 10 &&
+        timeDifference.inMinutes >= -5; // Allow 5 minutes late
+  }
+
+  // TAMBAHAN: Enhanced upcoming task item
+  Widget _buildUpcomingTaskItem(PatrolTask task, int index, bool isUrgent) {
+    final now = DateTime.now();
+    final canStart = task.assignedStartTime != null &&
+        task.assignedStartTime!.difference(now).inMinutes <= 10;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isUrgent ? warningY50.withOpacity(0.3) : Colors.transparent,
+        borderRadius: index == 0 && index == _displayedUpcomingTasks.length - 1
+            ? BorderRadius.circular(12)
+            : index == 0
+                ? const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
+                  )
+                : index == _displayedUpcomingTasks.length - 1
+                    ? const BorderRadius.only(
+                        bottomLeft: Radius.circular(12),
+                        bottomRight: Radius.circular(12),
+                      )
+                    : BorderRadius.zero,
+      ),
+      child: InkWell(
+        onTap: () => _showTaskDialog(task),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              // Priority indicator & Avatar
+              Stack(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: kbpBlue100,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isUrgent ? warningY400 : kbpBlue300,
+                        width: isUrgent ? 2 : 1,
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: task.officerPhotoUrl.isNotEmpty
+                          ? Image.network(
+                              task.officerPhotoUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Center(
+                                  child: Text(
+                                    task.officerName
+                                        .substring(0, 1)
+                                        .toUpperCase(),
+                                    style: semiBoldTextStyle(
+                                        size: 16, color: kbpBlue900),
+                                  ),
+                                );
+                              },
+                            )
+                          : Center(
+                              child: Text(
+                                task.officerName.substring(0, 1).toUpperCase(),
+                                style: semiBoldTextStyle(
+                                    size: 16, color: kbpBlue900),
+                              ),
+                            ),
+                    ),
+                  ),
+                  // Urgent indicator
+                  if (isUrgent)
+                    Positioned(
+                      top: -2,
+                      right: -2,
+                      child: Container(
+                        width: 16,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: warningY500,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: const Icon(
+                          Icons.priority_high,
+                          size: 8,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 16),
+
+              // Task info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Officer name & vehicle
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            task.officerName,
+                            style: semiBoldTextStyle(
+                              size: 15,
+                              color: isUrgent ? warningY500 : kbpBlue900,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+
+                    // Route info
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.place,
+                          size: 14,
+                          color: isUrgent ? warningY400 : kbpBlue600,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          "${task.assignedRoute?.length ?? 0} titik patroli",
+                          style: regularTextStyle(
+                            size: 12,
+                            color: isUrgent ? warningY500 : kbpBlue700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+
+                    // Status badges
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: canStart ? successG500 : kbpBlue600,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            canStart ? 'Siap Dimulai' : 'Terjadwal',
+                            style: boldTextStyle(size: 10, color: Colors.white),
+                          ),
+                        ),
+                        if (isUrgent) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: warningY500,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              'PRIORITAS',
+                              style:
+                                  boldTextStyle(size: 10, color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // Time & Action
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  // Scheduled time
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isUrgent ? warningY100 : kbpBlue50,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: isUrgent ? warningY300 : kbpBlue200,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          task.assignedStartTime != null
+                              ? formatDateFromString(
+                                  task.assignedStartTime.toString())
+                              : 'N/A',
+                          style: mediumTextStyle(
+                            size: 10,
+                            color: isUrgent ? warningY500 : kbpBlue700,
+                          ),
+                        ),
+                        Text(
+                          task.assignedStartTime != null
+                              ? formatTimeFromString(
+                                  task.assignedStartTime.toString())
+                              : 'N/A',
+                          style: boldTextStyle(
+                            size: 12,
+                            color: isUrgent ? warningY500 : kbpBlue900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // const SizedBox(width: 12),
+                  // Icon(
+                  //   Icons.access_time,
+                  //   size: 14,
+                  //   color: isUrgent ? warningY500 : kbpBlue600,
+                  // ),
+                  // const SizedBox(width: 4),
+                  // Text(
+                  //   _getTimeUntilStart(task, now),
+                  //   style: mediumTextStyle(
+                  //     size: 12,
+                  //     color: isUrgent ? warningY500 : kbpBlue700,
+                  //   ),
+                  // ),
+
+                  // Action button
+                  SizedBox(
+                    width: 80,
+                    height: 32,
+                    child: ElevatedButton(
+                      onPressed: () => _showTaskDialog(task),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: canStart ? successG500 : kbpBlue900,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        elevation: 0,
+                        padding: EdgeInsets.zero,
+                      ),
+                      child: Text(
+                        canStart ? 'Mulai' : 'Detail',
+                        style: mediumTextStyle(size: 11, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // TAMBAHAN: Get time until task start
+  String _getTimeUntilStart(PatrolTask task, DateTime now) {
+    if (task.assignedStartTime == null) return 'Waktu tidak tersedia';
+
+    final difference = task.assignedStartTime!.difference(now);
+
+    if (difference.inMinutes <= 0) {
+      return 'Sekarang';
+    } else if (difference.inMinutes <= 60) {
+      return '${difference.inMinutes} menit lagi';
+    } else if (difference.inHours <= 24) {
+      return '${difference.inHours} jam lagi';
+    } else {
+      return '${difference.inDays} hari lagi';
+    }
+  }
+
+  void _loadMoreOngoingTasks() {
+    if (_isLoadingMoreOngoing || !_hasMoreOngoingTasks) return;
+
+    setState(() {
+      _isLoadingMoreOngoing = true;
+    });
+
+    final startIndex = (_ongoingCurrentPage + 1) * _ongoingItemsPerPage;
+    final endIndex = startIndex + _ongoingItemsPerPage;
+
+    if (startIndex < _allOngoingTasks.length) {
+      final newTasks =
+          _allOngoingTasks.skip(startIndex).take(_ongoingItemsPerPage).toList();
+
+      setState(() {
+        _displayedOngoingTasks.addAll(newTasks);
+        _ongoingCurrentPage++;
+        _hasMoreOngoingTasks = endIndex < _allOngoingTasks.length;
+        _isLoadingMoreOngoing = false;
+      });
+
+      print(
+          'Loaded ongoing page $_ongoingCurrentPage: ${newTasks.length} tasks');
+    } else {
+      setState(() {
+        _hasMoreOngoingTasks = false;
+        _isLoadingMoreOngoing = false;
+      });
+    }
+  }
+
+  void _initializeOngoingPagination(List<PatrolTask> allTasks) {
+    _allOngoingTasks = List.from(allTasks);
+    _displayedOngoingTasks =
+        _allOngoingTasks.take(_ongoingItemsPerPage).toList();
+    _ongoingCurrentPage = 0;
+    _hasMoreOngoingTasks = _allOngoingTasks.length > _ongoingItemsPerPage;
+    _isLoadingMoreOngoing = false;
+
+    print(
+        'Initialized ongoing pagination: ${_displayedOngoingTasks.length}/${_allOngoingTasks.length}');
+  }
+
+  void _loadMoreUpcomingTasks() {
+    if (_isLoadingMoreUpcoming || !_hasMoreUpcomingTasks) return;
+
+    setState(() {
+      _isLoadingMoreUpcoming = true;
+    });
+
+    // Simulate loading delay for smooth UX
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+
+      final currentLength = _displayedUpcomingTasks.length;
+      final nextBatch = _allUpcomingTasks
+          .skip(currentLength)
+          .take(_upcomingItemsPerPage)
+          .toList();
+
+      setState(() {
+        _displayedUpcomingTasks.addAll(nextBatch);
+        _upcomingCurrentPage++;
+        _hasMoreUpcomingTasks =
+            _displayedUpcomingTasks.length < _allUpcomingTasks.length;
+        _isLoadingMoreUpcoming = false;
+      });
+
+      print(
+          'Loaded more upcoming: +${nextBatch.length}, total: ${_displayedUpcomingTasks.length}/${_allUpcomingTasks.length}');
+    });
+  }
+
+  void _loadMoreHistoryTasks() {
+    if (_isLoadingMoreHistory || !_hasMoreHistoryTasks) return;
+
+    setState(() {
+      _isLoadingMoreHistory = true;
+    });
+
+    final startIndex = (_historyCurrentPage + 1) * _historyItemsPerPage;
+    final endIndex = startIndex + _historyItemsPerPage;
+
+    if (startIndex < _allHistoryTasks.length) {
+      final newTasks =
+          _allHistoryTasks.skip(startIndex).take(_historyItemsPerPage).toList();
+
+      setState(() {
+        _displayedHistoryTasks.addAll(newTasks);
+        _historyCurrentPage++;
+        _hasMoreHistoryTasks = endIndex < _allHistoryTasks.length;
+        _isLoadingMoreHistory = false;
+      });
+
+      print(
+          'Loaded history page $_historyCurrentPage: ${newTasks.length} tasks');
+    } else {
+      setState(() {
+        _hasMoreHistoryTasks = false;
+        _isLoadingMoreHistory = false;
+      });
+    }
+  }
+
+  // TAMBAHAN: Initialize pagination for upcoming tasks
+  void _initializeUpcomingPagination(List<PatrolTask> allTasks) {
+    // Sort berdasarkan assignedStartTime yang mendekati DateTime.now()
+    final now = DateTime.now();
+    allTasks.sort((a, b) {
+      final aTime = a.assignedStartTime ?? DateTime(2099);
+      final bTime = b.assignedStartTime ?? DateTime(2099);
+
+      // Prioritas: tasks yang bisa dimulai sekarang (dalam 10 menit), kemudian yang terdekat
+      final aCanStart = aTime.difference(now).inMinutes <= 10;
+      final bCanStart = bTime.difference(now).inMinutes <= 10;
+
+      if (aCanStart && !bCanStart) return -1;
+      if (!aCanStart && bCanStart) return 1;
+
+      return aTime.compareTo(bTime);
+    });
+
+    _allUpcomingTasks = List.from(allTasks);
+
+    // Show only preview limit initially
+    _displayedUpcomingTasks = _allUpcomingTasks
+        .take(
+            _isUpcomingExpanded ? _upcomingItemsPerPage : _upcomingPreviewLimit)
+        .toList();
+
+    _upcomingCurrentPage = 0;
+    _hasMoreUpcomingTasks =
+        _allUpcomingTasks.length > _displayedUpcomingTasks.length;
+    _isLoadingMoreUpcoming = false;
+
+    // Update legacy list untuk backward compatibility
+    _upcomingTasks = List.from(_displayedUpcomingTasks);
+
+    print(
+        'Initialized upcoming pagination: ${_displayedUpcomingTasks.length}/${_allUpcomingTasks.length} (expanded: $_isUpcomingExpanded)');
+  }
+
+  // TAMBAHAN: Initialize pagination for history tasks
+  void _initializeHistoryPagination(List<PatrolTask> allTasks) {
+    _allHistoryTasks = List.from(allTasks);
+    _displayedHistoryTasks =
+        _allHistoryTasks.take(_historyItemsPerPage).toList();
+    _historyCurrentPage = 0;
+    _hasMoreHistoryTasks = _allHistoryTasks.length > _historyItemsPerPage;
+    _isLoadingMoreHistory = false;
+
+    // Update legacy list untuk backward compatibility
+    _historyTasks = List.from(_displayedHistoryTasks);
+
+    print(
+        'Initialized history pagination: ${_displayedHistoryTasks.length}/${_allHistoryTasks.length}');
+  }
+
+  // void _startRefreshTimer() {
+  //   // PERBAIKAN: Cancel timer sebelumnya dan cek mounted
+  //   _refreshTimer?.cancel();
+  //   if (!mounted) return;
+
+  //   _refreshTimer = Timer.periodic(const Duration(seconds: 300), (timer) {
+  //     // PERBAIKAN: Cek mounted di dalam callback timer
+  //     if (!mounted) {
+  //       timer.cancel();
+  //       return;
+  //     }
+
+  //     _loadUserData();
+
+  //     // PERBAIKAN: Cek mounted sebelum show snackbar
+  //     if (mounted) {
+  //       ScaffoldMessenger.of(context).showSnackBar(
+  //         SnackBar(
+  //           content: Text(
+  //             'Memperbarui data...',
+  //             style: mediumTextStyle(color: Colors.white),
+  //           ),
+  //           backgroundColor: kbpBlue800,
+  //           duration: const Duration(seconds: 1),
+  //           behavior: SnackBarBehavior.floating,
+  //           margin: const EdgeInsets.all(16),
+  //           shape: RoundedRectangleBorder(
+  //             borderRadius: BorderRadius.circular(8),
+  //           ),
+  //         ),
+  //       );
+  //     }
+  //   });
+  // }
 
   @override
   void dispose() {
@@ -98,7 +829,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _refreshTimer = null;
     _taskSubscription?.cancel();
     _taskSubscription = null;
-    _lifecycleListener.dispose();
+    // _lifecycleListener.dispose();
     super.dispose();
   }
 
@@ -120,7 +851,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadUserData() async {
-    // PERBAIKAN: Early return jika widget sudah di-dispose
     if (!mounted) return;
 
     final authState = context.read<AuthBloc>().state;
@@ -135,14 +865,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (_currentUser!.role == 'patrol') {
         await _loadClusterOfficerTasks();
-
-        // PERBAIKAN: Cek mounted sebelum operasi async lanjutan
         if (!mounted) return;
-
-        // Tambahkan pengecekan untuk task yang expired
         await _checkForExpiredTasks();
       } else {
-        // PERBAIKAN: Cek mounted sebelum bloc operations
         if (!mounted) return;
 
         context
@@ -154,16 +879,13 @@ class _HomeScreenState extends State<HomeScreen> {
             .repository
             .getCurrentTask(_currentUser!.id);
 
-        // PERBAIKAN: Cek mounted setelah operasi async
         if (!mounted) return;
 
         if (currentTask != null) {
-          // Cek apakah task sudah melewati batas waktu
           final now = DateTime.now();
           if (currentTask.status == 'active' &&
               currentTask.assignedEndTime != null &&
               now.isAfter(currentTask.assignedEndTime!)) {
-            // Update status task menjadi expired
             await _markTaskAsExpired(currentTask);
           } else {
             if (mounted) {
@@ -184,17 +906,14 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
 
-        // PERBAIKAN: Cek mounted sebelum start stream
         if (mounted) {
           _startTaskStream();
         }
       }
     } catch (e, stack) {
-      // PERBAIKAN: Log error dengan lebih detail
       print('Error in _loadUserData: $e');
       print('Stack trace: $stack');
     } finally {
-      // PERBAIKAN: Safe setState untuk loading
       _safeSetState(() {
         _isLoading = false;
       });
@@ -294,6 +1013,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     try {
+      // TAMBAHAN: Reset pagination saat load fresh data
+      _resetPaginationData();
+
       final clusterId = _currentUser!.id;
 
       final officerSnapshot = await FirebaseDatabase.instance
@@ -301,18 +1023,19 @@ class _HomeScreenState extends State<HomeScreen> {
           .child('users/$clusterId/officers')
           .get();
 
-      // PERBAIKAN: Cek mounted setelah operasi async
       if (!mounted) return;
 
       if (!officerSnapshot.exists) {
         _safeSetState(() {
-          _upcomingTasks = [];
-          _historyTasks = [];
+          _initializeOngoingPagination([]);
+          _initializeUpcomingPagination([]);
+          _initializeHistoryPagination([]);
           _isLoading = false;
         });
         return;
       }
 
+      // ... existing officer parsing code ...
       Map<dynamic, dynamic> officersData;
       if (officerSnapshot.value is Map) {
         officersData = officerSnapshot.value as Map<dynamic, dynamic>;
@@ -326,8 +1049,9 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       } else {
         _safeSetState(() {
-          _upcomingTasks = [];
-          _historyTasks = [];
+          _initializeOngoingPagination([]);
+          _initializeUpcomingPagination([]);
+          _initializeHistoryPagination([]);
           _isLoading = false;
         });
         return;
@@ -336,7 +1060,6 @@ class _HomeScreenState extends State<HomeScreen> {
       Map<String, Map<String, String>> officerInfo = {};
 
       try {
-        // Untuk kasus officers adalah array (struktur yang benar)
         if (officerSnapshot.value is List) {
           final officersList = List.from(
               (officerSnapshot.value as List).where((item) => item != null));
@@ -374,45 +1097,52 @@ class _HomeScreenState extends State<HomeScreen> {
         print('Error parsing officer data: $e');
       }
 
+      // PERBAIKAN: Limit query untuk performa yang lebih baik
       final taskSnapshot = await FirebaseDatabase.instance
           .ref()
           .child('tasks')
           .orderByChild('clusterId')
           .equalTo(clusterId)
-          .limitToLast(100)
+          .limitToLast(200) // Limit 200 tasks terbaru
           .get();
 
-      // PERBAIKAN: Cek mounted setelah operasi async kedua
       if (!mounted) return;
 
       List<PatrolTask> allHistoryTasks = [];
       List<PatrolTask> allUpcomingTasks = [];
+      List<PatrolTask> allOngoingTasks =
+          []; // TAMBAHAN: List untuk ongoing tasks
 
       if (taskSnapshot.exists) {
-        // PERBAIKAN: Tambahkan pengecekan tipe data sebelum casting
         Map<dynamic, dynamic> tasksData;
         if (taskSnapshot.value is Map) {
           tasksData = taskSnapshot.value as Map<dynamic, dynamic>;
         } else {
           _safeSetState(() {
-            _upcomingTasks = [];
-            _historyTasks = [];
+            _initializeOngoingPagination([]);
+            _initializeUpcomingPagination([]);
+            _initializeHistoryPagination([]);
             _isLoading = false;
           });
           return;
         }
 
-        tasksData.forEach((taskId, taskData) {
+        // PERBAIKAN: Process tasks dengan batching untuk menghindari blocking UI
+        int processedCount = 0;
+        const batchSize = 50;
+
+        for (var entry in tasksData.entries) {
+          final taskId = entry.key;
+          final taskData = entry.value;
+
           if (taskData is Map) {
             try {
               final userId = taskData['userId']?.toString() ?? '';
               final status = taskData['status']?.toString() ?? 'unknown';
 
-              // Convert task data
               final task = PatrolTask(
                 taskId: taskId,
                 userId: userId,
-                // vehicleId: taskData['vehicleId']?.toString() ?? '',
                 status: status,
                 assignedStartTime:
                     _parseDateTime(taskData['assignedStartTime']),
@@ -441,32 +1171,41 @@ class _HomeScreenState extends State<HomeScreen> {
                     : 0,
               );
 
-              // Set officer info if available from our map
+              // Set officer info if available
               if (officerInfo.containsKey(userId)) {
                 task.officerName = officerInfo[userId]!['name'].toString();
                 task.officerPhotoUrl =
                     officerInfo[userId]!['photo_url'].toString();
               }
 
-              // Important: Check for active AND ongoing status
+              // PERBAIKAN: Categorize tasks dengan lebih spesifik
               if (status.toLowerCase() == 'finished' ||
                   status.toLowerCase() == 'completed' ||
                   status.toLowerCase() == 'cancelled' ||
                   status.toLowerCase() == 'expired') {
                 allHistoryTasks.add(task);
-              } else if (status.toLowerCase() == 'active' ||
-                  status.toLowerCase() == 'ongoing' ||
+              } else if (status.toLowerCase() == 'ongoing' ||
                   status.toLowerCase() == 'in_progress') {
+                // TAMBAHAN: Pisahkan ongoing dari upcoming
+                allOngoingTasks.add(task);
+              } else if (status.toLowerCase() == 'active') {
                 allUpcomingTasks.add(task);
+              }
+
+              processedCount++;
+
+              // TAMBAHAN: Yield control setiap batch untuk tidak blocking UI
+              if (processedCount % batchSize == 0) {
+                await Future.delayed(Duration.zero); // Yield control
+                if (!mounted) return; // Check if still mounted
               }
             } catch (e, stack) {
               print('Error parsing task $taskId: $e');
             }
           }
-        });
+        }
       }
 
-      // PERBAIKAN: Cek mounted sebelum sorting dan setState
       if (!mounted) return;
 
       // Sort tasks
@@ -476,12 +1215,20 @@ class _HomeScreenState extends State<HomeScreen> {
       allUpcomingTasks.sort((a, b) => (a.assignedStartTime ?? DateTime.now())
           .compareTo(b.assignedStartTime ?? DateTime.now()));
 
-      // Update state
+      // TAMBAHAN: Sort ongoing tasks by start time
+      allOngoingTasks.sort((a, b) => (a.startTime ?? DateTime.now())
+          .compareTo(b.startTime ?? DateTime.now()));
+
+      // TAMBAHAN: Initialize pagination dengan data yang sudah diurutkan
       _safeSetState(() {
-        _historyTasks = allHistoryTasks;
-        _upcomingTasks = allUpcomingTasks;
+        _initializeOngoingPagination(allOngoingTasks);
+        _initializeUpcomingPagination(allUpcomingTasks);
+        _initializeHistoryPagination(allHistoryTasks);
         _isLoading = false;
       });
+
+      print(
+          'Loaded total: ${allOngoingTasks.length} ongoing, ${allUpcomingTasks.length} upcoming, ${allHistoryTasks.length} history');
     } catch (e, stack) {
       print('Error in _loadClusterOfficerTasks: $e');
       print('Stack trace: $stack');
@@ -490,6 +1237,550 @@ class _HomeScreenState extends State<HomeScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  Widget _buildOngoingPatrolsContent() {
+    if (_displayedOngoingTasks.isEmpty && !_isLoadingMoreOngoing) {
+      return const SizedBox.shrink(); // Don't show anything if no ongoing tasks
+    }
+
+    final Map<String, List<PatrolTask>> tasksByOfficer = {};
+
+    for (final task in _displayedOngoingTasks) {
+      if (!tasksByOfficer.containsKey(task.userId)) {
+        tasksByOfficer[task.userId] = [];
+      }
+      tasksByOfficer[task.userId]!.add(task);
+    }
+
+    final sortedOfficerIds = tasksByOfficer.keys.toList()
+      ..sort((a, b) {
+        final taskA = tasksByOfficer[a]!.first;
+        final taskB = tasksByOfficer[b]!.first;
+        return taskA.officerName.compareTo(taskB.officerName);
+      });
+
+    return Column(
+      children: [
+        // TAMBAHAN: Info pagination untuk ongoing tasks
+        if (_displayedOngoingTasks.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: successG50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: successG200),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.play_circle, size: 14, color: successG400),
+                const SizedBox(width: 8),
+                Text(
+                  'Menampilkan ${_displayedOngoingTasks.length} dari ${_allOngoingTasks.length} patroli berlangsung',
+                  style: mediumTextStyle(size: 12, color: successG500),
+                ),
+                if (_hasMoreOngoingTasks) ...[
+                  const Spacer(),
+                  Icon(Icons.keyboard_arrow_down, size: 14, color: successG400),
+                ],
+              ],
+            ),
+          ),
+
+        // Task list
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: sortedOfficerIds.length,
+          itemBuilder: (context, index) {
+            final officerId = sortedOfficerIds[index];
+            final officerTasks = tasksByOfficer[officerId]!;
+
+            final officerName = officerTasks.first.officerName;
+            final officerPhotoUrl = officerTasks.first.officerPhotoUrl;
+
+            officerTasks.sort((a, b) => (a.startTime ?? DateTime.now())
+                .compareTo(b.startTime ?? DateTime.now()));
+
+            return Card(
+              elevation: 2,
+              margin: const EdgeInsets.only(bottom: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: successG400, width: 2),
+              ),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      successG50,
+                      Colors.white,
+                    ],
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Officer header dengan status ongoing
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Row(
+                        children: [
+                          // Animated pulse container for ongoing indicator
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: successG100,
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: successG400, width: 2),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: successG300.withOpacity(0.3),
+                                  blurRadius: 8,
+                                  spreadRadius: 0,
+                                ),
+                              ],
+                            ),
+                            child: Stack(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(22),
+                                  child: officerPhotoUrl.isNotEmpty
+                                      ? Image.network(
+                                          officerPhotoUrl,
+                                          width: 44,
+                                          height: 44,
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                            return Center(
+                                              child: Text(
+                                                officerName
+                                                    .substring(0, 1)
+                                                    .toUpperCase(),
+                                                style: semiBoldTextStyle(
+                                                    size: 18,
+                                                    color: successG500),
+                                              ),
+                                            );
+                                          },
+                                        )
+                                      : Center(
+                                          child: Text(
+                                            officerName
+                                                .substring(0, 1)
+                                                .toUpperCase(),
+                                            style: semiBoldTextStyle(
+                                                size: 18, color: successG500),
+                                          ),
+                                        ),
+                                ),
+                                // Pulse indicator
+                                Positioned(
+                                  bottom: -1,
+                                  right: -1,
+                                  child: Container(
+                                    width: 16,
+                                    height: 16,
+                                    decoration: BoxDecoration(
+                                      color: successG500,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                          color: Colors.white, width: 2),
+                                    ),
+                                    child: Center(
+                                      child: Container(
+                                        width: 6,
+                                        height: 6,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius:
+                                              BorderRadius.circular(3),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    // Animated dot indicator
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: successG500,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        officerName,
+                                        style: semiBoldTextStyle(
+                                            size: 16, color: successG500),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: successG500,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.play_circle,
+                                              size: 12, color: Colors.white),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'SEDANG PATROLI',
+                                            style: boldTextStyle(
+                                                size: 10, color: Colors.white),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      '${officerTasks.length} tugas berlangsung',
+                                      style: regularTextStyle(
+                                          size: 12, color: successG500),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          // Live tracking button
+                          Container(
+                            decoration: BoxDecoration(
+                              color: successG100,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: successG300),
+                            ),
+                            child: IconButton(
+                              icon: const Icon(Icons.gps_fixed,
+                                  color: successG500),
+                              onPressed: () {
+                                // Navigate to live tracking or map view
+                                final task = officerTasks.first;
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => MapScreen(
+                                      task: task,
+                                      onStart: () {
+                                        // Task already started, just navigate
+                                      },
+                                    ),
+                                  ),
+                                );
+                              },
+                              tooltip: 'Pantau Langsung',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const Divider(height: 1, color: successG200),
+
+                    // Always show all ongoing tasks (no expand/collapse for ongoing)
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: officerTasks.length,
+                      itemBuilder: (context, taskIndex) {
+                        return _buildOngoingTaskItem(officerTasks[taskIndex]);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+
+        // TAMBAHAN: Load more button untuk ongoing tasks
+        if (_hasMoreOngoingTasks || _isLoadingMoreOngoing) ...[
+          const SizedBox(height: 16),
+          if (_isLoadingMoreOngoing)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: successG400,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Memuat patroli lainnya...',
+                    style: mediumTextStyle(size: 14, color: successG400),
+                  ),
+                ],
+              ),
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _loadMoreOngoingTasks,
+                icon: const Icon(Icons.expand_more, size: 18),
+                label: Text('Lihat ${_ongoingItemsPerPage} Patroli Lagi'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: successG500,
+                  side: BorderSide(color: successG400, width: 1.5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildOngoingTaskItem(PatrolTask task) {
+    final startTime = task.startTime ?? DateTime.now();
+    final currentTime = DateTime.now();
+    final elapsedDuration = currentTime.difference(startTime);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: successG200),
+        boxShadow: [
+          BoxShadow(
+            color: successG100.withOpacity(0.5),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Live indicator
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [successG400, successG400],
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.navigation,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+
+              // Task info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: successG500,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'LIVE',
+                            style: boldTextStyle(size: 10, color: Colors.white),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Patroli sedang berlangsung',
+                            style:
+                                semiBoldTextStyle(size: 14, color: successG500),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.place, size: 14, color: successG400),
+                        const SizedBox(width: 4),
+                        Text(
+                          "${task.assignedRoute?.length ?? 0} Titik Patroli",
+                          style: regularTextStyle(size: 12, color: successG500),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.timer, size: 14, color: successG400),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Berlangsung ${_formatDuration(elapsedDuration)}',
+                          style: regularTextStyle(size: 12, color: successG500),
+                        ),
+                      ],
+                    ),
+                    if (task.distance != null && task.distance! > 0) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(Icons.straighten,
+                              size: 14, color: successG400),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Jarak: ${(task.distance! / 1000).toStringAsFixed(2)} km',
+                            style:
+                                regularTextStyle(size: 12, color: successG500),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              // Time info
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: successG100,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      formatDateFromString(startTime.toString()),
+                      style: mediumTextStyle(size: 10, color: successG500),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    formatTimeFromString(startTime.toString()),
+                    style: semiBoldTextStyle(size: 12, color: successG500),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Dimulai',
+                    style: regularTextStyle(size: 10, color: successG400),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Action buttons
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MapScreen(
+                          task: task,
+                          onStart: () {
+                            // Task already started
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.map, size: 16),
+                  label: Text(
+                    'Pantau Live',
+                    style: mediumTextStyle(size: 12, color: Colors.white),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: successG400,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    elevation: 0,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _showTaskDialog(task),
+                  icon: const Icon(Icons.info_outline, size: 16),
+                  label: Text(
+                    'Detail',
+                    style: mediumTextStyle(size: 12, color: successG500),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: successG500,
+                    side: BorderSide(color: successG400, width: 1),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   // PERBAIKAN: Start task stream dengan proper cleanup
@@ -702,6 +1993,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     _buildUserGreetingCard(),
                     const SizedBox(height: 24),
+
+                    // TAMBAHAN: Ongoing patrols section - hanya tampil jika ada ongoing tasks
+                    if (_currentUser?.role == 'patrol' &&
+                        _displayedOngoingTasks.isNotEmpty) ...[
+                      _buildSectionHeader(
+                        icon: Icons.play_circle,
+                        title: 'Patroli Sedang Berlangsung',
+                        color: successG500,
+                      ),
+                      const SizedBox(height: 12),
+                      _buildOngoingPatrolsContent(),
+                      const SizedBox(height: 24),
+                    ],
+
                     _buildSectionHeader(
                       icon: Icons.access_time,
                       title: 'Patroli Mendatang',
@@ -727,14 +2032,16 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSectionHeader({required IconData icon, required String title}) {
+  Widget _buildSectionHeader(
+      {required IconData icon, required String title, Color? color}) {
+    final iconColor = color ?? kbpBlue900;
     return Row(
       children: [
-        Icon(icon, color: kbpBlue900, size: 20),
+        Icon(icon, color: iconColor, size: 20),
         const SizedBox(width: 8),
         Text(
           title,
-          style: semiBoldTextStyle(size: 18, color: kbpBlue900),
+          style: semiBoldTextStyle(size: 18, color: iconColor),
         ),
       ],
     );
@@ -793,8 +2100,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   Text(
                     _currentUser?.role == 'patrol'
-                        ? 'Command Center'
-                        : 'Petugas Patroli',
+                        ? 'Petugas Patroli'
+                        : 'Command Center',
                     style: regularTextStyle(size: 14, color: kbpBlue700),
                   ),
                 ],
@@ -857,180 +2164,250 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildUpcomingPatrolsContent() {
-    if (_upcomingTasks.isEmpty) {
-      return _buildEmptyStateCard(
-        icon: 'assets/state/noTask.svg',
-        message: 'Belum ada tugas patroli\nyang dijadwalkan',
-      );
-    }
+  // Widget _buildUpcomingPatrolsContent() {
+  //   if (_displayedUpcomingTasks.isEmpty && !_isLoadingMoreUpcoming) {
+  //     return _buildEmptyStateCard(
+  //       icon: 'assets/state/noTask.svg',
+  //       message: 'Belum ada tugas patroli\nyang dijadwalkan',
+  //     );
+  //   }
 
-    final Map<String, List<PatrolTask>> tasksByOfficer = {};
+  //   final Map<String, List<PatrolTask>> tasksByOfficer = {};
 
-    for (final task in _upcomingTasks) {
-      if (!tasksByOfficer.containsKey(task.userId)) {
-        tasksByOfficer[task.userId] = [];
-      }
-      tasksByOfficer[task.userId]!.add(task);
-    }
+  //   for (final task in _displayedUpcomingTasks) {
+  //     if (!tasksByOfficer.containsKey(task.userId)) {
+  //       tasksByOfficer[task.userId] = [];
+  //     }
+  //     tasksByOfficer[task.userId]!.add(task);
+  //   }
 
-    final sortedOfficerIds = tasksByOfficer.keys.toList()
-      ..sort((a, b) {
-        final taskA = tasksByOfficer[a]!.first;
-        final taskB = tasksByOfficer[b]!.first;
+  //   final sortedOfficerIds = tasksByOfficer.keys.toList()
+  //     ..sort((a, b) {
+  //       final taskA = tasksByOfficer[a]!.first;
+  //       final taskB = tasksByOfficer[b]!.first;
+  //       return taskA.officerName.compareTo(taskB.officerName);
+  //     });
 
-        return taskA.officerName.compareTo(taskB.officerName);
-      });
+  //   return Column(
+  //     children: [
+  //       // TAMBAHAN: Info pagination untuk upcoming tasks
+  //       if (_displayedUpcomingTasks.isNotEmpty)
+  //         Container(
+  //           width: double.infinity,
+  //           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  //           margin: const EdgeInsets.only(bottom: 12),
+  //           decoration: BoxDecoration(
+  //             color: kbpBlue50,
+  //             borderRadius: BorderRadius.circular(8),
+  //             border: Border.all(color: kbpBlue200),
+  //           ),
+  //           child: Row(
+  //             children: [
+  //               Icon(Icons.info_outline, size: 14, color: kbpBlue600),
+  //               const SizedBox(width: 8),
+  //               Text(
+  //                 'Menampilkan ${_displayedUpcomingTasks.length} dari ${_allUpcomingTasks.length} tugas mendatang',
+  //                 style: mediumTextStyle(size: 12, color: kbpBlue700),
+  //               ),
+  //               if (_hasMoreUpcomingTasks) ...[
+  //                 const Spacer(),
+  //                 Icon(Icons.keyboard_arrow_down, size: 14, color: kbpBlue600),
+  //               ],
+  //             ],
+  //           ),
+  //         ),
 
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: sortedOfficerIds.length,
-      itemBuilder: (context, index) {
-        final officerId = sortedOfficerIds[index];
-        final officerTasks = tasksByOfficer[officerId]!;
+  //       // Task list
+  //       ListView.builder(
+  //         shrinkWrap: true,
+  //         physics: const NeverScrollableScrollPhysics(),
+  //         itemCount: sortedOfficerIds.length,
+  //         itemBuilder: (context, index) {
+  //           final officerId = sortedOfficerIds[index];
+  //           final officerTasks = tasksByOfficer[officerId]!;
 
-        // Ambil nama officer dari task pertama
-        final officerName = officerTasks.first.officerName;
-        final officerPhotoUrl = officerTasks.first.officerPhotoUrl;
+  //           final officerName = officerTasks.first.officerName;
+  //           final officerPhotoUrl = officerTasks.first.officerPhotoUrl;
 
-        // Sortir tugas untuk officer ini berdasarkan waktu mulai
-        officerTasks.sort((a, b) => (a.assignedStartTime ?? DateTime.now())
-            .compareTo(b.assignedStartTime ?? DateTime.now()));
+  //           officerTasks.sort((a, b) => (a.assignedStartTime ?? DateTime.now())
+  //               .compareTo(b.assignedStartTime ?? DateTime.now()));
 
-        return Card(
-          elevation: 0,
-          margin: const EdgeInsets.only(bottom: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: kbpBlue300, width: 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Officer header
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  children: [
-                    // Officer avatar
-                    Container(
-                      width: 48,
-                      height: 48,
-                      clipBehavior: Clip.antiAlias,
-                      decoration: BoxDecoration(
-                        color: kbpBlue100,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: kbpBlue300, width: 1),
-                      ),
-                      child: officerPhotoUrl.isNotEmpty
-                          ? Image.network(
-                              officerPhotoUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Center(
-                                  child: Text(
-                                    officerName.substring(0, 1).toUpperCase(),
-                                    style: semiBoldTextStyle(
-                                        size: 18, color: kbpBlue900),
-                                  ),
-                                );
-                              },
-                            )
-                          : Center(
-                              child: Text(
-                                officerName.substring(0, 1).toUpperCase(),
-                                style: semiBoldTextStyle(
-                                    size: 18, color: kbpBlue900),
-                              ),
-                            ),
-                    ),
-                    const SizedBox(width: 12),
+  //           return Card(
+  //             elevation: 0,
+  //             margin: const EdgeInsets.only(bottom: 16),
+  //             shape: RoundedRectangleBorder(
+  //               borderRadius: BorderRadius.circular(12),
+  //               side: const BorderSide(color: kbpBlue300, width: 1),
+  //             ),
+  //             child: Column(
+  //               crossAxisAlignment: CrossAxisAlignment.start,
+  //               children: [
+  //                 // Officer header
+  //                 Padding(
+  //                   padding: const EdgeInsets.all(16.0),
+  //                   child: Row(
+  //                     children: [
+  //                       Container(
+  //                         width: 48,
+  //                         height: 48,
+  //                         clipBehavior: Clip.antiAlias,
+  //                         decoration: BoxDecoration(
+  //                           color: kbpBlue100,
+  //                           borderRadius: BorderRadius.circular(24),
+  //                           border: Border.all(color: kbpBlue300, width: 1),
+  //                         ),
+  //                         child: officerPhotoUrl.isNotEmpty
+  //                             ? Image.network(
+  //                                 officerPhotoUrl,
+  //                                 fit: BoxFit.cover,
+  //                                 errorBuilder: (context, error, stackTrace) {
+  //                                   return Center(
+  //                                     child: Text(
+  //                                       officerName
+  //                                           .substring(0, 1)
+  //                                           .toUpperCase(),
+  //                                       style: semiBoldTextStyle(
+  //                                           size: 18, color: kbpBlue900),
+  //                                     ),
+  //                                   );
+  //                                 },
+  //                               )
+  //                             : Center(
+  //                                 child: Text(
+  //                                   officerName.substring(0, 1).toUpperCase(),
+  //                                   style: semiBoldTextStyle(
+  //                                       size: 18, color: kbpBlue900),
+  //                                 ),
+  //                               ),
+  //                       ),
+  //                       const SizedBox(width: 12),
+  //                       Expanded(
+  //                         child: Column(
+  //                           crossAxisAlignment: CrossAxisAlignment.start,
+  //                           children: [
+  //                             Text(
+  //                               officerName,
+  //                               style: semiBoldTextStyle(
+  //                                   size: 16, color: kbpBlue900),
+  //                               overflow: TextOverflow.ellipsis,
+  //                             ),
+  //                             Text(
+  //                               '${officerTasks.length} tugas patroli mendatang',
+  //                               style: regularTextStyle(
+  //                                   size: 14, color: kbpBlue700),
+  //                             ),
+  //                           ],
+  //                         ),
+  //                       ),
+  //                       IconButton(
+  //                         icon: const Icon(
+  //                           Icons.keyboard_arrow_down,
+  //                           color: kbpBlue900,
+  //                         ),
+  //                         onPressed: () {
+  //                           _toggleOfficerExpanded(officerId);
+  //                         },
+  //                       ),
+  //                     ],
+  //                   ),
+  //                 ),
 
-                    // Officer name and task count
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            officerName,
-                            style:
-                                semiBoldTextStyle(size: 16, color: kbpBlue900),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            '${officerTasks.length} tugas patroli mendatang',
-                            style:
-                                regularTextStyle(size: 14, color: kbpBlue700),
-                          ),
-                        ],
-                      ),
-                    ),
+  //                 const Divider(height: 1, color: kbpBlue200),
 
-                    // Collapse/expand icon
-                    IconButton(
-                      icon: const Icon(
-                        Icons.keyboard_arrow_down,
-                        color: kbpBlue900,
-                      ),
-                      onPressed: () {
-                        _toggleOfficerExpanded(officerId);
-                      },
-                    ),
-                  ],
-                ),
-              ),
+  //                 _expandedOfficers.contains(officerId)
+  //                     ? ListView.builder(
+  //                         shrinkWrap: true,
+  //                         physics: const NeverScrollableScrollPhysics(),
+  //                         itemCount: officerTasks.length,
+  //                         itemBuilder: (context, taskIndex) {
+  //                           return _buildOfficerTaskItem(
+  //                               officerTasks[taskIndex]);
+  //                         },
+  //                       )
+  //                     : officerTasks.isNotEmpty
+  //                         ? _buildOfficerTaskItem(officerTasks.first)
+  //                         : const SizedBox.shrink(),
 
-              // Divider between header and tasks
-              const Divider(height: 1, color: kbpBlue200),
+  //                 if (!_expandedOfficers.contains(officerId) &&
+  //                     officerTasks.length > 1)
+  //                   Padding(
+  //                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+  //                     child: TextButton(
+  //                       onPressed: () => _toggleOfficerExpanded(officerId),
+  //                       style: TextButton.styleFrom(
+  //                         foregroundColor: kbpBlue700,
+  //                         padding: const EdgeInsets.symmetric(vertical: 8),
+  //                         minimumSize: Size.zero,
+  //                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  //                       ),
+  //                       child: Row(
+  //                         mainAxisAlignment: MainAxisAlignment.center,
+  //                         children: [
+  //                           Text(
+  //                             'Lihat ${officerTasks.length - 1} tugas lainnya',
+  //                             style:
+  //                                 mediumTextStyle(size: 12, color: kbpBlue700),
+  //                           ),
+  //                           const SizedBox(width: 4),
+  //                           const Icon(Icons.keyboard_arrow_down,
+  //                               size: 16, color: kbpBlue700),
+  //                         ],
+  //                       ),
+  //                     ),
+  //                   ),
+  //               ],
+  //             ),
+  //           );
+  //         },
+  //       ),
 
-              // Officer's tasks
-              _expandedOfficers.contains(officerId)
-                  ? ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: officerTasks.length,
-                      itemBuilder: (context, taskIndex) {
-                        return _buildOfficerTaskItem(officerTasks[taskIndex]);
-                      },
-                    )
-                  : officerTasks.isNotEmpty
-                      ? _buildOfficerTaskItem(officerTasks.first)
-                      : const SizedBox.shrink(),
-
-              // Jika ingin menambahkan indikator "lihat X tugas lainnya" saat collapsed
-              if (!_expandedOfficers.contains(officerId) &&
-                  officerTasks.length > 1)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: TextButton(
-                    onPressed: () => _toggleOfficerExpanded(officerId),
-                    style: TextButton.styleFrom(
-                      foregroundColor: kbpBlue700,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'Lihat ${officerTasks.length - 1} tugas lainnya',
-                          style: mediumTextStyle(size: 12, color: kbpBlue700),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.keyboard_arrow_down,
-                            size: 16, color: kbpBlue700),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  //       // TAMBAHAN: Load more button untuk upcoming tasks
+  //       if (_hasMoreUpcomingTasks || _isLoadingMoreUpcoming) ...[
+  //         const SizedBox(height: 16),
+  //         if (_isLoadingMoreUpcoming)
+  //           Container(
+  //             padding: const EdgeInsets.symmetric(vertical: 16),
+  //             child: Row(
+  //               mainAxisAlignment: MainAxisAlignment.center,
+  //               children: [
+  //                 SizedBox(
+  //                   width: 16,
+  //                   height: 16,
+  //                   child: CircularProgressIndicator(
+  //                     strokeWidth: 2,
+  //                     color: kbpBlue600,
+  //                   ),
+  //                 ),
+  //                 const SizedBox(width: 12),
+  //                 Text(
+  //                   'Memuat tugas lainnya...',
+  //                   style: mediumTextStyle(size: 14, color: kbpBlue600),
+  //                 ),
+  //               ],
+  //             ),
+  //           )
+  //         else
+  //           SizedBox(
+  //             width: double.infinity,
+  //             child: OutlinedButton.icon(
+  //               onPressed: _loadMoreUpcomingTasks,
+  //               icon: const Icon(Icons.expand_more, size: 18),
+  //               label: Text('Lihat ${_upcomingItemsPerPage} Tugas Lagi'),
+  //               style: OutlinedButton.styleFrom(
+  //                 foregroundColor: kbpBlue900,
+  //                 side: BorderSide(color: kbpBlue300, width: 1.5),
+  //                 shape: RoundedRectangleBorder(
+  //                   borderRadius: BorderRadius.circular(8),
+  //                 ),
+  //                 padding:
+  //                     const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+  //               ),
+  //             ),
+  //           ),
+  //       ],
+  //     ],
+  //   );
+  // }
 
 // Individual task item within officer group
   Widget _buildOfficerTaskItem(PatrolTask task) {
@@ -1292,67 +2669,152 @@ class _HomeScreenState extends State<HomeScreen> {
 
 // Wrapper for history content
   Widget _buildHistoryContent() {
-    if (_historyTasks.isEmpty) {
+    if (_displayedHistoryTasks.isEmpty && !_isLoadingMoreHistory) {
       return _buildEmptyStateCard(
         icon: 'assets/nodata.svg',
         message: 'Belum ada riwayat patroli',
       );
     }
 
-    return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: kbpBlue200, width: 1),
-      ),
-      color: Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _historyTasks.length > 5 ? 5 : _historyTasks.length,
-              separatorBuilder: (context, index) =>
-                  const Divider(height: 1, color: kbpBlue200),
-              itemBuilder: (context, index) {
-                final task = _historyTasks[index];
-                return _buildHistoryItem(task);
-              },
+    return Column(
+      children: [
+        // TAMBAHAN: Info pagination untuk history
+        if (_displayedHistoryTasks.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: successG50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: successG200),
             ),
-            if (_historyTasks.length > 5)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: TextButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PatrolHistoryListScreen(
-                          tasksList: _historyTasks,
-                          isClusterView: _currentUser?.role == 'patrol',
+            child: Row(
+              children: [
+                Icon(Icons.history, size: 14, color: successG300),
+                const SizedBox(width: 8),
+                Text(
+                  'Menampilkan ${_displayedHistoryTasks.length} dari ${_allHistoryTasks.length} riwayat',
+                  style: mediumTextStyle(size: 12, color: successG400),
+                ),
+                if (_hasMoreHistoryTasks) ...[
+                  const Spacer(),
+                  Icon(Icons.keyboard_arrow_down, size: 14, color: successG500),
+                ],
+              ],
+            ),
+          ),
+
+        // History list
+        Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: kbpBlue200, width: 1),
+          ),
+          color: Colors.white,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _displayedHistoryTasks.length,
+                  separatorBuilder: (context, index) =>
+                      const Divider(height: 1, color: kbpBlue200),
+                  itemBuilder: (context, index) {
+                    final task = _displayedHistoryTasks[index];
+                    return _buildHistoryItem(task);
+                  },
+                ),
+
+                // TAMBAHAN: Load more section untuk history
+                if (_hasMoreHistoryTasks || _isLoadingMoreHistory) ...[
+                  const Divider(height: 1, color: kbpBlue200),
+                  if (_isLoadingMoreHistory)
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: kbpBlue600,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Memuat riwayat lainnya...',
+                            style: mediumTextStyle(size: 14, color: kbpBlue600),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _loadMoreHistoryTasks,
+                          icon: const Icon(Icons.expand_more, size: 16),
+                          label: Text(
+                              'Lihat ${_historyItemsPerPage} Riwayat Lagi'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: successG500,
+                            side: BorderSide(color: successG300, width: 1.5),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                          ),
                         ),
                       ),
-                    );
-                  },
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Lihat Semua Riwayat',
-                        style: mediumTextStyle(color: kbpBlue900),
+                    ),
+                ],
+
+                // Show "Lihat Semua" button only if there are more than displayed
+                if (_allHistoryTasks.length > _displayedHistoryTasks.length &&
+                    !_hasMoreHistoryTasks)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PatrolHistoryListScreen(
+                              tasksList:
+                                  _allHistoryTasks, // Pass all history tasks
+                              isClusterView: _currentUser?.role == 'patrol',
+                            ),
+                          ),
+                        );
+                      },
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Lihat Semua Riwayat',
+                            style: mediumTextStyle(color: kbpBlue900),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.arrow_forward,
+                              size: 16, color: kbpBlue900),
+                        ],
                       ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.arrow_forward,
-                          size: 16, color: kbpBlue900),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-          ],
+              ],
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 

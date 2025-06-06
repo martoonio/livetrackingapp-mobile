@@ -294,7 +294,7 @@ class _ClusterPatrolHistoryScreenState
                           children: [
                             Row(
                               children: [
-                                Icon(Icons.info_outline,
+                                const Icon(Icons.info_outline,
                                     size: 16, color: kbpBlue600),
                                 const SizedBox(width: 8),
                                 Text(
@@ -425,7 +425,7 @@ class _ClusterPatrolHistoryScreenState
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
+          const SizedBox(
             width: 20,
             height: 20,
             child: CircularProgressIndicator(
@@ -464,8 +464,8 @@ class _ClusterPatrolHistoryScreenState
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: kbpBlue50,
-      decoration: BoxDecoration(
+      // color: kbpBlue50,
+      decoration: const BoxDecoration(
         border: Border(
           bottom: BorderSide(color: kbpBlue200, width: 1),
         ),
@@ -797,7 +797,7 @@ class _ClusterPatrolHistoryScreenState
                                         size: 12, color: neutral600),
                                   ),
                                   const SizedBox(width: 4),
-                                  Tooltip(
+                                  const Tooltip(
                                     message:
                                         'Titik dianggap dikunjungi jika petugas berada dalam radius validasi checkpoint.',
                                     child: Icon(Icons.info_outline,
@@ -887,7 +887,7 @@ class _ClusterPatrolHistoryScreenState
                         return Theme(
                           data: ThemeData.light().copyWith(
                             primaryColor: kbpBlue900,
-                            colorScheme: ColorScheme.light(primary: kbpBlue900),
+                            colorScheme: const ColorScheme.light(primary: kbpBlue900),
                             buttonTheme: const ButtonThemeData(
                                 textTheme: ButtonTextTheme.primary),
                           ),
@@ -913,7 +913,7 @@ class _ClusterPatrolHistoryScreenState
                         return Theme(
                           data: ThemeData.light().copyWith(
                             primaryColor: kbpBlue900,
-                            colorScheme: ColorScheme.light(primary: kbpBlue900),
+                            colorScheme: const ColorScheme.light(primary: kbpBlue900),
                             buttonTheme: const ButtonThemeData(
                                 textTheme: ButtonTextTheme.primary),
                           ),
@@ -1023,10 +1023,6 @@ class _ClusterPatrolHistoryScreenState
                                   child: Text('Semua Status'),
                                 ),
                                 DropdownMenuItem<String>(
-                                  value: 'assigned',
-                                  child: Text(_getStatusText('assigned')),
-                                ),
-                                DropdownMenuItem<String>(
                                   value: 'ongoing',
                                   child: Text(_getStatusText('ongoing')),
                                 ),
@@ -1037,10 +1033,6 @@ class _ClusterPatrolHistoryScreenState
                                 DropdownMenuItem<String>(
                                   value: 'finished',
                                   child: Text(_getStatusText('finished')),
-                                ),
-                                DropdownMenuItem<String>(
-                                  value: 'completed',
-                                  child: Text(_getStatusText('completed')),
                                 ),
                                 DropdownMenuItem<String>(
                                   value: 'cancelled',
@@ -1078,7 +1070,7 @@ class _ClusterPatrolHistoryScreenState
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(Icons.calendar_today,
+                                      const Icon(Icons.calendar_today,
                                           size: 16, color: kbpBlue900),
                                       const SizedBox(width: 8),
                                       Text(
@@ -1107,7 +1099,7 @@ class _ClusterPatrolHistoryScreenState
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(Icons.calendar_today,
+                                      const Icon(Icons.calendar_today,
                                           size: 16, color: kbpBlue900),
                                       const SizedBox(width: 8),
                                       Text(
@@ -1172,7 +1164,7 @@ class _ClusterPatrolHistoryScreenState
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                   ),
-                                  child: Text(
+                                  child: const Text(
                                     'Reset Filter',
                                     style: TextStyle(color: dangerR500),
                                   ),
