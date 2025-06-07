@@ -1103,7 +1103,6 @@ class _HomeScreenState extends State<HomeScreen> {
           .child('tasks')
           .orderByChild('clusterId')
           .equalTo(clusterId)
-          .limitToLast(200) // Limit 200 tasks terbaru
           .get();
 
       if (!mounted) return;
