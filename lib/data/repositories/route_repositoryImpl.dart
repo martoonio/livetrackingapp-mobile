@@ -434,6 +434,7 @@ class RouteRepositoryImpl implements RouteRepository {
           : null,
       clusterId: data['clusterId']?.toString() ?? '',
       mockLocationDetected: data['mockLocationDetected'] == true,
+      timeliness: data['timeliness']?.toString() ?? 'unknown',
       mockLocationCount: data['mockLocationCount'] is num
           ? (data['mockLocationCount'] as num).toInt()
           : 0,
