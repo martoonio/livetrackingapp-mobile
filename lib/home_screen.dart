@@ -907,7 +907,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
 
         if (mounted) {
-          _startTaskStream();
+          // _startTaskStream();
         }
       }
     } catch (e, stack) {
@@ -1773,24 +1773,24 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    _taskSubscription =
-        context.read<PatrolBloc>().repository.watchCurrentTask(userId).listen(
-      (task) {
-        // PERBAIKAN: Cek mounted di dalam callback stream
-        if (task != null && mounted) {
-          _handleNewTask(task);
-        }
-      },
-      onError: (error) {
-        print('Task stream error: $error');
-        _taskSubscription?.cancel();
-        _taskSubscription = null;
-      },
-      onDone: () {
-        print('Task stream completed');
-        _taskSubscription = null;
-      },
-    );
+    // _taskSubscription =
+    //     context.read<PatrolBloc>().repository.watchCurrentTask(userId).listen(
+    //   (task) {
+    //     // PERBAIKAN: Cek mounted di dalam callback stream
+    //     if (task != null && mounted) {
+    //       _handleNewTask(task);
+    //     }
+    //   },
+    //   onError: (error) {
+    //     print('Task stream error: $error');
+    //     _taskSubscription?.cancel();
+    //     _taskSubscription = null;
+    //   },
+    //   onDone: () {
+    //     print('Task stream completed');
+    //     _taskSubscription = null;
+    //   },
+    // );
   }
 
   void _handleNewTask(PatrolTask task) {
@@ -1917,7 +1917,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             onPressed: () {
               _loadUserData();
-              _startTaskStream();
+              // _startTaskStream();
 
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -1944,7 +1944,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onRefresh: () async {
           if (mounted) {
             _loadUserData();
-            _startTaskStream();
+            // _startTaskStream();
           }
         },
         color: kbpBlue900,
