@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -48,16 +49,21 @@ class AdminMapScreenState extends State<AdminMapScreen> {
   bool _showAllClusters = true;
   final Map<String, String> _clusterNames = {};
 
+  StreamSubscription<DatabaseEvent>? _activeTasksSubscription;
+  StreamSubscription<DatabaseEvent>? _inProgressTasksSubscription;
+
   @override
   void initState() {
     super.initState();
     _loadMarkerIcons();
-    _loadActiveTasks();
+    // _loadActiveTasks();
     _loadClusters();
 
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      _loadActiveTasks();
-    });
+    _setupActiveTasksListener();
+
+    // _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    //   _loadActiveTasks();
+    // });
 
     WidgetsBinding.instance.addPostFrameCallback(
       (_) {
@@ -74,8 +80,96 @@ class AdminMapScreenState extends State<AdminMapScreen> {
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    _activeTasksSubscription?.cancel(); // Batalkan langganan
+    _inProgressTasksSubscription?.cancel();
+    // _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  void _setupActiveTasksListener() async {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is! AuthAuthenticated) {
+      log('User not authenticated, cannot setup active tasks listener.');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true; // Set loading state
+      _activeTasks.clear(); // Bersihkan data sebelumnya
+      _markers.clear();
+      _polylines.clear();
+    });
+
+    // Listener untuk status 'ongoing'
+    _activeTasksSubscription = FirebaseDatabase.instance
+        .ref()
+        .child('tasks')
+        .orderByChild('status')
+        .equalTo('ongoing')
+        .onChildAdded
+        .listen((event) => _handleTaskChange(event, 'added'));
+    // .onError((error) => log('Error listening to ongoing tasks: $error'));
+
+    FirebaseDatabase.instance
+        .ref()
+        .child('tasks')
+        .orderByChild('status')
+        .equalTo('ongoing')
+        .onChildChanged
+        .listen((event) => _handleTaskChange(event, 'changed'))
+        .onError((error) => log('Error listening to ongoing tasks: $error'));
+
+    FirebaseDatabase.instance
+        .ref()
+        .child('tasks')
+        .orderByChild('status')
+        .equalTo('ongoing')
+        .onChildRemoved
+        .listen((event) => _handleTaskChange(event, 'removed'))
+        .onError((error) => log('Error listening to ongoing tasks: $error'));
+
+    setState(() {
+      _isLoading = false; // Setelah listener setup, nonaktifkan loading
+    });
+  }
+
+  void _handleTaskChange(DatabaseEvent event, String eventType) async {
+    if (!mounted) return;
+
+    final taskId = event.snapshot.key;
+    final taskData = event.snapshot.value as Map<dynamic, dynamic>?;
+
+    if (taskId == null) return;
+
+    setState(() {
+      if (eventType == 'removed') {
+        _activeTasks.remove(taskId);
+        _taskRoutes.remove(taskId);
+        _markers.removeWhere((m) => m.markerId.value == taskId);
+        _polylines.removeWhere((p) => p.polylineId.value == 'path_$taskId');
+      } else if (taskData != null) {
+        final task = _createPatrolTaskFromMap(taskId, taskData);
+        if (taskData['route_path'] != null && taskData['route_path'] is Map) {
+          final routePath = _extractRoutePath(
+              taskData['route_path'] as Map<dynamic, dynamic>);
+          if (routePath.isNotEmpty) {
+            _taskRoutes[taskId] = routePath;
+          }
+        } else {
+          _taskRoutes.remove(taskId); // Hapus jika route_path tidak ada
+        }
+
+        _activeTasks[taskId] = task; // Update atau tambahkan task
+        if (task.officerName.startsWith('Officer #')) {
+          _fetchOfficerInfo(task); // Ambil info petugas jika belum ada
+        }
+      }
+      _updateMapMarkers(); // Perbarui peta berdasarkan perubahan
+      if (_isFirstLoad && _activeTasks.isNotEmpty) {
+        _centerMapOnAllMarkers();
+        _isFirstLoad = false;
+      }
+    });
   }
 
   Future<void> _centerMapOnSpecificLocation(LatLng location) async {
@@ -115,14 +209,20 @@ class AdminMapScreenState extends State<AdminMapScreen> {
           _clusterFilters[clusterId] = true;
         }
       });
-    } catch (e) {}
+
+      print('Loaded ${_clusterNames.length} clusters');
+    } catch (e) {
+      print('Error loading clusters: $e');
+    }
   }
 
   Future<void> _loadMarkerIcons() async {
     try {
       _defaultIcon = await _getBitmapDescriptorFromAssetBytes(
           'assets/markers/default_marker.png', 120);
-    } catch (e) {}
+    } catch (e) {
+      print('Error loading marker icons: $e');
+    }
   }
 
   Future<BitmapDescriptor> _getBitmapDescriptorFromAssetBytes(
@@ -144,6 +244,7 @@ class AdminMapScreenState extends State<AdminMapScreen> {
         return BitmapDescriptor.defaultMarker;
       }
     } catch (e) {
+      print('Error creating custom marker: $e');
       return BitmapDescriptor.defaultMarker;
     }
   }
@@ -156,46 +257,47 @@ class AdminMapScreenState extends State<AdminMapScreen> {
     }
 
     final authState = context.read<AuthBloc>().state;
-    if (authState is! AuthAuthenticated) return;
+    if (authState is! AuthAuthenticated) {
+      print('User not authenticated');
+      return;
+    }
 
     try {
       _lastRefresh = DateTime.now();
 
-      // PERBAIKAN: Query hanya ongoing tasks
-      final ongoingSnapshot = await FirebaseDatabase.instance
+      final snapshot = await FirebaseDatabase.instance
           .ref()
           .child('tasks')
           .orderByChild('status')
           .equalTo('ongoing')
-          .limitToLast(100) // Limit untuk performa
           .get();
 
-      if (ongoingSnapshot.exists && ongoingSnapshot.value != null) {
-        await _processTaskSnapshot(ongoingSnapshot);
+      if (!snapshot.exists ||
+          (snapshot.value as Map<dynamic, dynamic>).isEmpty) {
+        print('No tasks with status "ongoing", trying alternative statuses');
+
+        final inProgressSnapshot = await FirebaseDatabase.instance
+            .ref()
+            .child('tasks')
+            .orderByChild('status')
+            .equalTo('in_progress')
+            .get();
+
+        if (inProgressSnapshot.exists && inProgressSnapshot.value != null) {
+          await _processTaskSnapshot(inProgressSnapshot);
+          return;
+        }
+
+        setState(() {
+          _isLoading = false;
+          _activeTasks.clear();
+          _markers.clear();
+          _polylines.clear();
+        });
         return;
       }
 
-      // Fallback ke in_progress jika tidak ada ongoing
-      final inProgressSnapshot = await FirebaseDatabase.instance
-          .ref()
-          .child('tasks')
-          .orderByChild('status')
-          .equalTo('in_progress')
-          .limitToLast(100)
-          .get();
-
-      if (inProgressSnapshot.exists && inProgressSnapshot.value != null) {
-        await _processTaskSnapshot(inProgressSnapshot);
-        return;
-      }
-
-      // Clear jika tidak ada data
-      setState(() {
-        _isLoading = false;
-        _activeTasks.clear();
-        _markers.clear();
-        _polylines.clear();
-      });
+      await _processTaskSnapshot(snapshot);
     } catch (e) {
       print('Error loading active tasks: $e');
       if (mounted) {
@@ -208,6 +310,7 @@ class AdminMapScreenState extends State<AdminMapScreen> {
 
   Future<void> _processTaskSnapshot(DataSnapshot snapshot) async {
     if (!snapshot.exists) {
+      print('No tasks found');
       setState(() {
         _isLoading = false;
         _activeTasks.clear();
@@ -242,7 +345,9 @@ class AdminMapScreenState extends State<AdminMapScreen> {
             _taskRoutes[taskId] = routePath;
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        print('Error processing task $taskId: $e');
+      }
     });
 
     if (mounted) {
@@ -311,6 +416,7 @@ class AdminMapScreenState extends State<AdminMapScreen> {
         return LatLng(lat, lng);
       }).toList();
     } catch (e) {
+      print('Error extracting route path: $e');
       return [];
     }
   }
@@ -338,7 +444,9 @@ class AdminMapScreenState extends State<AdminMapScreen> {
           }
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      print('Error fetching officer info: $e');
+    }
   }
 
   DateTime? _parseDateTime(dynamic value) {
@@ -359,7 +467,9 @@ class AdminMapScreenState extends State<AdminMapScreen> {
       } else if (value is int) {
         return DateTime.fromMillisecondsSinceEpoch(value);
       }
-    } catch (e) {}
+    } catch (e) {
+      print('Error parsing datetime: $value, error: $e');
+    }
     return null;
   }
 

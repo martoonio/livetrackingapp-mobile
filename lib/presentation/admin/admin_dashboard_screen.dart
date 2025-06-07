@@ -1,3 +1,5 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:livetrackingapp/domain/entities/patrol_task.dart';
@@ -31,7 +33,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Set<String> _selectedTaskIds = <String>{};
 
   // PERBAIKAN: Simplify pagination variables - HAPUS statistik
-
+  final Map<String, ScrollController> _clusterScrollControllers = {};
   Map<String, int> _clusterTaskPages = {};
   Map<String, bool> _clusterTaskLoading = {};
   Map<String, List<PatrolTask>> _clusterTasksData = {};
@@ -48,6 +50,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   void _initializeData() {
     print('AdminDashboard: Initializing...');
     context.read<AdminBloc>().add(const LoadAllTasks());
+  }
+
+  @override
+  void dispose() {
+    _clusterScrollControllers
+        .forEach((key, controller) => controller.dispose());
+    _clusterScrollControllers.clear();
+    super.dispose();
   }
 
   // PERBAIKAN: Enhanced loadData TANPA cluster summary loading
@@ -76,63 +86,90 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       {bool loadMore = false}) async {
     if (_clusterTaskLoading[clusterId] == true) return;
 
-    setState(() {
+    _safeSetState(() {
       _clusterTaskLoading[clusterId] = true;
     });
 
     try {
       final currentPage = _clusterTaskPages[clusterId] ?? 0;
       final newPage = loadMore ? currentPage + 1 : 0;
-      final lastKey = loadMore ? _clusterLastKeys[clusterId] : null;
 
-      print(
-          'Loading cluster tasks for $clusterId, page: $newPage, loadMore: $loadMore');
+      // Use the createdAt timestamp of the last loaded task as lastKey
+      final lastKeyForQuery = loadMore ? _clusterLastKeys[clusterId] : null;
 
-      // PERBAIKAN: Single query dengan pagination yang proper
-      final tasks = await context.read<PatrolBloc>().repository.getClusterTasks(
-            clusterId,
-            limit: _tasksPerPage,
-            lastKey: lastKey,
-          );
+      log('Loading cluster tasks for $clusterId, page: $newPage, loadMore: $loadMore, lastKey: $lastKeyForQuery');
 
-      // PERBAIKAN: Filter active dan cancelled di client side
-      final filteredTasks = tasks.where((task) {
-        return task.status.toLowerCase() == 'active' ||
-            task.status.toLowerCase() == 'cancelled';
-      }).toList();
+      // Load active tasks
+      final activeTasks =
+          await context.read<PatrolBloc>().repository.getClusterTasks(
+                clusterId,
+                limit: _tasksPerPage,
+                status: 'active',
+                lastKey: lastKeyForQuery,
+              );
 
-      print(
-          'Loaded ${tasks.length} tasks, filtered to ${filteredTasks.length} for cluster $clusterId');
+      // Load cancelled tasks
+      final cancelledTasks =
+          await context.read<PatrolBloc>().repository.getClusterTasks(
+                clusterId,
+                limit: _tasksPerPage,
+                status: 'cancelled',
+                lastKey: lastKeyForQuery,
+              );
 
-      if (mounted) {
-        setState(() {
-          if (loadMore) {
-            final currentTasks = _clusterTasksData[clusterId] ?? [];
-            _clusterTasksData[clusterId] = [...currentTasks, ...filteredTasks];
-          } else {
-            _clusterTasksData[clusterId] = filteredTasks;
-          }
+      // Combine and deduplicate
+      List<PatrolTask> combinedTasks = [];
+      combinedTasks.addAll(activeTasks);
+      combinedTasks.addAll(cancelledTasks);
 
-          _clusterTaskPages[clusterId] = newPage;
-          _clusterHasMoreTasks[clusterId] = tasks.length >= _tasksPerPage;
+      // Remove duplicates
+      final uniqueTasksMap = <String, PatrolTask>{};
+      for (var task in combinedTasks) {
+        uniqueTasksMap[task.taskId] = task;
+      }
+      combinedTasks = uniqueTasksMap.values.toList();
 
-          if (tasks.isNotEmpty) {
-            _clusterLastKeys[clusterId] = tasks.last.taskId;
-          }
+      // Sort by createdAt (newest first)
+      combinedTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-          _clusterTaskLoading[clusterId] = false;
-        });
+      if (!loadMore) {
+        _clusterTasksData[clusterId] = [];
       }
 
-      print(
-          'Updated state for cluster $clusterId: hasMore=${_clusterHasMoreTasks[clusterId]}, totalLoaded=${_clusterTasksData[clusterId]?.length ?? 0}');
+      _safeSetState(() {
+        // Append new tasks
+        _clusterTasksData[clusterId] = [
+          ...(_clusterTasksData[clusterId] ?? []),
+          ...combinedTasks
+        ];
+
+        _clusterTaskPages[clusterId] = newPage;
+
+        // Check if there are more tasks (if we got fewer than requested, probably no more)
+        _clusterHasMoreTasks[clusterId] = combinedTasks.length >= _tasksPerPage;
+
+        // Set lastKey to the createdAt of the last task for next pagination request
+        if (combinedTasks.isNotEmpty) {
+          _clusterLastKeys[clusterId] =
+              combinedTasks.last.createdAt.toIso8601String();
+        }
+
+        _clusterTaskLoading[clusterId] = false;
+      });
+
+      log('Updated state for cluster $clusterId: hasMore=${_clusterHasMoreTasks[clusterId]}, totalLoaded=${_clusterTasksData[clusterId]?.length ?? 0}');
     } catch (e) {
-      print('Error loading cluster tasks for $clusterId: $e');
-      if (mounted) {
-        setState(() {
-          _clusterTaskLoading[clusterId] = false;
-        });
-      }
+      log('Error loading cluster tasks for $clusterId: $e');
+      _safeSetState(() {
+        _clusterTaskLoading[clusterId] = false;
+      });
+    }
+  }
+
+  // --- Helper _safeSetState (Tambahkan di semua StatefulWidget untuk keamanan) ---
+  void _safeSetState(VoidCallback fn) {
+    if (mounted) {
+      setState(fn);
     }
   }
 
@@ -603,6 +640,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final hasMoreTasks = _clusterHasMoreTasks[cluster.id] ?? false;
     final currentPage = _clusterTaskPages[cluster.id] ?? 0;
 
+    // Inisialisasi ScrollController jika belum ada
+    if (!_clusterScrollControllers.containsKey(cluster.id)) {
+      _clusterScrollControllers[cluster.id] = ScrollController();
+      _clusterScrollControllers[cluster.id]!.addListener(() {
+        if (_clusterScrollControllers[cluster.id]!.position.pixels ==
+            _clusterScrollControllers[cluster.id]!.position.maxScrollExtent) {
+          _loadClusterTasks(cluster.id, loadMore: true);
+        }
+      });
+    }
+
     // HAPUS: Semua logika statistik summary
     // final clusterSummary = _clusterTaskCounts[cluster.id]; // DIHAPUS
     // final actualActiveTasks = clusterSummary?['active'] ?? 0; // DIHAPUS
@@ -942,10 +990,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     Column(
                       children: [
                         ListView.builder(
-                          physics: const NeverScrollableScrollPhysics(),
+                          controller: _clusterScrollControllers[
+                              cluster.id], // PASANG CONTROLLER DI SINI
+                          physics:
+                              const NeverScrollableScrollPhysics(), // BIARKAN INI KARENA PARENT JUGA SCROLLABLE
                           shrinkWrap: true,
-                          itemCount: paginatedTasks.length,
+                          itemCount: paginatedTasks.length +
+                              (hasMoreTasks
+                                  ? 1
+                                  : 0), // Tambah 1 untuk tombol "Muat Lebih Banyak"
                           itemBuilder: (context, taskIndex) {
+                            if (taskIndex == paginatedTasks.length) {
+                              return _buildLoadMoreButton(
+                                  cluster.id, isLoadingTasks, hasMoreTasks);
+                            }
+
                             final task = paginatedTasks[taskIndex];
                             final assignedOfficer =
                                 _findOfficerByUserId(officers, task.userId) ??
@@ -965,119 +1024,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 task, assignedOfficer);
                           },
                         ),
-                        if (hasMoreTasks || isLoadingTasks)
-                          Container(
-                            margin: const EdgeInsets.symmetric(vertical: 12),
-                            child: Column(
-                              children: [
-                                Container(
-                                  height: 1,
-                                  margin:
-                                      const EdgeInsets.symmetric(vertical: 8),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        Colors.transparent,
-                                        kbpBlue200,
-                                        Colors.transparent,
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                if (isLoadingTasks)
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          color: kbpBlue900,
-                                          strokeWidth: 2,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Text(
-                                        'Memuat lebih banyak tugas...',
-                                        style: mediumTextStyle(
-                                            size: 12, color: kbpBlue600),
-                                      ),
-                                    ],
-                                  )
-                                else if (hasMoreTasks)
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: OutlinedButton.icon(
-                                      onPressed: () => _loadClusterTasks(
-                                          cluster.id,
-                                          loadMore: true),
-                                      icon: const Icon(Icons.expand_more,
-                                          size: 18),
-                                      label: Text(
-                                          'Lihat ${_tasksPerPage} Tugas Lagi'),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: kbpBlue900,
-                                        side: BorderSide(
-                                            color: kbpBlue300, width: 1.5),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 16, vertical: 12),
-                                      ),
-                                    ),
-                                  ),
-                                if (hasMoreTasks)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 8),
-                                    child: Text(
-                                      'Halaman ${currentPage + 1} • ${paginatedTasks.length} tugas dimuat',
-                                      style: regularTextStyle(
-                                          size: 11, color: neutral500),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        if (!hasMoreTasks &&
-                            paginatedTasks.isNotEmpty &&
-                            !isLoadingTasks)
-                          Container(
-                            margin: const EdgeInsets.symmetric(vertical: 12),
-                            child: Column(
-                              children: [
-                                Container(
-                                  height: 1,
-                                  margin:
-                                      const EdgeInsets.symmetric(vertical: 8),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        Colors.transparent,
-                                        neutral300,
-                                        Colors.transparent,
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.check_circle_outline,
-                                        color: successG500, size: 16),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'Menampilkan semua ${paginatedTasks.length} tugas',
-                                      style: mediumTextStyle(
-                                          size: 12, color: successG300),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
                       ],
                     ),
                 ],
@@ -1087,6 +1033,85 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ],
       ),
     );
+  }
+
+  // Widget baru untuk tombol "Muat Lebih Banyak" atau indikator loading
+  Widget _buildLoadMoreButton(String clusterId, bool isLoading, bool hasMore) {
+    if (isLoading) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: kbpBlue600,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Memuat lebih banyak tugas...',
+              style: mediumTextStyle(size: 14, color: kbpBlue600),
+            ),
+          ],
+        ),
+      );
+    } else if (hasMore) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () => _loadClusterTasks(clusterId, loadMore: true),
+            icon: const Icon(Icons.expand_more, size: 18),
+            label: Text('Lihat ${_tasksPerPage} Tugas Lagi'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: kbpBlue900,
+              side: BorderSide(color: kbpBlue300, width: 1.5),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+          ),
+        ),
+      );
+    } else {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 12),
+        child: Column(
+          children: [
+            Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.transparent,
+                    neutral300,
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.check_circle_outline, color: successG500, size: 16),
+                const SizedBox(width: 8),
+                Text(
+                  'Menampilkan semua ${(_clusterTasksData[clusterId] ?? []).length} tugas',
+                  style: mediumTextStyle(size: 12, color: successG300),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   Widget _buildSimpleClusterStatsRow(
