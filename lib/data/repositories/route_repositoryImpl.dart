@@ -26,6 +26,8 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<PatrolTask?> getCurrentTask(String userId) async {
     try {
+      log('getCurrentTask called for userId: $userId');
+
       final snapshot = await _database
           .child('tasks')
           .orderByChild('userId')
@@ -33,6 +35,7 @@ class RouteRepositoryImpl implements RouteRepository {
           .get();
 
       if (!snapshot.exists) {
+        log('No tasks found for userId: $userId');
         return null;
       }
 
@@ -52,7 +55,7 @@ class RouteRepositoryImpl implements RouteRepository {
           return null;
         }
       } catch (e) {
-        // log('Error converting snapshot value to map in getCurrentTask: $e');
+        log('Error converting snapshot value to map in getCurrentTask: $e');
         return null;
       }
 
@@ -70,54 +73,25 @@ class RouteRepositoryImpl implements RouteRepository {
           orElse: () => MapEntry(null, null),
         );
       } catch (e) {
-        // log('Error finding active task in getCurrentTask: $e');
+        log('Error finding active task in getCurrentTask: $e');
         activeTaskEntry = null;
       }
 
       if (activeTaskEntry == null || activeTaskEntry.key == null) {
+        log('No active task found for userId: $userId');
         return null;
       }
 
-      final taskData = activeTaskEntry.value as Map<dynamic, dynamic>;
+      final taskData = Map<String, dynamic>.from(activeTaskEntry.value as Map);
+      taskData['taskId'] = activeTaskEntry.key.toString();
 
-      String? officerName;
-      String? officerPhotoUrl;
-      try {
-        if (taskData['userId'] != null) {
-          final officerId = taskData['userId'].toString();
-          final clusterId = taskData['clusterId']?.toString();
+      // ✅ Load officer info
+      await _loadOfficerInfoForTask(taskData);
 
-          if (clusterId != null && clusterId.isNotEmpty) {
-            final officerSnapshot = await _database
-                .child('users/$clusterId/officers')
-                .orderByKey()
-                .equalTo(officerId)
-                .get();
+      // ✅ Convert to PatrolTask (includes route_path)
+      final task = _convertToPatrolTask(taskData);
 
-            if (officerSnapshot.exists) {
-              if (officerSnapshot.value is Map) {
-                final officerData = officerSnapshot.value as Map;
-                if (officerData.containsKey(officerId) &&
-                    officerData[officerId] is Map) {
-                  officerName = officerData[officerId]['name']?.toString();
-                  officerPhotoUrl =
-                      officerData[officerId]['photoUrl']?.toString();
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        // log('Error fetching officer info in getCurrentTask: $e');
-      }
-
-      final task = _convertToPatrolTask({
-        ...taskData,
-        'taskId': activeTaskEntry.key,
-        'officerName': officerName,
-        'officerPhotoUrl': officerPhotoUrl,
-      });
-
+      // ✅ Update timeliness if needed
       final recalculatedTimeliness = determineTimelinessStatus(
           task.assignedStartTime,
           task.startTime,
@@ -129,9 +103,10 @@ class RouteRepositoryImpl implements RouteRepository {
         return task.copyWith(timeliness: recalculatedTimeliness);
       }
 
+      log('Returning task: ${task.taskId} with status: ${task.status}');
       return task;
     } catch (e, stackTrace) {
-      // log('Error in getCurrentTask: $e\n$stackTrace');
+      log('Error in getCurrentTask: $e\n$stackTrace');
       return null;
     }
   }
@@ -577,7 +552,9 @@ class RouteRepositoryImpl implements RouteRepository {
       createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
       assignedRoute: _parseRouteCoordinates(
           data['assigned_route'] ?? data['assignedRoute']),
-      // routePath: data['route_path'] != null ? Map<String, dynamic>.from(data['route_path'] as Map) : null, // HAPUS ATAU KOMENTARI BARIS INI
+      routePath: data['route_path'] != null
+          ? Map<String, dynamic>.from(data['route_path'] as Map)
+          : null,
       clusterId: data['clusterId']?.toString() ?? '',
       mockLocationDetected: data['mockLocationDetected'] == true,
       mockLocationCount: data['mockLocationCount'] is num
@@ -846,7 +823,9 @@ class RouteRepositoryImpl implements RouteRepository {
     String? lastKey,
   }) async {
     try {
-      // Get all tasks for the cluster first
+      log('getClusterTasks called: clusterId=$clusterId, limit=$limit, status=$status, lastKey=$lastKey');
+
+      // ✅ Get all tasks for the cluster first
       final snapshot = await _database
           .child('tasks')
           .orderByChild('clusterId')
@@ -854,26 +833,47 @@ class RouteRepositoryImpl implements RouteRepository {
           .get();
 
       if (!snapshot.exists || snapshot.value == null) {
+        log('No tasks found for cluster $clusterId');
         return [];
       }
 
       final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      List<PatrolTask> allTasks = _convertMapToTaskList(tasksMap);
+      List<PatrolTask> allTasks = [];
 
-      // Filter by status if specified
-      if (status != null) {
-        allTasks = allTasks
-            .where((task) => task.status.toLowerCase() == status.toLowerCase())
-            .toList();
-      }
+      // ✅ Process each task with complete data
+      await Future.forEach(tasksMap.entries,
+          (MapEntry<dynamic, dynamic> entry) async {
+        try {
+          final taskId = entry.key.toString();
+          final taskData = Map<String, dynamic>.from(entry.value as Map);
+          taskData['taskId'] = taskId;
 
-      // Sort by createdAt (newest first)
+          // ✅ Filter by status if specified
+          if (status != null &&
+              taskData['status']?.toString().toLowerCase() !=
+                  status.toLowerCase()) {
+            return; // Skip this task
+          }
+
+          // ✅ Load officer info
+          await _loadOfficerInfoForTask(taskData);
+
+          // ✅ Convert to PatrolTask (now includes route_path)
+          if (_isValidTaskData(taskData)) {
+            final task = _convertToPatrolTask(taskData);
+            allTasks.add(task);
+          }
+        } catch (e) {
+          log('Error processing task ${entry.key}: $e');
+        }
+      });
+
+      // ✅ Sort by createdAt (newest first)
       allTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-      // Apply pagination client-side
+      // ✅ Apply pagination client-side
       int startIndex = 0;
       if (lastKey != null) {
-        // Find the index of the task with the given createdAt timestamp
         startIndex = allTasks.indexWhere(
                 (task) => task.createdAt.toIso8601String() == lastKey) +
             1;
@@ -887,6 +887,51 @@ class RouteRepositoryImpl implements RouteRepository {
     } catch (e, stackTrace) {
       log('Error in getClusterTasks for $clusterId: $e\n$stackTrace');
       return [];
+    }
+  }
+
+// ✅ Helper method untuk load officer info
+  Future<void> _loadOfficerInfoForTask(Map<String, dynamic> taskData) async {
+    try {
+      if (taskData['userId'] != null && taskData['clusterId'] != null) {
+        final officerId = taskData['userId'].toString();
+        final clusterId = taskData['clusterId'].toString();
+
+        if (clusterId.isNotEmpty) {
+          final officerSnapshot =
+              await _database.child('users/$clusterId/officers').get();
+
+          if (officerSnapshot.exists && officerSnapshot.value != null) {
+            final officersData = officerSnapshot.value;
+
+            // ✅ Handle both List and Map structures
+            if (officersData is List) {
+              for (var officer in officersData) {
+                if (officer != null && officer['id'] == officerId) {
+                  taskData['officerName'] = officer['name']?.toString() ?? '';
+                  taskData['officerPhotoUrl'] =
+                      officer['photo_url']?.toString() ?? '';
+                  break;
+                }
+              }
+            } else if (officersData is Map) {
+              officersData.forEach((key, officer) {
+                if (officer != null && officer['id'] == officerId) {
+                  taskData['officerName'] = officer['name']?.toString() ?? '';
+                  taskData['officerPhotoUrl'] =
+                      officer['photo_url']?.toString() ?? '';
+                }
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      log('Error loading officer info for task: $e');
+      // Set default values if error
+      taskData['officerName'] = taskData['officerName'] ??
+          'Officer #${taskData['userId']?.toString().substring(0, 6) ?? 'Unknown'}';
+      taskData['officerPhotoUrl'] = taskData['officerPhotoUrl'] ?? '';
     }
   }
 
@@ -925,6 +970,7 @@ class RouteRepositoryImpl implements RouteRepository {
   List<PatrolTask> _convertMapToTaskList(Map<dynamic, dynamic> tasksMap) {
     final tasks = <PatrolTask>[];
 
+    // ✅ Process tasks with complete data loading
     tasksMap.forEach((key, value) {
       if (value is Map) {
         try {
@@ -932,19 +978,27 @@ class RouteRepositoryImpl implements RouteRepository {
           taskData['taskId'] = key.toString();
 
           if (_isValidTaskData(taskData)) {
+            // ✅ Load officer info if not already present
+            if (taskData['officerName'] == null ||
+                taskData['officerName'] == '') {
+              // Set placeholder that will be loaded later
+              taskData['officerName'] =
+                  'Officer #${taskData['userId']?.toString().substring(0, 6) ?? 'Unknown'}';
+              taskData['officerPhotoUrl'] = '';
+            }
+
             final task = _convertToPatrolTask(taskData);
             tasks.add(task);
           } else {
-            // log('Invalid task data for key $key: missing required fields');
+            log('Invalid task data for key $key: missing required fields');
           }
         } catch (e) {
-          // log('Error converting task $key: $e');
+          log('Error converting task $key: $e');
         }
       }
     });
 
     tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
     return tasks;
   }
 

@@ -770,7 +770,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    '${officers.length} petugas • ${totalTasks} tugas', // Simplified subtitle
+                                    '${officers.length} petugas', // Simplified subtitle
                                     style: mediumTextStyle(
                                         size: 13, color: neutral600),
                                   ),
@@ -821,15 +821,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ],
                   ),
 
-                  const SizedBox(height: 20),
+                  // const SizedBox(height: 20),
 
                   // PERBAIKAN: Simplified statistics tanpa loading
-                  _buildSimpleClusterStatsRow(
-                    officers.length,
-                    organikOfficers,
-                    outsourceOfficers,
-                    totalTasks,
-                  ),
+                  // _buildSimpleClusterStatsRow(
+                  //   officers.length,
+                  //   organikOfficers,
+                  //   outsourceOfficers,
+                  //   totalTasks,
+                  // ),
 
                   if (isFiltered && summaryActiveTasks.isNotEmpty) ...[
                     const SizedBox(height: 16),
@@ -879,8 +879,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         const SizedBox(width: 4),
                         Text(
                           isExpanded
-                              ? 'Tutup untuk menyembunyikan detail'
-                              : 'Ketuk untuk melihat detail tugas',
+                              ? 'Tutup untuk menyembunyikan'
+                              : 'Ketuk untuk melihat list tugas',
                           style: mediumTextStyle(size: 11, color: kbpBlue600),
                         ),
                       ],
