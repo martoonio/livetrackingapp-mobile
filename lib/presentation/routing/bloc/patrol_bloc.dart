@@ -1210,6 +1210,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             task: updatedTask,
             isOffline: !_isConnected,
             mockLocationDetected: false,
+            isPatrolling: true,
           ));
 
           // Gunakan mergedRoutePath

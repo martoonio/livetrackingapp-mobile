@@ -784,6 +784,7 @@ class _MapScreenState extends State<MapScreen> {
   Widget _buildPatrolButtonUI(bool isPatrolling) {
     final state = context.read<PatrolBloc>().state;
     final isOffline = state is PatrolLoaded ? state.isOffline : false;
+
     final canStartNow = _canStartPatrol();
 
     if (isOffline && !isPatrolling) {
@@ -1292,17 +1293,36 @@ class _MapScreenState extends State<MapScreen> {
                                                 reportTime: DateTime.now(),
                                               ));
 
-                                          _startPatrol(
-                                              context); // Panggil _startPatrol setelah laporan awal
+                                          await Future.delayed(const Duration(
+                                              milliseconds: 500));
 
-                                          // Tampilkan snackbar sukses
-                                          showCustomSnackbar(
-                                            context: context,
-                                            title: 'Laporan awal berhasil',
-                                            subtitle:
-                                                'Patroli akan segera dimulai',
-                                            type: SnackbarType.success,
-                                          );
+                                          final patrolState =
+                                              context.read<PatrolBloc>().state;
+
+                                          if (mounted &&
+                                              patrolState is PatrolLoaded &&
+                                              patrolState.task
+                                                      ?.initialReportPhotoUrl !=
+                                                  null) {
+                                            _startPatrol(
+                                                context); // Panggil _startPatrol hanya setelah laporan awal disubmit dan state terupdate
+                                            showCustomSnackbar(
+                                              context: context,
+                                              title: 'Laporan awal berhasil',
+                                              subtitle:
+                                                  'Patroli akan segera dimulai',
+                                              type: SnackbarType.success,
+                                            );
+                                          } else {
+                                            // Jika ada masalah update state, tangani di sini (misal: tampilkan error)
+                                            showCustomSnackbar(
+                                              context: context,
+                                              title: 'Gagal Memulai Patroli',
+                                              subtitle:
+                                                  'Terjadi masalah saat menyiapkan laporan awal. Coba lagi.',
+                                              type: SnackbarType.danger,
+                                            );
+                                          }
                                         }
                                       } catch (e) {
                                         // Tangani error
