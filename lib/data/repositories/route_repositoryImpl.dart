@@ -1,8 +1,5 @@
-// lib/data/repositories/route_repositoryImpl.dart
-
 // import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:async';
-import 'dart:developer'; // Import for log
+import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -26,6 +23,8 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<PatrolTask?> getCurrentTask(String userId) async {
     try {
+      // Debug print
+
       final snapshot = await _database
           .child('tasks')
           .orderByChild('userId')
@@ -36,11 +35,13 @@ class RouteRepositoryImpl implements RouteRepository {
         return null;
       }
 
+      // PERBAIKAN: Cek tipe data sebelum casting
       Map<dynamic, dynamic> tasks;
       try {
         if (snapshot.value is Map) {
           tasks = snapshot.value as Map<dynamic, dynamic>;
         } else if (snapshot.value is List) {
+          // Handle jika bentuknya List
           final list = snapshot.value as List;
           tasks = {};
           for (int i = 0; i < list.length; i++) {
@@ -52,15 +53,22 @@ class RouteRepositoryImpl implements RouteRepository {
           return null;
         }
       } catch (e) {
-        // log('Error converting snapshot value to map in getCurrentTask: $e');
         return null;
       }
 
+      // Debugging
+      tasks.forEach((key, value) {
+        if (value is Map) {
+        } else {}
+      });
+
+      // Perbaikan: Mencari tugas dengan status active, ongoing, atau in_progress
       MapEntry<dynamic, dynamic>? activeTaskEntry;
       try {
         activeTaskEntry = tasks.entries.firstWhere(
           (entry) {
             if (entry.value is! Map) return false;
+
             final task = entry.value as Map<dynamic, dynamic>;
             final status = task['status']?.toString().toLowerCase();
             return status == 'active' ||
@@ -69,8 +77,12 @@ class RouteRepositoryImpl implements RouteRepository {
           },
           orElse: () => MapEntry(null, null),
         );
+
+        if (activeTaskEntry.key != null) {
+        } else {
+          return null;
+        }
       } catch (e) {
-        // log('Error finding active task in getCurrentTask: $e');
         activeTaskEntry = null;
       }
 
@@ -78,8 +90,10 @@ class RouteRepositoryImpl implements RouteRepository {
         return null;
       }
 
+      // Create PatrolTask with the task data
       final taskData = activeTaskEntry.value as Map<dynamic, dynamic>;
 
+      // Add officer name to task if possible
       String? officerName;
       String? officerPhotoUrl;
       try {
@@ -88,13 +102,15 @@ class RouteRepositoryImpl implements RouteRepository {
           final clusterId = taskData['clusterId']?.toString();
 
           if (clusterId != null && clusterId.isNotEmpty) {
+            // Try to find officer in cluster's officers list
             final officerSnapshot = await _database
                 .child('users/$clusterId/officers')
-                .orderByKey()
+                .orderByKey() // Use orderByKey for new structure
                 .equalTo(officerId)
                 .get();
 
             if (officerSnapshot.exists) {
+              // PERBAIKAN: Handle tipe data dengan benar
               if (officerSnapshot.value is Map) {
                 final officerData = officerSnapshot.value as Map;
                 if (officerData.containsKey(officerId) &&
@@ -107,9 +123,7 @@ class RouteRepositoryImpl implements RouteRepository {
             }
           }
         }
-      } catch (e) {
-        // log('Error fetching officer info in getCurrentTask: $e');
-      }
+      } catch (e) {}
 
       final task = _convertToPatrolTask({
         ...taskData,
@@ -118,12 +132,14 @@ class RouteRepositoryImpl implements RouteRepository {
         'officerPhotoUrl': officerPhotoUrl,
       });
 
+      // Check if timeliness needs update
       final recalculatedTimeliness = determineTimelinessStatus(
           task.assignedStartTime,
           task.startTime,
           task.assignedEndTime,
           task.status);
 
+      // Update timeliness in database if needed
       if (task.timeliness != recalculatedTimeliness) {
         await updateTask(task.taskId, {'timeliness': recalculatedTimeliness});
         return task.copyWith(timeliness: recalculatedTimeliness);
@@ -131,7 +147,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return task;
     } catch (e, stackTrace) {
-      // log('Error in getCurrentTask: $e\n$stackTrace');
       return null;
     }
   }
@@ -146,6 +161,7 @@ class RouteRepositoryImpl implements RouteRepository {
       });
 
       if (task != null) {
+        // Update timeliness after status change
         final timeliness = determineTimelinessStatus(task.assignedStartTime,
             task.startTime, task.assignedEndTime, status);
 
@@ -154,8 +170,7 @@ class RouteRepositoryImpl implements RouteRepository {
         });
       }
     } catch (e) {
-      // log('Error in updateTaskStatus: $e');
-      rethrow;
+      throw e;
     }
   }
 
@@ -166,34 +181,36 @@ class RouteRepositoryImpl implements RouteRepository {
     DateTime timestamp,
   ) async {
     try {
+      // Skip auth check to avoid permission issues
       final user = _auth.currentUser;
       if (user == null) {
-        // log('Not authenticated for updatePatrolLocation'); // Debug
-      } else {
-        // log('Authenticated user: ${user.uid} for updatePatrolLocation'); // Debug
-      }
+      } else {}
 
       final taskRef = _database.child('tasks').child(taskId);
 
+      // Create timestamp key
       final timestampKey = timestamp.millisecondsSinceEpoch.toString();
 
+      // Format data consistently
       final locationData = {
         'coordinates': coordinates,
         'timestamp': timestamp.toIso8601String(),
       };
 
+      // Try direct path first for better performance
       try {
         await taskRef.child('route_path').child(timestampKey).set(locationData);
       } catch (e) {
+        // Try alternative approach with update()
         final updates = {
           'route_path/$timestampKey': locationData,
         };
         await taskRef.update(updates);
       }
 
+      // Also update lastLocation
       await taskRef.child('lastLocation').set(locationData);
     } catch (e, stackTrace) {
-      // log('Failed to update location: $e\n$stackTrace');
       throw Exception('Failed to update location: $e');
     }
   }
@@ -211,6 +228,7 @@ class RouteRepositoryImpl implements RouteRepository {
         return [];
       }
 
+      // PERBAIKAN: Cek tipe data sebelum casting
       Map<dynamic, dynamic> tasks;
       if (snapshot.value is Map) {
         tasks = snapshot.value as Map<dynamic, dynamic>;
@@ -239,6 +257,7 @@ class RouteRepositoryImpl implements RouteRepository {
           final status = taskData['status']?.toString() ?? '';
 
           if (status.toLowerCase() == 'finished') {
+            // Get officer name if possible
             String? officerName;
             String? officerPhotoUrl;
 
@@ -264,9 +283,7 @@ class RouteRepositoryImpl implements RouteRepository {
                     }
                   }
                 }
-              } catch (e) {
-                // log('Error fetching officer info in getFinishedTasks: $e');
-              }
+              } catch (e) {}
             }
 
             final task = _convertToPatrolTask({
@@ -278,242 +295,104 @@ class RouteRepositoryImpl implements RouteRepository {
 
             finishedTasks.add(task);
           }
-        } catch (e) {
-          // log('Error processing task entry in getFinishedTasks: $e');
-        }
+        } catch (e) {}
       });
 
+      // Sort by end time, most recent first
       finishedTasks.sort((a, b) =>
           (b.endTime ?? DateTime.now()).compareTo(a.endTime ?? DateTime.now()));
 
       return finishedTasks;
     } catch (e) {
-      // log('Error in getFinishedTasks: $e');
       return [];
     }
   }
 
-  // --- PEMBAHARUAN KRITIS: watchCurrentTask menggunakan listener onChild... ---
+// Update watchCurrentTask to handle in_progress status
   @override
   Stream<PatrolTask?> watchCurrentTask(String userId) {
-    // Gunakan StreamController untuk memancarkan perubahan yang digabungkan dari beberapa listener
-    final controller = StreamController<PatrolTask?>.broadcast();
+    // Debug print
 
-    // Simpan referensi ke tugas yang sedang aktif secara lokal
-    PatrolTask? currentActiveTask;
-
-    // Listener untuk status 'active'
-    final activeQuery = _database
+    return _database
         .child('tasks')
         .orderByChild('userId')
         .equalTo(userId)
-        .orderByChild('status')
-        .equalTo('active');
-    activeQuery.onChildAdded.listen((event) => _handleChildEvent(
-        event, controller, userId, 'active', 'added', currentActiveTask));
-    activeQuery.onChildChanged.listen((event) => _handleChildEvent(
-        event, controller, userId, 'active', 'changed', currentActiveTask));
-    activeQuery.onChildRemoved.listen((event) => _handleChildEvent(
-        event, controller, userId, 'active', 'removed', currentActiveTask));
-
-    // Listener untuk status 'ongoing'
-    final ongoingQuery = _database
-        .child('tasks')
-        .orderByChild('userId')
-        .equalTo(userId)
-        .orderByChild('status')
-        .equalTo('ongoing');
-    ongoingQuery.onChildAdded.listen((event) => _handleChildEvent(
-        event, controller, userId, 'ongoing', 'added', currentActiveTask));
-    ongoingQuery.onChildChanged.listen((event) => _handleChildEvent(
-        event, controller, userId, 'ongoing', 'changed', currentActiveTask));
-    ongoingQuery.onChildRemoved.listen((event) => _handleChildEvent(
-        event, controller, userId, 'ongoing', 'removed', currentActiveTask));
-
-    // Listener untuk status 'in_progress'
-    final inProgressQuery = _database
-        .child('tasks')
-        .orderByChild('userId')
-        .equalTo(userId)
-        .orderByChild('status')
-        .equalTo('in_progress');
-    inProgressQuery.onChildAdded.listen((event) => _handleChildEvent(
-        event, controller, userId, 'in_progress', 'added', currentActiveTask));
-    inProgressQuery.onChildChanged.listen((event) => _handleChildEvent(event,
-        controller, userId, 'in_progress', 'changed', currentActiveTask));
-    inProgressQuery.onChildRemoved.listen((event) => _handleChildEvent(event,
-        controller, userId, 'in_progress', 'removed', currentActiveTask));
-
-    // Saat controller ditutup, pastikan listener juga dibatalkan
-    controller.onCancel = () {
-      // Tidak perlu membatalkan listener di sini, karena mereka adalah global.
-      // Firebase Realtime Database secara otomatis mengelola listener berdasarkan Query yang sama.
-      // Jika Anda memiliki listener terpisah yang dikelola oleh objek ini, batalkan di sini.
-    };
-
-    return controller.stream;
-  }
-
-  // Helper untuk memproses event onChild... dan memancarkan ke stream
-  Future<void> _handleChildEvent(
-    DatabaseEvent event,
-    StreamController<PatrolTask?> controller,
-    String userId,
-    String relevantStatus,
-    String eventType,
-    PatrolTask? currentActiveTask, // Menerima referensi tugas aktif saat ini
-  ) async {
-    try {
-      final taskId = event.snapshot.key;
-      final taskData = event.snapshot.value as Map<dynamic, dynamic>?;
-
-      if (eventType == 'removed') {
-        if (currentActiveTask?.taskId == taskId) {
-          // Jika tugas aktif saat ini dihapus, set ke null
-          controller.sink.add(null);
-        }
-        return;
+        .onValue
+        .map((event) {
+      if (!event.snapshot.exists) {
+        return null;
       }
 
-      if (taskData == null) return;
+      try {
+        final tasksMap = event.snapshot.value as Map<dynamic, dynamic>;
 
-      final status = taskData['status']?.toString().toLowerCase();
+        // Find active or ongoing task
+        MapEntry<dynamic, dynamic>? activeTaskEntry;
+        try {
+          activeTaskEntry = tasksMap.entries.firstWhere(
+            (entry) {
+              final task = entry.value as Map<dynamic, dynamic>;
+              final status = task['status']?.toString();
+              return status == 'active' ||
+                  status == 'ongoing' ||
+                  status == 'in_progress';
+            },
+          );
+        } catch (e) {
+          activeTaskEntry = null;
+        }
 
-      // Perbarui currentActiveTask secara lokal jika ada yang cocok
-      if (status == 'active' ||
-          status == 'ongoing' ||
-          status == 'in_progress') {
-        final task = _convertToPatrolTask({
+        if (activeTaskEntry == null) {
+          return null;
+        }
+
+        // Log assigned start/end times for debugging
+        final taskData = activeTaskEntry.value as Map<dynamic, dynamic>;
+
+        // Create PatrolTask with the task data
+        return _convertToPatrolTask({
           ...taskData,
-          'taskId': taskId,
+          'taskId': activeTaskEntry.key,
         });
-        currentActiveTask = task; // Update referensi lokal
-        controller.sink.add(task);
-      } else {
-        // Jika tugas aktif berubah status menjadi tidak aktif
-        if (currentActiveTask?.taskId == taskId) {
-          controller.sink.add(null);
-          currentActiveTask = null; // Set ke null
-        }
+      } catch (e, stackTrace) {
+        return null;
       }
-    } catch (e, stackTrace) {
-      // log('Error handling child event for watchCurrentTask: $e\n$stackTrace');
-      controller.addError(e);
-    }
+    }).handleError((error) {
+      return null;
+    });
   }
 
-  // --- PEMBAHARUAN KRITIS: watchFinishedTasks menggunakan listener onChild... ---
   @override
   Stream<List<PatrolTask>> watchFinishedTasks(String userId) {
-    final controller = StreamController<List<PatrolTask>>.broadcast();
-    List<PatrolTask> finishedTasks =
-        []; // Daftar lokal untuk tasks yang selesai
-
-    final finishedQuery = _database
+    return _database
         .child('tasks')
         .orderByChild('userId')
         .equalTo(userId)
-        .orderByChild('status')
-        .equalTo('finished');
-    finishedQuery.onChildAdded.listen((event) =>
-        _handleFinishedChildEvent(event, controller, finishedTasks, 'added'));
-    finishedQuery.onChildChanged.listen((event) =>
-        _handleFinishedChildEvent(event, controller, finishedTasks, 'changed'));
-    finishedQuery.onChildRemoved.listen((event) =>
-        _handleFinishedChildEvent(event, controller, finishedTasks, 'removed'));
-
-    final cancelledQuery = _database
-        .child('tasks')
-        .orderByChild('userId')
-        .equalTo(userId)
-        .orderByChild('status')
-        .equalTo('cancelled');
-    cancelledQuery.onChildAdded.listen((event) =>
-        _handleFinishedChildEvent(event, controller, finishedTasks, 'added'));
-    cancelledQuery.onChildChanged.listen((event) =>
-        _handleFinishedChildEvent(event, controller, finishedTasks, 'changed'));
-    cancelledQuery.onChildRemoved.listen((event) =>
-        _handleFinishedChildEvent(event, controller, finishedTasks, 'removed'));
-
-    final expiredQuery = _database
-        .child('tasks')
-        .orderByChild('userId')
-        .equalTo(userId)
-        .orderByChild('status')
-        .equalTo('expired');
-    expiredQuery.onChildAdded.listen((event) =>
-        _handleFinishedChildEvent(event, controller, finishedTasks, 'added'));
-    expiredQuery.onChildChanged.listen((event) =>
-        _handleFinishedChildEvent(event, controller, finishedTasks, 'changed'));
-    expiredQuery.onChildRemoved.listen((event) =>
-        _handleFinishedChildEvent(event, controller, finishedTasks, 'removed'));
-
-    // Memuat data awal untuk inisialisasi daftar
-    getFinishedTasks(userId).then((initialTasks) {
-      finishedTasks = initialTasks;
-      controller.sink.add(List.from(finishedTasks)); // Memancarkan data awal
-    }).catchError((e) {
-      // log('Error loading initial finished tasks: $e');
-      controller.addError(e);
-    });
-
-    controller.onCancel = () {
-      // Firebase Realtime Database secara otomatis mengelola listener berdasarkan Query yang sama.
-    };
-
-    return controller.stream;
-  }
-
-  // Helper untuk memproses event onChild... dan memancarkan ke stream finished tasks
-  Future<void> _handleFinishedChildEvent(
-    DatabaseEvent event,
-    StreamController<List<PatrolTask>> controller,
-    List<PatrolTask> finishedTasks, // Daftar lokal
-    String eventType,
-  ) async {
-    try {
-      final taskId = event.snapshot.key;
-      final taskData = event.snapshot.value as Map<dynamic, dynamic>?;
-
-      if (eventType == 'removed') {
-        finishedTasks.removeWhere((task) => task.taskId == taskId);
-      } else if (taskData != null) {
-        final task = _convertToPatrolTask({
-          ...taskData,
-          'taskId': taskId,
-        });
-
-        // Perbarui officerName dan officerPhotoUrl secara asinkron
-        // (Ini akan memanggil Firebase lagi, pertimbangkan caching jika terlalu sering)
-        await task.fetchOfficerName(_database);
-
-        final index = finishedTasks.indexWhere((t) => t.taskId == taskId);
-        if (index != -1) {
-          finishedTasks[index] = task;
-        } else {
-          // Hanya tambahkan jika statusnya 'finished'/'cancelled'/'expired'
-          final status = task.status.toLowerCase();
-          if (status == 'finished' ||
-              status == 'cancelled' ||
-              status == 'expired') {
-            finishedTasks.add(task);
-          } else {
-            // Jika status berubah dari finished/cancelled/expired ke status aktif, hapus dari daftar
-            finishedTasks.removeWhere((t) => t.taskId == taskId);
-          }
-        }
+        .onValue
+        .map((event) {
+      if (!event.snapshot.exists) {
+        return [];
       }
 
-      // Urutkan ulang daftar setelah perubahan
-      finishedTasks.sort((a, b) =>
-          (b.endTime ?? DateTime.now()).compareTo(a.endTime ?? DateTime.now()));
+      try {
+        final tasksMap = event.snapshot.value as Map<dynamic, dynamic>;
+        final finishedTasks = tasksMap.entries
+            .where((entry) => (entry.value as Map)['status'] == 'finished')
+            .map((entry) => _convertToPatrolTask({
+                  ...entry.value as Map<dynamic, dynamic>,
+                  'taskId': entry.key,
+                }))
+            .toList();
 
-      controller.sink.add(List.from(
-          finishedTasks)); // Memancarkan salinan daftar yang diperbarui
-    } catch (e, stackTrace) {
-      // log('Error handling finished child event: $e\n$stackTrace');
-      controller.addError(e);
-    }
+        // Sort by end time, most recent first
+        finishedTasks.sort((a, b) => (b.endTime ?? DateTime.now())
+            .compareTo(a.endTime ?? DateTime.now()));
+
+        return finishedTasks;
+      } catch (e) {
+        return [];
+      }
+    });
   }
 
   DateTime? _parseDateTime(dynamic value) {
@@ -525,16 +404,18 @@ class RouteRepositoryImpl implements RouteRepository {
       } else if (value is int) {
         return DateTime.fromMillisecondsSinceEpoch(value);
       } else if (value is Map && value['_seconds'] != null) {
+        // Firestore Timestamp format
         return DateTime.fromMillisecondsSinceEpoch(
             (value['_seconds'] as int) * 1000);
       }
     } catch (e) {
-      // log('Error parsing datetime: $value, error: $e');
+      print('Error parsing datetime: $value, error: $e');
     }
 
     return null;
   }
 
+  // PERBAIKAN: Safe route coordinates parsing
   List<List<double>>? _parseRouteCoordinates(dynamic value) {
     if (value == null) return null;
 
@@ -554,13 +435,14 @@ class RouteRepositoryImpl implements RouteRepository {
             .toList();
       }
     } catch (e) {
-      // log('Error parsing route coordinates: $e');
+      print('Error parsing route coordinates: $e');
     }
 
     return null;
   }
 
-  // --- PEMBAHARUAN KRITIS: _convertToPatrolTask TIDAK LAGI memuat routePath secara default ---
+  // Perbaiki metode _convertToPatrolTask untuk menangani semua properti penting
+
   PatrolTask _convertToPatrolTask(Map<String, dynamic> data) {
     return PatrolTask(
       taskId: data['taskId']?.toString() ?? '',
@@ -577,38 +459,25 @@ class RouteRepositoryImpl implements RouteRepository {
       createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
       assignedRoute: _parseRouteCoordinates(
           data['assigned_route'] ?? data['assignedRoute']),
-      // routePath: data['route_path'] != null ? Map<String, dynamic>.from(data['route_path'] as Map) : null, // HAPUS ATAU KOMENTARI BARIS INI
+      routePath: data['route_path'] != null
+          ? Map<String, dynamic>.from(data['route_path'] as Map)
+          : null,
       clusterId: data['clusterId']?.toString() ?? '',
       mockLocationDetected: data['mockLocationDetected'] == true,
       mockLocationCount: data['mockLocationCount'] is num
           ? (data['mockLocationCount'] as num).toInt()
           : 0,
+      // Additional fields
       finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
       finalReportNote: data['finalReportNote']?.toString(),
       finalReportTime: _parseDateTime(data['finalReportTime']),
       initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
       initialReportNote: data['initialReportNote']?.toString(),
       initialReportTime: _parseDateTime(data['initialReportTime']),
+      // Officer info
       officerName: data['officerName']?.toString() ?? '',
       clusterName: data['clusterName']?.toString() ?? '',
-      timeliness: data['timeliness']
-          ?.toString(), // Pastikan timeliness ada di PatrolTask
     );
-  }
-
-  // --- IMPLEMENTASI BARU: getTaskRoutePath untuk lazy loading ---
-  @override
-  Future<Map<String, dynamic>?> getTaskRoutePath(String taskId) async {
-    try {
-      final snapshot = await _database.child('tasks/$taskId/route_path').get();
-      if (snapshot.exists && snapshot.value != null) {
-        return Map<String, dynamic>.from(snapshot.value as Map);
-      }
-      return null;
-    } catch (e) {
-      // log('Error getting task route path for $taskId: $e');
-      return null;
-    }
   }
 
   @override
@@ -623,7 +492,6 @@ class RouteRepositoryImpl implements RouteRepository {
       final taskData = Map<String, dynamic>.from(snapshot.value as Map);
       return _convertToPatrolTask(taskData);
     } catch (e) {
-      // log('Error getting task by ID: $e');
       return null;
     }
   }
@@ -631,12 +499,16 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<void> updateTask(String taskId, Map<String, dynamic> updates) async {
     try {
+      // Debug print
+
+      // Get current task data first
       final taskSnapshot = await _database.child('tasks').child(taskId).get();
 
       if (!taskSnapshot.exists) {
         throw Exception('Task not found');
       }
 
+      // Format any DateTime objects in updates to ISO format
       final formattedUpdates = Map<String, dynamic>.from(updates);
       for (final key in formattedUpdates.keys) {
         final value = formattedUpdates[key];
@@ -645,9 +517,12 @@ class RouteRepositoryImpl implements RouteRepository {
         }
       }
 
+      // Update task with new data
       await _database.child('tasks').child(taskId).update(formattedUpdates);
+
+      // Debug print
     } catch (e, stackTrace) {
-      // log('Failed to update task: $e\n$stackTrace');
+      // Debug print
       throw Exception('Failed to update task: $e');
     }
   }
@@ -667,6 +542,7 @@ class RouteRepositoryImpl implements RouteRepository {
       await _checkAuth();
       final taskRef = _database.child('tasks').push();
 
+      // Simpan ID task untuk dikembalikan
       final String taskId = taskRef.key!;
 
       final newTask = {
@@ -687,9 +563,9 @@ class RouteRepositoryImpl implements RouteRepository {
 
       await taskRef.set(newTask);
 
+      // Kembalikan ID task
       return taskId;
     } catch (e) {
-      // log('Failed to create task: $e');
       throw Exception('Failed to create task: $e');
     }
   }
@@ -700,97 +576,79 @@ class RouteRepositoryImpl implements RouteRepository {
       final snapshot = await _database.child('tasks').get();
 
       if (!snapshot.exists || snapshot.value == null) {
-        // log('No tasks found in database');
+        print('No tasks found in database');
         return [];
       }
 
       final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      // log('Found ${tasksMap.length} tasks in database');
+      print('Found ${tasksMap.length} tasks in database');
 
       return _convertMapToTaskList(tasksMap);
     } catch (e) {
-      // log('Error in getAllTasks: $e');
+      print('Error in getAllTasks: $e');
       return [];
     }
   }
 
   @override
-  Future<List<PatrolTask>> getActiveTasks(
-      {int limit = 50, String? lastKey}) async {
+  Future<List<PatrolTask>> getActiveTasks({int limit = 50}) async {
     try {
-      log('getActiveTasks called: limit=$limit, lastKey=$lastKey');
+      // Query untuk active status
+      final activeSnapshot = await _database
+          .child('tasks')
+          .orderByChild('status')
+          .equalTo('active')
+          .limitToLast(limit)
+          .get();
+
+      // Query untuk ongoing status
+      final ongoingSnapshot = await _database
+          .child('tasks')
+          .orderByChild('status')
+          .equalTo('ongoing')
+          .limitToLast(limit)
+          .get();
+
       List<PatrolTask> allTasks = [];
 
-      // Query for 'active' status
-      Query activeQuery =
-          _database.child('tasks').orderByChild('status').equalTo('active');
-      if (lastKey != null) {
-        log('Warning: lastKey for getActiveTasks is currently not fully implemented for compound query pagination.');
-      }
-      activeQuery =
-          activeQuery.limitToLast(limit); // Fetch N most recent 'active' tasks
-
-      // Query for 'ongoing' status
-      Query ongoingQuery =
-          _database.child('tasks').orderByChild('status').equalTo('ongoing');
-      ongoingQuery = ongoingQuery
-          .limitToLast(limit); // Fetch N most recent 'ongoing' tasks
-
-      // Fetch both in parallel
-      final activeSnapshotFuture = activeQuery.get();
-      final ongoingSnapshotFuture = ongoingQuery.get();
-
-      final activeSnapshot = await activeSnapshotFuture;
       if (activeSnapshot.exists && activeSnapshot.value != null) {
-        allTasks.addAll(_convertMapToTaskList(
-            activeSnapshot.value as Map<dynamic, dynamic>));
+        final activeTasksMap = activeSnapshot.value as Map<dynamic, dynamic>;
+        allTasks.addAll(_convertMapToTaskList(activeTasksMap));
       }
 
-      final ongoingSnapshot = await ongoingSnapshotFuture;
       if (ongoingSnapshot.exists && ongoingSnapshot.value != null) {
-        allTasks.addAll(_convertMapToTaskList(
-            ongoingSnapshot.value as Map<dynamic, dynamic>));
+        final ongoingTasksMap = ongoingSnapshot.value as Map<dynamic, dynamic>;
+        allTasks.addAll(_convertMapToTaskList(ongoingTasksMap));
       }
 
-      // Remove duplicates and sort to ensure consistent order
+      // Remove duplicates berdasarkan taskId
       final Map<String, PatrolTask> uniqueTasks = {};
       for (var task in allTasks) {
         uniqueTasks[task.taskId] = task;
       }
-      final result = uniqueTasks.values.toList();
-      result.sort((a, b) =>
-          b.createdAt.compareTo(a.createdAt)); // Sort by createdAt DESC
 
-      return result.take(limit).toList(); // Ensure final limit
+      return uniqueTasks.values.toList();
     } catch (e) {
+      print('Error in getActiveTasks: $e');
       return [];
     }
   }
 
   @override
-  Future<List<PatrolTask>> getOngoingTasks(
-      {int limit = 50, String? lastKey}) async {
+  Future<List<PatrolTask>> getOngoingTasks({int limit = 50}) async {
     try {
-      log('getOngoingTasks called: limit=$limit, lastKey=$lastKey');
-      Query query =
-          _database.child('tasks').orderByChild('status').equalTo('ongoing');
+      final snapshot = await _database
+          .child('tasks')
+          .orderByChild('status')
+          .equalTo('ongoing')
+          .limitToLast(limit)
+          .get();
 
-      if (lastKey != null) {
-        log('Warning: lastKey for getOngoingTasks is currently not fully implemented for compound query pagination.');
-      }
-      query = query.limitToFirst(limit); // Fetch N most recent 'ongoing' tasks
-
-      final snapshot = await query.get();
       if (!snapshot.exists) return [];
 
       final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      final result = _convertMapToTaskList(tasksMap);
-      result.sort((a, b) =>
-          b.createdAt.compareTo(a.createdAt)); // Sort by createdAt DESC
-      log('Found ${result.length} ongoing tasks');
-      return result.take(limit).toList(); // Ensure final limit
+      return _convertMapToTaskList(tasksMap);
     } catch (e) {
-      log('Error in getOngoingTasks: $e');
       return [];
     }
   }
@@ -807,6 +665,7 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       Query query = _database.child('tasks');
 
+      // Filter by date range using timestamp
       final startTimestamp = startDate.millisecondsSinceEpoch;
       final endTimestamp = endDate.millisecondsSinceEpoch;
 
@@ -828,12 +687,12 @@ class RouteRepositoryImpl implements RouteRepository {
       final tasksMap = snapshot.value as Map<dynamic, dynamic>;
       final tasks = _convertMapToTaskList(tasksMap);
 
+      // Filter by date range locally (more efficient than complex queries)
       return tasks.where((task) {
         final taskTimestamp = task.createdAt.millisecondsSinceEpoch;
         return taskTimestamp >= startTimestamp && taskTimestamp <= endTimestamp;
       }).toList();
     } catch (e) {
-      // log('Error in getTasksByDateRange: $e');
       return [];
     }
   }
@@ -846,46 +705,59 @@ class RouteRepositoryImpl implements RouteRepository {
     String? lastKey,
   }) async {
     try {
-      // Get all tasks for the cluster first
-      final snapshot = await _database
-          .child('tasks')
-          .orderByChild('clusterId')
-          .equalTo(clusterId)
-          .get();
+      print(
+          'getClusterTasks called: clusterId=$clusterId, limit=$limit, status=$status, lastKey=$lastKey');
+
+      Query query =
+          _database.child('tasks').orderByChild('clusterId').equalTo(clusterId);
+
+      final snapshot = await query.get();
 
       if (!snapshot.exists || snapshot.value == null) {
+        print('No tasks found for cluster $clusterId');
         return [];
       }
 
       final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      List<PatrolTask> allTasks = _convertMapToTaskList(tasksMap);
+      final allTasks = _convertMapToTaskList(tasksMap);
 
-      // Filter by status if specified
+      print('Found ${allTasks.length} total tasks for cluster $clusterId');
+
+      // PERBAIKAN: Filter by status if provided
+      List<PatrolTask> filteredTasks = allTasks;
       if (status != null) {
-        allTasks = allTasks
+        filteredTasks = allTasks
             .where((task) => task.status.toLowerCase() == status.toLowerCase())
             .toList();
+        print('Filtered to ${filteredTasks.length} tasks with status $status');
       }
 
-      // Sort by createdAt (newest first)
-      allTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      // Sort by creation date (newest first) untuk konsistensi
+      filteredTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-      // Apply pagination client-side
-      int startIndex = 0;
+      // PERBAIKAN: Apply pagination dengan lastKey
       if (lastKey != null) {
-        // Find the index of the task with the given createdAt timestamp
-        startIndex = allTasks.indexWhere(
-                (task) => task.createdAt.toIso8601String() == lastKey) +
-            1;
+        final lastIndex =
+            filteredTasks.indexWhere((task) => task.taskId == lastKey);
+        if (lastIndex != -1 && lastIndex + 1 < filteredTasks.length) {
+          // Ambil tasks setelah lastKey
+          filteredTasks = filteredTasks.skip(lastIndex + 1).toList();
+          print(
+              'Applied lastKey pagination, starting from index ${lastIndex + 1}');
+        } else {
+          // LastKey tidak ditemukan atau sudah di akhir, return empty
+          print('LastKey not found or at end, returning empty list');
+          return [];
+        }
       }
 
-      final endIndex = (startIndex + limit).clamp(0, allTasks.length);
-      final paginatedTasks = allTasks.sublist(startIndex, endIndex);
+      // Take only up to limit
+      final paginatedTasks = filteredTasks.take(limit).toList();
 
-      log('Fetched ${paginatedTasks.length} tasks for cluster $clusterId, status $status');
+      print('Returning ${paginatedTasks.length} tasks for cluster $clusterId');
       return paginatedTasks;
-    } catch (e, stackTrace) {
-      log('Error in getClusterTasks for $clusterId: $e\n$stackTrace');
+    } catch (e) {
+      print('Error in getClusterTasks for $clusterId: $e');
       return [];
     }
   }
@@ -907,17 +779,19 @@ class RouteRepositoryImpl implements RouteRepository {
       final tasksMap = snapshot.value as Map<dynamic, dynamic>;
       final allTasks = _convertMapToTaskList(tasksMap);
 
+      // Filter hanya active dan cancelled
       final filteredTasks = allTasks
           .where((task) =>
               task.status.toLowerCase() == 'active' ||
               task.status.toLowerCase() == 'cancelled')
           .toList();
 
+      // Sort by creation date (newest first)
       filteredTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
       return filteredTasks.take(limit).toList();
     } catch (e) {
-      // log('Error getting active and cancelled tasks for $clusterId: $e');
+      print('Error getting active and cancelled tasks for $clusterId: $e');
       return [];
     }
   }
@@ -931,18 +805,21 @@ class RouteRepositoryImpl implements RouteRepository {
           final taskData = Map<String, dynamic>.from(value);
           taskData['taskId'] = key.toString();
 
+          // PERBAIKAN: Validasi data sebelum konversi
           if (_isValidTaskData(taskData)) {
             final task = _convertToPatrolTask(taskData);
             tasks.add(task);
           } else {
-            // log('Invalid task data for key $key: missing required fields');
+            print('Invalid task data for key $key: missing required fields');
           }
         } catch (e) {
-          // log('Error converting task $key: $e');
+          print('Error converting task $key: $e');
+          // Skip invalid tasks instead of failing
         }
       }
     });
 
+    // Sort by creation date descending untuk konsistensi
     tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
     return tasks;
@@ -951,7 +828,7 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<List<PatrolTask>> getAllClusterTasks(String clusterId) async {
     try {
-      // log('getAllClusterTasks called for: $clusterId');
+      print('getAllClusterTasks called for: $clusterId');
 
       final snapshot = await _database
           .child('tasks')
@@ -960,21 +837,22 @@ class RouteRepositoryImpl implements RouteRepository {
           .get();
 
       if (!snapshot.exists || snapshot.value == null) {
-        // log('No tasks found for cluster $clusterId');
+        print('No tasks found for cluster $clusterId');
         return [];
       }
 
       final tasksMap = snapshot.value as Map<dynamic, dynamic>;
       final allTasks = _convertMapToTaskList(tasksMap);
 
-      // log('Found ${allTasks.length} total tasks for cluster $clusterId');
+      print('Found ${allTasks.length} total tasks for cluster $clusterId');
       return allTasks;
     } catch (e) {
-      // log('Error in getAllClusterTasks for $clusterId: $e');
+      print('Error in getAllClusterTasks for $clusterId: $e');
       return [];
     }
   }
 
+  // PERBAIKAN: Enhanced validation
   bool _isValidTaskData(Map<String, dynamic> taskData) {
     return taskData['taskId'] != null &&
         taskData['taskId'].toString().isNotEmpty &&
@@ -982,13 +860,14 @@ class RouteRepositoryImpl implements RouteRepository {
         taskData['clusterId'].toString().isNotEmpty;
   }
 
+  // PERBAIKAN: Hapus getAllTasks() dan ganti dengan pagination
   @override
   Future<List<PatrolTask>> getRecentTasks({
     int limit = 50,
     String? lastKey,
   }) async {
     try {
-      // log('getRecentTasks called: limit=$limit, lastKey=$lastKey');
+      print('getRecentTasks called: limit=$limit, lastKey=$lastKey');
 
       Query query = _database.child('tasks').orderByKey();
 
@@ -1001,16 +880,16 @@ class RouteRepositoryImpl implements RouteRepository {
       final snapshot = await query.get();
 
       if (!snapshot.exists || snapshot.value == null) {
-        // log('No recent tasks found');
+        print('No recent tasks found');
         return [];
       }
 
       final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      // log('Found ${tasksMap.length} recent tasks');
+      print('Found ${tasksMap.length} recent tasks');
 
       return _convertMapToTaskList(tasksMap);
     } catch (e) {
-      // log('Error in getRecentTasks: $e');
+      print('Error in getRecentTasks: $e');
       return [];
     }
   }
@@ -1028,11 +907,13 @@ class RouteRepositoryImpl implements RouteRepository {
       final value = snapshot.value;
 
       if (value is List) {
+        // Handle list format
         return value
             .whereType<String>()
             .where((item) => item.isNotEmpty)
             .toList();
       } else if (value is Map) {
+        // Handle map format
         return value.values
             .where((item) => item != null)
             .map((item) => item.toString())
@@ -1041,10 +922,12 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return [];
     } catch (e) {
-      // log('Failed to get vehicles: $e');
       throw Exception('Failed to get vehicles: $e');
     }
   }
+
+  //Tatar Logic
+  // Tambahkan implementasi method-method baru ini ke AdminRepositoryImpl
 
   @override
   Future<UserModel.User> getClusterById(String clusterId) async {
@@ -1061,7 +944,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return UserModel.User.fromMap(userData);
     } catch (e) {
-      // log('Failed to get cluster details: $e');
       throw Exception('Failed to get cluster details: $e');
     }
   }
@@ -1075,6 +957,7 @@ class RouteRepositoryImpl implements RouteRepository {
     required List<List<double>> clusterCoordinates,
   }) async {
     try {
+      // Create Firebase Auth account
       final firebaseAuth = FirebaseAuth.instance;
       final userCredential = await firebaseAuth.createUserWithEmailAndPassword(
         email: email,
@@ -1083,13 +966,14 @@ class RouteRepositoryImpl implements RouteRepository {
 
       final userId = userCredential.user!.uid;
 
+      // Create user data in Realtime Database
       final now = DateTime.now().toIso8601String();
       await _database.child('users/$userId').set({
         'name': name,
         'email': email,
         'role': role,
         'cluster_coordinates': clusterCoordinates,
-        'officers': [],
+        'officers': [], // Empty officers list initially
         'created_at': now,
         'updated_at': now,
       });
@@ -1098,7 +982,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return;
     } catch (e) {
-      // log('Failed to create cluster account: $e');
       throw Exception('Failed to create cluster account: $e');
     }
   }
@@ -1115,10 +998,11 @@ class RouteRepositoryImpl implements RouteRepository {
       await _database.child('users/${cluster.id}').update(updates);
       return;
     } catch (e) {
-      // log('Failed to update cluster account: $e');
       throw Exception('Failed to update cluster account: $e');
     }
   }
+
+  // Memperbaiki metode addOfficerToCluster untuk menggunakan push().key sebagai ID
 
   @override
   Future<void> addOfficerToCluster({
@@ -1128,10 +1012,13 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       await _checkAuth();
 
+      // Buat referensi baru untuk officer dengan push()
       final officerRef = _database.child('users/$clusterId/officers').push();
 
+      // Dapatkan key yang dibuat Firebase
       final String officerId = officerRef.key!;
 
+      // Buat officer dengan ID Firebase
       final updatedOfficer = Officer(
         id: officerId,
         name: officer.name,
@@ -1141,8 +1028,10 @@ class RouteRepositoryImpl implements RouteRepository {
         photoUrl: officer.photoUrl,
       );
 
+      // Simpan officer dengan ID Firebase
       await officerRef.set(updatedOfficer.toMap());
 
+      // Update timestamp cluster
       await _database.child('users/$clusterId').update({
         'updated_at': DateTime.now().toIso8601String(),
         'updated_by': _auth.currentUser?.uid,
@@ -1150,7 +1039,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return;
     } catch (e) {
-      // log('Failed to add officer to cluster: $e');
       throw Exception('Failed to add officer to cluster: $e');
     }
   }
@@ -1164,9 +1052,11 @@ class RouteRepositoryImpl implements RouteRepository {
       bool needsUpdate = false;
       Map<String, dynamic> fixes = {};
 
+      // Check 1: Has endTime but no startTime
       if (task.endTime != null && task.startTime == null) {
-        // log('Found corrupted task $taskId: has endTime but no startTime');
-
+        print('Found corrupted task $taskId: has endTime but no startTime');
+        
+        // Option 1: Reset to active state
         fixes['endTime'] = null;
         fixes['status'] = 'active';
         fixes['distance'] = null;
@@ -1175,20 +1065,22 @@ class RouteRepositoryImpl implements RouteRepository {
         needsUpdate = true;
       }
 
+      // Check 2: Has initialReportTime but wrong timing
       if (task.initialReportTime != null && task.assignedStartTime != null) {
         final reportTime = task.initialReportTime!;
         final scheduledTime = task.assignedStartTime!;
-
-        if (reportTime
-            .isBefore(scheduledTime.subtract(const Duration(hours: 1)))) {
-          // log('Warning: Task $taskId has early initial report');
+        
+        // If report was made significantly before scheduled time
+        if (reportTime.isBefore(scheduledTime.subtract(Duration(hours: 1)))) {
+          print('Warning: Task $taskId has early initial report');
           fixes['earlyReportDetected'] = true;
           needsUpdate = true;
         }
       }
 
+      // Check 3: Status inconsistency
       if (task.status == 'finished' && task.startTime == null) {
-        // log('Found status inconsistency in task $taskId');
+        print('Found status inconsistency in task $taskId');
         fixes['status'] = 'active';
         fixes['statusInconsistencyFixed'] = true;
         needsUpdate = true;
@@ -1196,10 +1088,10 @@ class RouteRepositoryImpl implements RouteRepository {
 
       if (needsUpdate) {
         await updateTask(taskId, fixes);
-        // log('Fixed data integrity issues for task $taskId');
+        print('Fixed data integrity issues for task $taskId');
       }
     } catch (e) {
-      // log('Error checking task integrity for $taskId: $e');
+      print('Error checking task integrity for $taskId: $e');
     }
   }
 
@@ -1211,30 +1103,31 @@ class RouteRepositoryImpl implements RouteRepository {
 
       final tasksMap = snapshot.value as Map<dynamic, dynamic>;
       int fixedCount = 0;
-
+      
       for (var entry in tasksMap.entries) {
         final taskId = entry.key;
         final taskData = entry.value as Map<dynamic, dynamic>;
-
+        
+        // Find corrupted tasks
         if (taskData['endTime'] != null && taskData['startTime'] == null) {
-          // log('Fixing corrupted task: $taskId');
-
+          print('Fixing corrupted task: $taskId');
+          
           await _database.child('tasks').child(taskId).update({
             'endTime': null,
             'status': 'active',
             'distance': null,
             'corruptionFixed': true,
             'fixedAt': ServerValue.timestamp,
-            'originalEndTime': taskData['endTime'],
+            'originalEndTime': taskData['endTime'], // Backup original data
           });
-
+          
           fixedCount++;
         }
       }
-
-      // log('Fixed $fixedCount corrupted tasks');
+      
+      print('Fixed $fixedCount corrupted tasks');
     } catch (e) {
-      // log('Error fixing corrupted tasks: $e');
+      print('Error fixing corrupted tasks: $e');
     }
   }
 
@@ -1244,20 +1137,22 @@ class RouteRepositoryImpl implements RouteRepository {
       final task = await getTaskById(taskId: taskId);
       if (task == null) return false;
 
+      // Check for corruption signs
       if (task.endTime != null && task.startTime == null) {
         return false;
       }
-
+      
       if (task.status == 'finished' && task.startTime == null) {
         return false;
       }
-
+      
       return true;
     } catch (e) {
-      // log('Error validating task integrity: $e');
       return false;
     }
   }
+
+// Tambahkan method helper untuk generate string random
 
   @override
   Future<void> updateOfficerInCluster({
@@ -1265,6 +1160,7 @@ class RouteRepositoryImpl implements RouteRepository {
     required Officer officer,
   }) async {
     try {
+      // Get current officers list
       final snapshot = await _database.child('users/$clusterId/officers').get();
 
       if (!snapshot.exists || snapshot.value == null) {
@@ -1289,6 +1185,7 @@ class RouteRepositoryImpl implements RouteRepository {
             .toList();
       }
 
+      // Find and update officer
       final index = officersList.indexWhere(
         (item) => item['id'] == officer.id,
       );
@@ -1299,6 +1196,7 @@ class RouteRepositoryImpl implements RouteRepository {
 
       officersList[index] = officer.toMap();
 
+      // Update officers list
       await _database.child('users/$clusterId').update({
         'officers': officersList,
         'updated_at': DateTime.now().toIso8601String(),
@@ -1306,7 +1204,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return;
     } catch (e) {
-      // log('Failed to update officer in cluster: $e');
       throw Exception('Failed to update officer in cluster: $e');
     }
   }
@@ -1317,6 +1214,7 @@ class RouteRepositoryImpl implements RouteRepository {
     required String officerId,
   }) async {
     try {
+      // Get current officers list
       final snapshot = await _database.child('users/$clusterId/officers').get();
 
       if (!snapshot.exists || snapshot.value == null) {
@@ -1341,8 +1239,10 @@ class RouteRepositoryImpl implements RouteRepository {
             .toList();
       }
 
+      // Remove officer
       officersList.removeWhere((item) => item['id'] == officerId);
 
+      // Update officers list
       await _database.child('users/$clusterId').update({
         'officers': officersList,
         'updated_at': DateTime.now().toIso8601String(),
@@ -1350,30 +1250,20 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return;
     } catch (e) {
-      // log('Failed to remove officer from cluster: $e');
       throw Exception('Failed to remove officer from cluster: $e');
     }
   }
 
+  // Tambahkan metode-metode berikut ke class RouteRepositoryImpl
   @override
-  Future<List<UserModel.User>> getAllClusters(
-      {int limit = 50, String? lastKey}) async {
+  Future<List<UserModel.User>> getAllClusters() async {
     try {
       await _checkAuth();
-      // Perbaikan: Hanya satu orderByChild diizinkan per kueri.
-      // Kita akan order berdasarkan 'role' dan filter dengan 'equalTo'
-      // Firebase akan secara implisit menggunakan kunci (UID) sebagai tie-breaker.
-      Query query =
-          _database.child('users').orderByChild('role').equalTo('patrol');
-
-      // Jika lastKey ada, gunakan untuk paginasi.
-      // lastKey di sini diharapkan adalah kunci (UID) dari item terakhir yang dimuat.
-      if (lastKey != null) {
-        query = query.startAfter(lastKey);
-      }
-      query = query.limitToFirst(limit);
-
-      final snapshot = await query.get();
+      final snapshot = await _database
+          .child('users')
+          .orderByChild('role')
+          .equalTo('patrol')
+          .get();
 
       if (!snapshot.exists) {
         return [];
@@ -1382,27 +1272,16 @@ class RouteRepositoryImpl implements RouteRepository {
       final clustersMap = Map<String, dynamic>.from(snapshot.value as Map);
       final clusters = <UserModel.User>[];
 
-      // Konversi hasil snapshot ke daftar User model
-      clustersMap.forEach((userId, userData) {
-        if (userData is Map) {
-          try {
-            final clusterData = Map<String, dynamic>.from(userData);
-            clusterData['id'] = userId.toString();
-            clusters.add(UserModel.User.fromMap(clusterData));
-          } catch (e) {
-            log('Error converting cluster map entry: $e');
-          }
-        }
-      });
+      for (var entry in clustersMap.entries) {
+        try {
+          final clusterData = Map<String, dynamic>.from(entry.value);
+          clusterData['id'] = entry.key;
+          clusters.add(UserModel.User.fromMap(clusterData));
+        } catch (e) {}
+      }
 
-      // Karena kita menggunakan `orderByChild('role').equalTo('patrol')` yang kemudian implicit `orderByKey()`,
-      // hasilnya sudah terurut. Jika ingin urutan berdasarkan `name`, itu perlu client-side sorting
-      // atau penyesuaian query yang lebih kompleks (misalnya, hanya `orderByChild('name')` dan filter role di client).
-
-      log('Fetched ${clusters.length} clusters with limit $limit, lastKey $lastKey');
       return clusters;
     } catch (e) {
-      log('Failed to get clusters: $e');
       throw Exception('Failed to get clusters: $e');
     }
   }
@@ -1421,7 +1300,6 @@ class RouteRepositoryImpl implements RouteRepository {
       });
       return;
     } catch (e) {
-      // log('Failed to update cluster coordinates: $e');
       throw Exception('Failed to update cluster coordinates: $e');
     }
   }
@@ -1431,15 +1309,18 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       await _checkAuth();
 
+      // Optional: Archive instead of delete
       await _database.child('users/$clusterId').update({
         'status': 'deleted',
         'updated_at': DateTime.now().toIso8601String(),
         'updated_by': _auth.currentUser?.uid,
       });
 
+      // Or actually delete (uncomment if needed)
+      // await _database.child('users/$clusterId').remove();
+
       return;
     } catch (e) {
-      // log('Failed to delete cluster: $e');
       throw Exception('Failed to delete cluster: $e');
     }
   }
@@ -1459,7 +1340,6 @@ class RouteRepositoryImpl implements RouteRepository {
       userData['id'] = userId;
       return UserModel.User.fromMap(userData);
     } catch (e) {
-      // log('Error getting current user cluster: $e');
       return null;
     }
   }
@@ -1482,9 +1362,7 @@ class RouteRepositoryImpl implements RouteRepository {
             try {
               final officerMap = Map<String, dynamic>.from(officersData[i]);
               officers.add(Officer.fromMap(officerMap));
-            } catch (e) {
-              // log('Error parsing officer from list: $e');
-            }
+            } catch (e) {}
           }
         }
       } else if (officersData is Map) {
@@ -1493,20 +1371,20 @@ class RouteRepositoryImpl implements RouteRepository {
             try {
               final officerMap = Map<String, dynamic>.from(value);
               officers.add(Officer.fromMap(officerMap));
-            } catch (e) {
-              // log('Error parsing officer from map entry: $e');
-            }
+            } catch (e) {}
           }
         });
       }
 
       return officers;
     } catch (e) {
-      // log('Failed to get cluster officers: $e');
       throw Exception('Failed to get cluster officers: $e');
     }
   }
 
+// Metode untuk mendapatkan semua tugas yang terkait dengan cluster tertentu
+
+// Metode untuk mencari cluster berdasarkan nama
   @override
   Future<List<UserModel.User>> searchClustersByName(String searchTerm) async {
     try {
@@ -1518,7 +1396,6 @@ class RouteRepositoryImpl implements RouteRepository {
               cluster.name.toLowerCase().contains(searchTerm.toLowerCase()))
           .toList();
     } catch (e) {
-      // log('Failed to search clusters: $e');
       throw Exception('Failed to search clusters: $e');
     }
   }
@@ -1532,10 +1409,11 @@ class RouteRepositoryImpl implements RouteRepository {
       await _checkAuth();
       await _database.child('users/$clusterId').update(updates);
     } catch (e) {
-      // log('Failed to update cluster: $e');
       throw Exception('Failed to update cluster: $e');
     }
   }
+
+  // Tambahkan metode berikut di class RouteRepositoryImpl
 
   @override
   Future<void> logMockLocationDetection({
@@ -1544,19 +1422,23 @@ class RouteRepositoryImpl implements RouteRepository {
     required Map<String, dynamic> mockData,
   }) async {
     try {
+      // Update flag pada task
       await updateTask(taskId, {
         'mockLocationDetected': true,
         'mockLocationCount': mockData['count'] ?? 1,
         'lastMockDetection': mockData['timestamp'],
       });
 
+      // Catat detail percobaan ke node khusus di database
       final database = FirebaseDatabase.instance.ref();
 
+      // Simpan di task
       await database
           .child('tasks/$taskId/mock_detections')
           .push()
           .set(mockData);
 
+      // Simpan juga di koleksi terpisah untuk analisis
       await database.child('mock_location_logs').push().set({
         ...mockData,
         'taskId': taskId,
@@ -1566,7 +1448,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return;
     } catch (e) {
-      // log('Failed to log mock location: $e');
       throw Exception('Failed to log mock location: $e');
     }
   }
@@ -1591,12 +1472,12 @@ class RouteRepositoryImpl implements RouteRepository {
         }
       });
 
+      // Sort by timestamp
       detections.sort((a, b) =>
           (a['timestamp'] as String).compareTo(b['timestamp'] as String));
 
       return detections;
     } catch (e) {
-      // log('Error getting mock location detections: $e');
       return [];
     }
   }
@@ -1621,35 +1502,42 @@ class RouteRepositoryImpl implements RouteRepository {
 
       return 0;
     } catch (e) {
-      // log('Error getting mock location count: $e');
       return 0;
     }
   }
 
   String determineTimelinessStatus(DateTime? assignedStartTime,
       DateTime? startTime, DateTime? assignedEndTime, String status) {
+    // Jika belum dimulai, status 'idle'
     if (startTime == null) {
       return 'idle';
     }
 
     if (assignedStartTime != null) {
-      final lateThreshold = assignedStartTime.add(const Duration(minutes: 10));
-      final earlyThreshold =
-          assignedStartTime.subtract(const Duration(minutes: 10));
+      // Batas waktu toleransi - 10 menit dari jadwal
+      final lateThreshold = assignedStartTime.add(Duration(minutes: 10));
+      final earlyThreshold = assignedStartTime.subtract(Duration(minutes: 10));
 
+      // Jika waktu mulai lebih dari 10 menit setelah jadwal
       if (startTime.isAfter(lateThreshold)) {
+        // Jika juga melebihi waktu akhir
         if (assignedEndTime != null && startTime.isAfter(assignedEndTime)) {
           return 'pastDue';
         }
         return 'late';
-      } else if (startTime.isAfter(earlyThreshold) ||
+      }
+      // Jika waktu mulai dalam rentang -10 hingga +10 menit dari jadwal
+      else if (startTime.isAfter(earlyThreshold) ||
           startTime.isAtSameMomentAs(earlyThreshold)) {
         return 'ontime';
-      } else {
+      }
+      // Jika terlalu awal (lebih dari 10 menit sebelum jadwal)
+      else {
         return 'early';
       }
     }
 
+    // Default jika assignedStartTime null
     return 'ontime';
   }
 
@@ -1658,14 +1546,14 @@ class RouteRepositoryImpl implements RouteRepository {
       final task = await getTaskById(taskId: taskId);
       if (task == null) return;
 
+      // Recalculate timeliness
       final timeliness = determineTimelinessStatus(task.assignedStartTime,
           task.startTime, task.assignedEndTime, task.status);
 
+      // Only update if timeliness changed
       if (task.timeliness != timeliness) {
         await updateTask(taskId, {'timeliness': timeliness});
       }
-    } catch (e) {
-      // log('Error updating task timeliness: $e');
-    }
+    } catch (e) {}
   }
 }
