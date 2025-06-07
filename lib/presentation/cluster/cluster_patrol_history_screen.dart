@@ -1,5 +1,3 @@
-import 'dart:developer';
-
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -889,8 +887,7 @@ class _ClusterPatrolHistoryScreenState
                         return Theme(
                           data: ThemeData.light().copyWith(
                             primaryColor: kbpBlue900,
-                            colorScheme:
-                                const ColorScheme.light(primary: kbpBlue900),
+                            colorScheme: const ColorScheme.light(primary: kbpBlue900),
                             buttonTheme: const ButtonThemeData(
                                 textTheme: ButtonTextTheme.primary),
                           ),
@@ -916,8 +913,7 @@ class _ClusterPatrolHistoryScreenState
                         return Theme(
                           data: ThemeData.light().copyWith(
                             primaryColor: kbpBlue900,
-                            colorScheme:
-                                const ColorScheme.light(primary: kbpBlue900),
+                            colorScheme: const ColorScheme.light(primary: kbpBlue900),
                             buttonTheme: const ButtonThemeData(
                                 textTheme: ButtonTextTheme.primary),
                           ),
@@ -1289,6 +1285,76 @@ class _ClusterPatrolHistoryScreenState
     }
   }
 
+  Map<String, dynamic> _calculateVisitedPoints(PatrolTask task,
+      {double? customRadius}) {
+    try {
+      final Set<int> visitedCheckpoints = <int>{};
+      final List<Map<String, double>> routePositions = [];
+
+      final double radiusInMeters =
+          customRadius ?? _clusterValidationRadius ?? 50.0;
+
+      if (task.routePath != null && task.assignedRoute != null) {
+        final routePathMap = Map<String, dynamic>.from(task.routePath!);
+        routePathMap.forEach((key, value) {
+          try {
+            if (value is Map && value.containsKey('coordinates')) {
+              final coordinates = value['coordinates'] as List;
+              if (coordinates.length >= 2) {
+                routePositions.add({
+                  'lat': coordinates[0] as double,
+                  'lng': coordinates[1] as double
+                });
+              }
+            }
+          } catch (e) {
+            print('Error parsing route path entry $key: $e');
+          }
+        });
+
+        for (int i = 0; i < task.assignedRoute!.length; i++) {
+          try {
+            final checkpoint = task.assignedRoute![i];
+            final checkpointLat = checkpoint[0] as double;
+            final checkpointLng = checkpoint[1] as double;
+
+            double minDistance = double.infinity;
+            for (final position in routePositions) {
+              final distance = Geolocator.distanceBetween(position['lat']!,
+                  position['lng']!, checkpointLat, checkpointLng);
+
+              minDistance = Math.min(minDistance, distance);
+              if (distance <= radiusInMeters) {
+                visitedCheckpoints.add(i);
+                break;
+              }
+            }
+          } catch (e) {
+            print('Error checking distance for checkpoint $i: $e');
+          }
+        }
+      }
+
+      return {
+        'visitedCheckpoints': visitedCheckpoints,
+        'routePositions': routePositions,
+        'visitedCount': visitedCheckpoints.length,
+        'totalCount': task.assignedRoute?.length ?? 0,
+        'radiusUsed': radiusInMeters,
+      };
+    } catch (e) {
+      print('Error calculating visited points: $e');
+      return {
+        'visitedCheckpoints': <int>{},
+        'routePositions': <Map<String, double>>[],
+        'visitedCount': 0,
+        'totalCount': task.assignedRoute?.length ?? 0,
+        'radiusUsed': customRadius ?? 50.0,
+      };
+    }
+  }
+
+  // Existing helper methods for time info and delay info remain the same...
   Widget _buildTimeInfoSection({
     required String? assignedStartDateStr,
     required String? assignedStartTimeStr,
@@ -1308,9 +1374,8 @@ class _ClusterPatrolHistoryScreenState
                 'Jadwal: ',
                 style: mediumTextStyle(size: 12, color: neutral600),
               ),
-              // ✅ PERBAIKAN: Format yang benar
               Text(
-                '$assignedStartDateStr Pukul $assignedStartTimeStr',
+                '$assignedStartDateStr, $assignedStartTimeStr',
                 style: semiBoldTextStyle(size: 12, color: kbpBlue700),
               ),
             ],
@@ -1343,11 +1408,10 @@ class _ClusterPatrolHistoryScreenState
             ),
             Expanded(
               child: Text(
-                // ✅ PERBAIKAN: Format pelaksanaan yang konsisten
                 startTimeStr.isNotEmpty && endTimeStr != 'N/A'
-                    ? '$startDateStr Pukul $startTimeStr - $endTimeStr'
+                    ? '$startDateStr, $startTimeStr - $endTimeStr'
                     : startTimeStr.isNotEmpty
-                        ? '$startDateStr Pukul $startTimeStr - Berlangsung'
+                        ? '$startDateStr, $startTimeStr - Berlangsung'
                         : 'Belum dimulai',
                 style: mediumTextStyle(size: 12, color: neutral800),
               ),
@@ -1363,85 +1427,6 @@ class _ClusterPatrolHistoryScreenState
         ],
       ],
     );
-  }
-
-  // ✅ PERBAIKAN: Calculate visited points dengan route_path yang benar
-  Map<String, dynamic> _calculateVisitedPoints(PatrolTask task,
-      {double? customRadius}) {
-    try {
-      final Set<int> visitedCheckpoints = <int>{};
-      final List<Map<String, double>> routePositions = [];
-
-      final double radiusInMeters =
-          customRadius ?? _clusterValidationRadius ?? 50.0;
-
-      // ✅ PERBAIKAN: Check route_path dari task
-      if (task.routePath != null && task.assignedRoute != null) {
-        log('Task ${task.taskId} has route_path with ${task.routePath!.length} entries');
-
-        final routePathMap = Map<String, dynamic>.from(task.routePath!);
-        routePathMap.forEach((key, value) {
-          try {
-            if (value is Map && value.containsKey('coordinates')) {
-              final coordinates = value['coordinates'] as List;
-              if (coordinates.length >= 2) {
-                routePositions.add({
-                  'lat': (coordinates[0] as num).toDouble(),
-                  'lng': (coordinates[1] as num).toDouble()
-                });
-              }
-            }
-          } catch (e) {
-            log('Error parsing route path entry $key: $e');
-          }
-        });
-
-        log('Extracted ${routePositions.length} route positions');
-
-        // ✅ Calculate visited checkpoints
-        for (int i = 0; i < task.assignedRoute!.length; i++) {
-          try {
-            final checkpoint = task.assignedRoute![i];
-            final checkpointLat = (checkpoint[0] as num).toDouble();
-            final checkpointLng = (checkpoint[1] as num).toDouble();
-
-            for (final position in routePositions) {
-              final distance = Geolocator.distanceBetween(position['lat']!,
-                  position['lng']!, checkpointLat, checkpointLng);
-
-              if (distance <= radiusInMeters) {
-                visitedCheckpoints.add(i);
-                break;
-              }
-            }
-          } catch (e) {
-            log('Error checking distance for checkpoint $i: $e');
-          }
-        }
-      } else {
-        log('Task ${task.taskId} has no route_path or assigned_route');
-      }
-
-      final result = {
-        'visitedCheckpoints': visitedCheckpoints,
-        'routePositions': routePositions,
-        'visitedCount': visitedCheckpoints.length,
-        'totalCount': task.assignedRoute?.length ?? 0,
-        'radiusUsed': radiusInMeters,
-      };
-
-      log('Calculated visited points for task ${task.taskId}: ${result['visitedCount']}/${result['totalCount']}');
-      return result;
-    } catch (e) {
-      log('Error calculating visited points: $e');
-      return {
-        'visitedCheckpoints': <int>{},
-        'routePositions': <Map<String, double>>[],
-        'visitedCount': 0,
-        'totalCount': task.assignedRoute?.length ?? 0,
-        'radiusUsed': customRadius ?? 50.0,
-      };
-    }
   }
 
   Widget _buildDelayInfo(DateTime assignedTime, DateTime actualTime) {
