@@ -45,6 +45,12 @@ class _MapScreenState extends State<MapScreen> {
   bool _isMapReady = false;
   late final currentState;
 
+  bool _localIsPatrolling = false;
+  String? _localPatrollingTaskId;
+
+  bool _isInitializing = false;
+  bool _hasResumedPatrol = false;
+
   bool _mockLocationDetected = false;
   bool _snackbarShown = false;
 
@@ -134,44 +140,6 @@ class _MapScreenState extends State<MapScreen> {
     _lastPosition = newPosition;
   }
 
-  @override
-  void initState() {
-    super.initState();
-
-    final task = widget.task;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
-      // Untuk memastikan clusterName juga terisi jika belum
-      await widget.task.fetchClusterName(FirebaseDatabase.instance.ref());
-      if (mounted) {
-        setState(() {}); // Refresh UI after name is loaded
-      }
-    });
-
-    currentState = context.read<PatrolBloc>().state;
-
-    if (task.status == 'ongoing' || task.status == 'in_progress') {
-      // We need to wait for widget to be built before triggering resume
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _resumeExistingPatrol(task);
-      });
-    } else {}
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final patrolState = context.read<PatrolBloc>().state;
-      if (patrolState is PatrolLoaded && patrolState.isPatrolling) {
-        _enableWakelock();
-      }
-    });
-
-    _initializeMap();
-  }
-
   void _enableWakelock() async {
     isWakeLockEnabled = await WakelockPlus.enabled;
     if (!isWakeLockEnabled) {
@@ -230,136 +198,254 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _resumeExistingPatrol(PatrolTask task) {
-    if (task.startTime == null) {
-      return;
-    }
+  @override
+  void initState() {
+    super.initState();
+    _initializeApp();
+  }
 
-    // Get route path data
-    final routePath = task.routePath as Map<dynamic, dynamic>?;
+  // ✅ Centralized initialization method
+  Future<void> _initializeApp() async {
+    if (_isInitializing) return;
+    _isInitializing = true;
 
-    // Simpan route path yang sudah ada dengan struktur yang benar
-    Map<String, dynamic> existingRoutePath = {};
-    if (routePath != null) {
-      // Konversi ke Map<String, dynamic> untuk konsistensi
-      routePath.forEach((key, value) {
-        if (value is Map) {
-          Map<String, dynamic> pointData = {};
-          value.forEach((k, v) {
-            pointData[k.toString()] = v;
-          });
-          existingRoutePath[key.toString()] = pointData;
-        } else {
-          existingRoutePath[key.toString()] = value;
-        }
-      });
-    }
+    final task = widget.task;
+    print(
+        '🚀 Initializing app for task: ${task.taskId}, status: ${task.status}');
 
-    // Resume patrol in bloc with existing route path
-    context.read<PatrolBloc>().add(ResumePatrol(
-          task: task,
-          startTime: task.startTime!,
-          currentDistance: task.distance ?? 0.0,
-          existingRoutePath:
-              existingRoutePath, // Passing the existing route path
-        ));
-
-    // Set local variables
-    setState(() {
-      _elapsedTime = DateTime.now().difference(task.startTime!);
-      _totalDistance = task.distance ?? 0.0;
-
-      // Inisialisasi _routePoints untuk polyline
-      _routePoints.clear();
-      if (routePath != null && routePath.isNotEmpty) {
-        try {
-          // Sort entries by timestamp to ensure correct order
-          final List<MapEntry<dynamic, dynamic>> sortedEntries =
-              routePath.entries.toList()
-                ..sort((a, b) => (a.value['timestamp'].toString())
-                    .compareTo(b.value['timestamp'].toString()));
-
-          // Add points to _routePoints for polyline display
-          for (var entry in sortedEntries) {
-            if (entry.value is Map && entry.value['coordinates'] != null) {
-              final coordinates = entry.value['coordinates'] as List;
-              if (coordinates.length >= 2) {
-                _routePoints.add(LatLng(
-                  (coordinates[0] as num).toDouble(),
-                  (coordinates[1] as num).toDouble(),
-                ));
-              }
-            }
-          }
-        } catch (e) {}
-      }
-
-      // Update lastPosition to the most recent point if available
-      if (routePath != null && routePath.isNotEmpty) {
-        try {
-          // Get the most recent point by timestamp
-          final sortedEntries = routePath.entries.toList()
-            ..sort((a, b) => (b.value['timestamp'].toString())
-                .compareTo(a.value['timestamp'].toString()));
-
-          if (sortedEntries.isNotEmpty) {
-            final coordinates =
-                sortedEntries.first.value['coordinates'] as List;
-            _lastPosition = Position(
-              latitude: (coordinates[0] as num).toDouble(),
-              longitude: (coordinates[1] as num).toDouble(),
-              timestamp: DateTime.now(),
-              accuracy: 0,
-              altitude: 0,
-              heading: 0,
-              speed: 0,
-              speedAccuracy: 0,
-              isMocked: false,
-              floor: null,
-              altitudeAccuracy: 0,
-              headingAccuracy: 0,
-            );
-          }
-        } catch (e) {}
+    // 1. Load officer and cluster names first
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
+      await widget.task.fetchClusterName(FirebaseDatabase.instance.ref());
+      if (mounted) {
+        setState(() {}); // Refresh UI after name is loaded
       }
     });
 
-    // Start systems
-    _startPatrolTimer();
-    _startLocationTracking();
+    // 2. Check if patrol is ongoing and set state IMMEDIATELY
+    final isOngoingPatrol =
+        task.status == 'ongoing' || task.status == 'in_progress';
 
-    // Load saved route if exists
-    if (routePath != null && routePath.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _displaySavedRoute(routePath.cast<String, dynamic>());
-        setState(() {
-          _polylines.clear();
-          if (_routePoints.isNotEmpty) {
-            _polylines.add(
-              Polyline(
-                polylineId: const PolylineId('patrol_route'),
-                points: _routePoints,
-                color: _polylineColor,
-                width: 5,
-              ),
-            );
-          }
-        });
+    if (isOngoingPatrol && !_hasResumedPatrol) {
+      print('📍 Task is ongoing, setting local state immediately');
 
-        // Zoom to show the entire route
-        if (_routePoints.isNotEmpty && mapController != null) {
-          _zoomToPolyline();
-        }
+      // ✅ Set local state SYNCHRONOUSLY before any async operations
+      setState(() {
+        _localIsPatrolling = true;
+        _localPatrollingTaskId = task.taskId;
+        _hasResumedPatrol = true;
       });
+
+      // ✅ Resume patrol after a frame to ensure UI is stable
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await Future.delayed(
+            Duration(milliseconds: 100)); // Small delay for state stability
+        if (mounted && !_hasResumedPatrol) {
+          return; // Prevent double execution
+        }
+        _resumeExistingPatrolSafe(task);
+      });
+    } else {
+      print('📍 Task not ongoing, status: ${task.status}');
     }
 
-    // Notify user
-    showCustomSnackbar(
-      context: context,
-      title: 'Patroli Dilanjutkan',
-      subtitle: 'Melanjutkan patroli yang sedang berlangsung',
-      type: SnackbarType.success,
-    );
+    // 3. Initialize other components
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context
+            .read<PatrolBloc>()
+            .add(LoadRouteData(userId: widget.task.userId));
+      }
+    });
+
+    // 4. Check wakelock
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final patrolState = context.read<PatrolBloc>().state;
+      if (patrolState is PatrolLoaded && patrolState.isPatrolling) {
+        _enableWakelock();
+      }
+    });
+
+    // 5. Initialize map
+    _initializeMap();
+
+    _isInitializing = false;
+  }
+
+  // ✅ Safe version of resume patrol with better error handling
+  void _resumeExistingPatrolSafe(PatrolTask task) async {
+    if (task.startTime == null || !mounted) {
+      return;
+    }
+
+    print('🔄 Resuming patrol for task: ${task.taskId}');
+
+    try {
+      // ✅ Ensure local state is set and stable
+      if (!_localIsPatrolling || _localPatrollingTaskId != task.taskId) {
+        setState(() {
+          _localIsPatrolling = true;
+          _localPatrollingTaskId = task.taskId;
+        });
+
+        // Wait for state to stabilize
+        await Future.delayed(Duration(milliseconds: 50));
+      }
+
+      // Get route path data
+      final routePath = task.routePath as Map<dynamic, dynamic>?;
+
+      // Simpan route path yang sudah ada dengan struktur yang benar
+      Map<String, dynamic> existingRoutePath = {};
+      if (routePath != null) {
+        routePath.forEach((key, value) {
+          if (value is Map) {
+            Map<String, dynamic> pointData = {};
+            value.forEach((k, v) {
+              pointData[k.toString()] = v;
+            });
+            existingRoutePath[key.toString()] = pointData;
+          } else {
+            existingRoutePath[key.toString()] = value;
+          }
+        });
+      }
+
+      // ✅ Send resume event to BLoC AFTER local state is stable
+      if (mounted) {
+        context.read<PatrolBloc>().add(ResumePatrol(
+              task: task,
+              startTime: task.startTime!,
+              currentDistance: task.distance ?? 0.0,
+              existingRoutePath: existingRoutePath,
+            ));
+      }
+
+      // ✅ Set local variables in batches to prevent multiple rebuilds
+      if (mounted) {
+        setState(() {
+          _elapsedTime = DateTime.now().difference(task.startTime!);
+          _totalDistance = task.distance ?? 0.0;
+
+          // Process route points
+          _routePoints.clear();
+          if (routePath != null && routePath.isNotEmpty) {
+            try {
+              final List<MapEntry<dynamic, dynamic>> sortedEntries =
+                  routePath.entries.toList()
+                    ..sort((a, b) => (a.value['timestamp'].toString())
+                        .compareTo(b.value['timestamp'].toString()));
+
+              for (var entry in sortedEntries) {
+                if (entry.value is Map && entry.value['coordinates'] != null) {
+                  final coordinates = entry.value['coordinates'] as List;
+                  if (coordinates.length >= 2) {
+                    _routePoints.add(LatLng(
+                      (coordinates[0] as num).toDouble(),
+                      (coordinates[1] as num).toDouble(),
+                    ));
+                  }
+                }
+              }
+            } catch (e) {
+              print('Error processing route points: $e');
+            }
+          }
+
+          // Set last position
+          if (routePath != null && routePath.isNotEmpty) {
+            try {
+              final sortedEntries = routePath.entries.toList()
+                ..sort((a, b) => (b.value['timestamp'].toString())
+                    .compareTo(a.value['timestamp'].toString()));
+
+              if (sortedEntries.isNotEmpty) {
+                final coordinates =
+                    sortedEntries.first.value['coordinates'] as List;
+                _lastPosition = Position(
+                  latitude: (coordinates[0] as num).toDouble(),
+                  longitude: (coordinates[1] as num).toDouble(),
+                  timestamp: DateTime.now(),
+                  accuracy: 0,
+                  altitude: 0,
+                  heading: 0,
+                  speed: 0,
+                  speedAccuracy: 0,
+                  isMocked: false,
+                  floor: null,
+                  altitudeAccuracy: 0,
+                  headingAccuracy: 0,
+                );
+              }
+            } catch (e) {
+              print('Error setting last position: $e');
+            }
+          }
+        });
+      }
+
+      // ✅ Start systems after state is set
+      _startPatrolTimer();
+      _startLocationTracking();
+
+      // ✅ Load saved route after a frame delay
+      if (routePath != null && routePath.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _displaySavedRoute(routePath.cast<String, dynamic>());
+
+            setState(() {
+              _polylines.clear();
+              if (_routePoints.isNotEmpty) {
+                _polylines.add(
+                  Polyline(
+                    polylineId: const PolylineId('patrol_route'),
+                    points: _routePoints,
+                    color: _polylineColor,
+                    width: 5,
+                  ),
+                );
+              }
+            });
+
+            // Zoom to show route
+            if (_routePoints.isNotEmpty && mapController != null) {
+              Future.delayed(Duration(milliseconds: 500), () {
+                if (mounted) _zoomToPolyline();
+              });
+            }
+          }
+        });
+      }
+
+      // ✅ Gradual transition from local state to BLoC state
+      Future.delayed(Duration(seconds: 3), () {
+        if (mounted) {
+          print('🔄 Transitioning from local state to BLoC state');
+          setState(() {
+            _localIsPatrolling = false;
+            _localPatrollingTaskId = null;
+          });
+        }
+      });
+
+      // Notify user
+      showCustomSnackbar(
+        context: context,
+        title: 'Patroli Dilanjutkan',
+        subtitle: 'Melanjutkan patroli yang sedang berlangsung',
+        type: SnackbarType.success,
+      );
+    } catch (e) {
+      print('❌ Error in resume patrol: $e');
+      // Reset local state on error
+      if (mounted) {
+        setState(() {
+          _localIsPatrolling = false;
+          _localPatrollingTaskId = null;
+        });
+      }
+    }
   }
 
   Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
@@ -539,6 +625,7 @@ class _MapScreenState extends State<MapScreen> {
 
   void _startLocationTracking() {
     String timeNow = DateTime.now().toIso8601String();
+    print('🚀 Starting location tracking at: $timeNow');
 
     // Cancel any existing subscription
     _positionStreamSubscription?.cancel();
@@ -556,7 +643,7 @@ class _MapScreenState extends State<MapScreen> {
 
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
+        accuracy: LocationAccuracy.high,
         distanceFilter: 5,
       ),
     ).listen(
@@ -576,8 +663,9 @@ class _MapScreenState extends State<MapScreen> {
                   state is PatrolLoaded && state.isPatrolling;
               final isPatrollingInTask = widget.task.status == 'ongoing' ||
                   widget.task.status == 'in_progress';
-              final isPatrolActive = isPatrollingInBloc || isPatrollingInTask;
-
+              final isPatrolActive = isPatrollingInBloc ||
+                  isPatrollingInTask ||
+                  _localIsPatrolling;
               if (isPatrolActive) {
                 // Ambil mockCount dari bloc atau gunakan nilai default
                 int mockCount = 1;
@@ -685,8 +773,9 @@ class _MapScreenState extends State<MapScreen> {
           final isPatrollingInTask = widget.task.status == 'ongoing' ||
               widget.task.status == 'in_progress';
           final isPatrolActive = isPatrollingInBloc || isPatrollingInTask;
+          final actuallyPatrolling = _isCurrentlyPatrolling();
 
-          if (isPatrolActive) {
+          if (actuallyPatrolling) {
             // IMPORTANT: This is where we send location updates to bloc
             final timestamp = DateTime.now();
             context.read<PatrolBloc>().add(UpdatePatrolLocation(
@@ -784,10 +873,11 @@ class _MapScreenState extends State<MapScreen> {
   Widget _buildPatrolButtonUI(bool isPatrolling) {
     final state = context.read<PatrolBloc>().state;
     final isOffline = state is PatrolLoaded ? state.isOffline : false;
+    final actuallyPatrolling = _isCurrentlyPatrolling();
 
     final canStartNow = _canStartPatrol();
 
-    if (isOffline && !isPatrolling) {
+    if (isOffline && !actuallyPatrolling) {
       return Container(
         width: 120,
         height: 70,
@@ -826,7 +916,7 @@ class _MapScreenState extends State<MapScreen> {
       );
     }
 
-    if (!canStartNow && !isPatrolling) {
+    if (!canStartNow && !actuallyPatrolling) {
       return Container(
         width: 120,
         height: 70,
@@ -871,14 +961,14 @@ class _MapScreenState extends State<MapScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              isPatrolling
+              actuallyPatrolling
                   ? 'Tekan 3 detik untuk selesai'
                   : isOffline
                       ? 'Mode offline, koneksi diperlukan'
                       : 'Tekan 3 detik untuk mulai',
               style: mediumTextStyle(color: Colors.white),
             ),
-            backgroundColor: isPatrolling
+            backgroundColor: actuallyPatrolling
                 ? dangerR300
                 : isOffline
                     ? neutral500
@@ -893,7 +983,7 @@ class _MapScreenState extends State<MapScreen> {
         );
       },
       onLongPressStart: (_) {
-        if (isOffline && !isPatrolling)
+        if (isOffline && !actuallyPatrolling)
           return; // Disable long press jika offline dan belum mulai
         final state = context.read<PatrolBloc>().state;
         _startLongPressAnimation(context, state);
@@ -918,12 +1008,12 @@ class _MapScreenState extends State<MapScreen> {
                 child: CircularProgressIndicator(
                   value: value,
                   strokeWidth: 6.0,
-                  color: isPatrolling
+                  color: actuallyPatrolling
                       ? dangerR300
                       : isOffline
                           ? neutral500
                           : successG300,
-                  backgroundColor: isPatrolling
+                  backgroundColor: actuallyPatrolling
                       ? dangerR300.withOpacity(0.3)
                       : isOffline
                           ? neutral500.withOpacity(0.3)
@@ -938,7 +1028,7 @@ class _MapScreenState extends State<MapScreen> {
             height: 70,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isPatrolling
+              color: actuallyPatrolling
                   ? dangerR300
                   : isOffline
                       ? neutral500
@@ -953,7 +1043,7 @@ class _MapScreenState extends State<MapScreen> {
             ),
             child: Center(
               child: Icon(
-                isPatrolling
+                actuallyPatrolling
                     ? Icons.stop
                     : isOffline
                         ? Icons.wifi_off
@@ -1265,6 +1355,9 @@ class _MapScreenState extends State<MapScreen> {
                                           setState(() {
                                             initialReportPhotoUrl = photoUrl;
                                             isSubmitting = false;
+                                            _localIsPatrolling = true;
+                                            _localPatrollingTaskId =
+                                                widget.task.taskId;
                                           });
                                         }
 
@@ -1313,6 +1406,16 @@ class _MapScreenState extends State<MapScreen> {
                                                   'Patroli akan segera dimulai',
                                               type: SnackbarType.success,
                                             );
+
+                                            Future.delayed(Duration(seconds: 5),
+                                                () {
+                                              if (mounted) {
+                                                setState(() {
+                                                  _localIsPatrolling = false;
+                                                  _localPatrollingTaskId = null;
+                                                });
+                                              }
+                                            });
                                           } else {
                                             // Jika ada masalah update state, tangani di sini (misal: tampilkan error)
                                             showCustomSnackbar(
@@ -1860,6 +1963,25 @@ class _MapScreenState extends State<MapScreen> {
         );
       },
     );
+  }
+
+  bool _isCurrentlyPatrolling() {
+    // Check local state first (highest priority during transitions)
+    if (_localIsPatrolling && _localPatrollingTaskId == widget.task.taskId) {
+      return true;
+    }
+
+    // Check bloc state
+    final state = context.read<PatrolBloc>().state;
+    if (state is PatrolLoaded && state.isPatrolling) {
+      return true;
+    }
+
+    // Check task status as fallback
+    final taskOngoing =
+        widget.task.status == 'ongoing' || widget.task.status == 'in_progress';
+
+    return taskOngoing;
   }
 
   Future<void> _addRouteMarkers(List<List<double>> coordinates) async {
@@ -2969,6 +3091,13 @@ class _MapScreenState extends State<MapScreen> {
     _longPressTimer?.cancel();
     mapController?.dispose();
     _disableWakelock();
+
+    // Reset flags
+    _isInitializing = false;
+    _hasResumedPatrol = false;
+    _localIsPatrolling = false;
+    _localPatrollingTaskId = null;
+
     super.dispose();
   }
 
@@ -3147,7 +3276,8 @@ class _MapScreenState extends State<MapScreen> {
                                     style: semiBoldTextStyle(size: 16),
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                                  if (!isPatrolling)
+                                  // ✅ Gunakan _isCurrentlyPatrolling() untuk menampilkan info waktu
+                                  if (!_isCurrentlyPatrolling())
                                     Row(
                                       children: [
                                         const Icon(Icons.access_time,
@@ -3180,7 +3310,10 @@ class _MapScreenState extends State<MapScreen> {
                         // Info Waktu & Jarak (saat patroli aktif)
                         BlocBuilder<PatrolBloc, PatrolState>(
                           builder: (context, state) {
-                            if (state is PatrolLoaded && state.isPatrolling) {
+                            // ✅ Gunakan _isCurrentlyPatrolling() untuk konsistensi
+                            final actuallyPatrolling = _isCurrentlyPatrolling();
+
+                            if (actuallyPatrolling) {
                               return Column(
                                 children: [
                                   const SizedBox(height: 12),
@@ -3346,8 +3479,8 @@ class _MapScreenState extends State<MapScreen> {
                 right: 16,
                 child: BlocBuilder<PatrolBloc, PatrolState>(
                   builder: (context, state) {
-                    final isPatrolling =
-                        state is PatrolLoaded && state.isPatrolling;
+                    // ✅ Gunakan _isCurrentlyPatrolling() untuk konsistensi
+                    final actuallyPatrolling = _isCurrentlyPatrolling();
 
                     return Card(
                       elevation: 4,
@@ -3403,7 +3536,7 @@ class _MapScreenState extends State<MapScreen> {
                             Row(
                               children: [
                                 // Tombol laporan (hanya saat patroli aktif)
-                                if (isPatrolling)
+                                if (actuallyPatrolling) // ✅ Gunakan actuallyPatrolling
                                   ActionButton(
                                     icon: Icons.report_problem,
                                     color: dangerR300,
@@ -3412,7 +3545,8 @@ class _MapScreenState extends State<MapScreen> {
                                   ),
                                 const SizedBox(width: 12),
                                 // Tombol mulai/stop dengan UI yang lebih baik
-                                _buildPatrolButtonUI(isPatrolling),
+                                _buildPatrolButtonUI(
+                                    actuallyPatrolling), // ✅ Pass actuallyPatrolling
                               ],
                             ),
                           ],
