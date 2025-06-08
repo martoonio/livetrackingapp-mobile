@@ -271,11 +271,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
   double? _clusterValidationRadius;
 
-  // ✅ Tambahkan buffer untuk prevent race condition
-  bool _localPatrollingState = false;
-  String? _localPatrollingTaskId;
-  Timer? _stateStabilityTimer;
-
   PatrolBloc({required this.repository}) : super(PatrolInitial()) {
     on<LoadRouteData>(_onLoadRouteData);
     on<StartPatrol>(_onStartPatrol);
@@ -350,47 +345,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         // Note: Report sync should be handled by the UI layer, not here
         // Since we don't have access to BuildContext in the bloc
       }
-    }
-  }
-
-  Future<void> _onUpdateTask(
-    UpdateTask event,
-    Emitter<PatrolState> emit,
-  ) async {
-    try {
-      if (_isConnected) {
-        await repository.updateTask(
-          event.taskId,
-          event.updates,
-        );
-      } else {
-        if (_offlineLocationBox != null) {
-          final key =
-              'task_update_${event.taskId}_${DateTime.now().millisecondsSinceEpoch}';
-          await _offlineLocationBox!.put(key, {
-            'taskId': event.taskId,
-            'updates': event.updates,
-          });
-        }
-      }
-
-      if (state is PatrolLoaded) {
-        final currentState = state as PatrolLoaded;
-        final isInProgress = event.updates['status'] == 'ongoing';
-
-        emit(PatrolLoaded(
-          task: currentState.task!.copyWith(
-            status: event.updates['status'] as String?,
-            startTime: event.updates['startTime'] != null
-                ? DateTime.parse(event.updates['startTime'] as String)
-                : null,
-          ),
-          isPatrolling: isInProgress,
-          isOffline: !_isConnected,
-        ));
-      }
-    } catch (e) {
-      emit(PatrolError('Failed to update task: $e'));
     }
   }
 
@@ -910,10 +864,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) async {
     try {
-      // ✅ Set local state IMMEDIATELY
-      _localPatrollingState = true;
-      _localPatrollingTaskId = event.task.taskId;
-
       emit(PatrolLoading());
 
       final isValid = await repository.validateTaskIntegrity(event.task.taskId);
@@ -960,10 +910,49 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         }
       }
 
-      // ✅ Update state SEBELUM database operations
       final routePath = <String, dynamic>{};
+
+      // Calculate initial timeliness
       final timeliness = _calculateTimeliness(event.task.assignedStartTime,
           event.startTime, event.task.assignedEndTime, 'ongoing');
+
+      // PERBAIKAN: Ensure all critical fields are updated atomically
+      final updateData = {
+        'status': 'ongoing',
+        'startTime': event.startTime.toIso8601String(),
+        'timeliness': timeliness,
+        // TAMBAHAN: Clear any previous end data
+        'endTime': null,
+        'distance': 0.0,
+        // TAMBAHAN: Add start metadata
+        'actualStartTime': event.startTime.toIso8601String(),
+        'startedFromApp': true,
+      };
+
+      if (_isConnected) {
+        // PERBAIKAN: Use transaction-like update to ensure atomicity
+        try {
+          await repository.updateTask(event.task.taskId, updateData);
+
+          // TAMBAHAN: Verify the update was successful
+          final verifyTask =
+              await repository.getTaskById(taskId: event.task.taskId);
+          if (verifyTask?.startTime == null) {
+            throw Exception('Failed to update startTime in database');
+          }
+        } catch (e) {
+          print('Error updating task start: $e');
+          emit(PatrolError('Failed to start patrol: database update failed'));
+          return;
+        }
+      } else {
+        if (_offlineLocationBox != null) {
+          await _offlineLocationBox!.put('patrol_start_${event.task.taskId}', {
+            'taskId': event.task.taskId,
+            ...updateData,
+          });
+        }
+      }
 
       final updatedTask = PatrolTask(
         taskId: event.task.taskId,
@@ -984,12 +973,8 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         clusterName: event.task.clusterName,
         officerName: event.task.officerName,
         officerPhotoUrl: event.task.officerPhotoUrl,
-        initialReportPhotoUrl: event.task.initialReportPhotoUrl,
-        initialReportNote: event.task.initialReportNote,
-        initialReportTime: event.task.initialReportTime,
       );
 
-      // ✅ Emit state SEBELUM database update
       emit(PatrolLoaded(
         task: updatedTask,
         isPatrolling: true,
@@ -999,69 +984,56 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         isOffline: !_isConnected,
       ));
 
-      // Database update dalam background
-      final updateData = {
-        'status': 'ongoing',
-        'startTime': event.startTime.toIso8601String(),
-        'timeliness': timeliness,
-        'endTime': null,
-        'distance': 0.0,
-        'actualStartTime': event.startTime.toIso8601String(),
-        'startedFromApp': true,
-      };
-
-      if (_isConnected) {
-        await repository.updateTask(event.task.taskId, updateData);
-      } else {
-        if (_offlineLocationBox != null) {
-          await _offlineLocationBox!.put('patrol_start_${event.task.taskId}', {
-            'taskId': event.task.taskId,
-            ...updateData,
-          });
-        }
-      }
-
-      // ✅ Start location tracking IMMEDIATELY
       _startLocationTracking();
 
-      // ✅ Stabilkan state
-      _startStateStabilityTimer(event.task.taskId);
-
       print(
-          'Patrol started with immediate UI update for task ${event.task.taskId}');
+          'Patrol started successfully for task ${event.task.taskId} at ${event.startTime}');
     } catch (e, stackTrace) {
-      _localPatrollingState = false;
-      _localPatrollingTaskId = null;
       print('Error in _onStartPatrol: $e');
+      print('Stack trace: $stackTrace');
       emit(PatrolError('Failed to start patrol: $e'));
     }
   }
 
-  // ✅ Override method untuk cek patrolling status
-  bool get isCurrentlyPatrolling {
-    if (_localPatrollingState && _localPatrollingTaskId != null) {
-      return true;
-    }
-
-    if (state is PatrolLoaded) {
-      final currentState = state as PatrolLoaded;
-      return currentState.isPatrolling;
-    }
-
-    return false;
-  }
-
-  // ✅ Timer untuk stabilkan state setelah database update
-  void _startStateStabilityTimer(String taskId) {
-    _stateStabilityTimer?.cancel();
-    _stateStabilityTimer = Timer(Duration(seconds: 3), () {
-      // Setelah 3 detik, trust database state
-      if (_localPatrollingTaskId == taskId) {
-        _localPatrollingState = false;
-        _localPatrollingTaskId = null;
-        print('State stability timer completed for task $taskId');
+  Future<void> _onUpdateTask(
+    UpdateTask event,
+    Emitter<PatrolState> emit,
+  ) async {
+    try {
+      if (_isConnected) {
+        await repository.updateTask(
+          event.taskId,
+          event.updates,
+        );
+      } else {
+        if (_offlineLocationBox != null) {
+          final key =
+              'task_update_${event.taskId}_${DateTime.now().millisecondsSinceEpoch}';
+          await _offlineLocationBox!.put(key, {
+            'taskId': event.taskId,
+            'updates': event.updates,
+          });
+        }
       }
-    });
+
+      if (state is PatrolLoaded) {
+        final currentState = state as PatrolLoaded;
+        final isInProgress = event.updates['status'] == 'ongoing';
+
+        emit(PatrolLoaded(
+          task: currentState.task!.copyWith(
+            status: event.updates['status'] as String?,
+            startTime: event.updates['startTime'] != null
+                ? DateTime.parse(event.updates['startTime'] as String)
+                : null,
+          ),
+          isPatrolling: isInProgress,
+          isOffline: !_isConnected,
+        ));
+      }
+    } catch (e) {
+      emit(PatrolError('Failed to update task: $e'));
+    }
   }
 
   Future<void> _onUpdatePatrolLocation(
@@ -1070,13 +1042,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
   ) async {
     if (state is PatrolLoaded) {
       final currentState = state as PatrolLoaded;
-
-      // ✅ Check BOTH local state AND bloc state
-      final shouldProcessLocation = isCurrentlyPatrolling &&
-          currentState.task != null &&
-          (currentState.isPatrolling || _localPatrollingState);
-
-      if (shouldProcessLocation) {
+      if (currentState.isPatrolling && currentState.task != null) {
         try {
           final isMocked =
               await LocationValidator.isLocationMocked(event.position);
@@ -1402,7 +1368,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
     _locationSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
+        accuracy: LocationAccuracy.best,
         distanceFilter: 5,
       ),
     ).listen(
@@ -1509,7 +1475,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
   @override
   Future<void> close() async {
-    _stateStabilityTimer?.cancel();
     _timelinessTimer?.cancel();
     await _locationSubscription?.cancel();
     await _taskSubscription?.cancel();
@@ -1571,9 +1536,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       final currentState = state as PatrolLoaded;
 
       try {
-        // ✅ LANGSUNG set local patrolling state untuk mencegah race condition
-        _localPatrollingState = true;
-        _localPatrollingTaskId = currentState.task?.taskId;
+        emit(PatrolLoading());
 
         final updatedTask = currentState.task?.copyWith(
           initialReportPhotoUrl: event.photoUrl,
@@ -1582,13 +1545,6 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         );
 
         if (updatedTask != null) {
-          // ✅ Update state SEBELUM database call
-          emit(currentState.copyWith(
-            task: updatedTask,
-            isPatrolling: true, // Langsung set true di UI
-          ));
-
-          // Database update dalam background
           await repository.updateTask(
             updatedTask.taskId,
             {
@@ -1598,14 +1554,18 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             },
           );
 
-          // ✅ Stabilkan state setelah database update
-          _startStateStabilityTimer(updatedTask.taskId);
+          emit(PatrolLoaded(
+            task: updatedTask,
+            isPatrolling: currentState.isPatrolling,
+            distance: currentState.distance,
+            finishedTasks: currentState.finishedTasks,
+            routePath: currentState.routePath,
+            isOffline: currentState.isOffline,
+          ));
         }
       } catch (e) {
-        // Reset local state jika error
-        _localPatrollingState = false;
-        _localPatrollingTaskId = null;
-        emit(PatrolError('Failed to submit initial report: $e'));
+        emit(PatrolError('Failed to submit final report: $e'));
+        emit(currentState);
       }
     }
   }
