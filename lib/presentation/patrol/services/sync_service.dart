@@ -20,7 +20,7 @@ class SyncService {
         await _syncSinglePatrol(patrol);
       }
 
-      print('✅ Sync completed');
+      print('✅ Sync finished');
     } catch (e) {
       print('❌ Error during sync: $e');
     }
@@ -39,8 +39,8 @@ class SyncService {
         updateData['startTime'] = patrol.startTime;
 
         // Map local status to Firebase status
-        if (patrol.status == 'completed') {
-          updateData['status'] = 'completed';
+        if (patrol.status == 'finished') {
+          updateData['status'] = 'finished';
         } else if (patrol.status == 'ongoing' || patrol.status == 'started') {
           updateData['status'] = 'ongoing';
         }
@@ -48,12 +48,11 @@ class SyncService {
 
       if (patrol.endTime != null) {
         updateData['endTime'] = patrol.endTime;
-        updateData['status'] = 'completed';
+        updateData['status'] = 'finished';
       }
 
       // ✅ Distance and time data
       updateData['distance'] = patrol.distance;
-      updateData['elapsedTimeSeconds'] = patrol.elapsedTimeSeconds;
 
       // ✅ Photo URLs
       if (patrol.initialReportPhotoUrl != null) {
@@ -94,7 +93,6 @@ class SyncService {
                   ],
                   'timestamp':
                       value['timestamp'] ?? DateTime.now().toIso8601String(),
-                  'accuracy': (value['accuracy'] ?? 0.0).toDouble(),
                 };
               }
             }
@@ -117,7 +115,6 @@ class SyncService {
       // ✅ Metadata
       updateData['lastUpdated'] = patrol.lastUpdated;
       updateData['syncedAt'] = DateTime.now().toIso8601String();
-      updateData['dataSource'] = 'mobile_local_sync'; // Track sync source
 
       print('🔄 Updating Firebase for patrol ${patrol.taskId}');
       print('📊 Update data: ${updateData.keys.toList()}');
@@ -227,7 +224,7 @@ class SyncService {
       // ✅ Perform sync if data not verified in Firebase
       print('🔄 Force syncing patrol: $taskId');
       await _syncSinglePatrol(localData);
-      print('✅ Force sync completed for: $taskId');
+      print('✅ Force sync finished for: $taskId');
       return true;
     } catch (e) {
       print('❌ Error force syncing patrol $taskId: $e');
@@ -274,7 +271,7 @@ class SyncService {
         }
       }
 
-      print('✅ Cleanup completed, deleted $deletedCount local patrol records');
+      print('✅ Cleanup finished, deleted $deletedCount local patrol records');
     } catch (e) {
       print('❌ Error during cleanup: $e');
     }

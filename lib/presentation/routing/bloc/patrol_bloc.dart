@@ -481,10 +481,21 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     SyncOfflineData event,
     Emitter<PatrolState> emit,
   ) async {
-    if (!_isConnected || _offlineLocationBox == null) return;
+    // ✅ Consistent connectivity check with SyncService
+    final connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      print('❌ No internet connection for sync');
+      return;
+    }
+
+    if (_offlineLocationBox == null) {
+      print('⚠️ No offline storage available');
+      return;
+    }
 
     try {
       if (_offlineLocationBox!.isEmpty) {
+        print('ℹ️ No offline data to sync');
         return;
       }
 
@@ -492,40 +503,159 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         final currentState = state as PatrolLoaded;
         emit(currentState.copyWith(isSyncing: true));
 
-        final stopKeyPattern = 'patrol_stop_';
-        final stopKeys = _offlineLocationBox!.keys
-            .where((k) => k.toString().startsWith(stopKeyPattern))
+        print('🔄 Starting offline data sync...');
+        print('📊 Total offline items: ${_offlineLocationBox!.length}');
+
+        // ✅ 1. SYNC PATROL START DATA
+        final startKeys = _offlineLocationBox!.keys
+            .where((k) => k.toString().startsWith('patrol_start_'))
             .toList();
 
-        final locationDataByTask = <String, Map<String, dynamic>>{};
+        for (final key in startKeys) {
+          try {
+            final data = _offlineLocationBox!.get(key);
+            if (data != null && data is Map) {
+              final taskId = data['taskId'] as String;
+              final updateData = Map<String, dynamic>.from(data)
+                ..remove('taskId');
 
+              print('🔄 Syncing patrol start for: $taskId');
+
+              // ✅ Retry mechanism like SyncService
+              int retryCount = 0;
+              bool updateSuccess = false;
+
+              while (!updateSuccess && retryCount < 3) {
+                try {
+                  await repository.updateTask(taskId, updateData).timeout(
+                        Duration(seconds: 30),
+                        onTimeout: () => throw Exception('Update timeout'),
+                      );
+                  updateSuccess = true;
+                  print('✅ Patrol start synced on attempt ${retryCount + 1}');
+                } catch (e) {
+                  retryCount++;
+                  print('❌ Start sync attempt $retryCount failed: $e');
+                  if (retryCount < 3) {
+                    await Future.delayed(Duration(seconds: retryCount * 2));
+                  } else {
+                    throw e;
+                  }
+                }
+              }
+
+              // ✅ Delete after successful sync (like SyncService)
+              if (updateSuccess) {
+                await _offlineLocationBox!.delete(key);
+                print('✅ Deleted offline start data: $key');
+              }
+            }
+          } catch (e) {
+            print('❌ Error syncing patrol start $key: $e');
+          }
+        }
+
+        // ✅ 2. SYNC PATROL STOP DATA
+        final stopKeys = _offlineLocationBox!.keys
+            .where((k) => k.toString().startsWith('patrol_stop_'))
+            .toList();
+
+        for (final key in stopKeys) {
+          try {
+            final data = _offlineLocationBox!.get(key);
+            if (data != null && data is Map) {
+              final taskId = data['taskId'] as String;
+              final endTime = DateTime.parse(data['endTime'] as String);
+              final distance = data['distance'] as double;
+
+              print('🔄 Syncing patrol stop for: $taskId');
+
+              // ✅ Retry mechanism
+              int retryCount = 0;
+              bool updateSuccess = false;
+
+              while (!updateSuccess && retryCount < 3) {
+                try {
+                  await repository.updateTaskStatus(taskId, 'finished').timeout(
+                        Duration(seconds: 30),
+                        onTimeout: () =>
+                            throw Exception('Status update timeout'),
+                      );
+
+                  await repository.updateTask(taskId, {
+                    'endTime': endTime.toIso8601String(),
+                    'distance': distance,
+                    'status': 'finished',
+                    'syncedAt': DateTime.now().toIso8601String(),
+                  }).timeout(
+                    Duration(seconds: 30),
+                    onTimeout: () => throw Exception('Task update timeout'),
+                  );
+
+                  updateSuccess = true;
+                  print('✅ Patrol stop synced on attempt ${retryCount + 1}');
+                } catch (e) {
+                  retryCount++;
+                  print('❌ Stop sync attempt $retryCount failed: $e');
+                  if (retryCount < 3) {
+                    await Future.delayed(Duration(seconds: retryCount * 2));
+                  } else {
+                    throw e;
+                  }
+                }
+              }
+
+              // ✅ Delete after successful sync
+              if (updateSuccess) {
+                await _offlineLocationBox!.delete(key);
+                print('✅ Deleted offline stop data: $key');
+              }
+            }
+          } catch (e) {
+            print('❌ Error syncing patrol stop $key: $e');
+          }
+        }
+
+        // ✅ 3. SYNC LOCATION DATA (GROUP BY TASK)
         final locationKeys = _offlineLocationBox!.keys
             .where((k) =>
-                !k.toString().startsWith(stopKeyPattern) &&
+                !k.toString().startsWith('patrol_stop_') &&
                 !k.toString().startsWith('task_update_') &&
                 !k.toString().startsWith('patrol_start_') &&
                 !k.toString().startsWith('mock_detection_'))
             .toList();
 
+        final locationDataByTask = <String, Map<String, dynamic>>{};
+
         for (final key in locationKeys) {
-          final data = _offlineLocationBox!.get(key);
-          if (data != null && data is Map && data['taskId'] != null) {
-            final taskId = data['taskId'] as String;
-            final timestamp = data['timestamp'] as String;
-            final latitude = data['latitude'] as double;
-            final longitude = data['longitude'] as double;
+          try {
+            final data = _offlineLocationBox!.get(key);
+            if (data != null && data is Map && data['taskId'] != null) {
+              final taskId = data['taskId'] as String;
+              final timestamp = data['timestamp'] as String;
+              final latitude = data['latitude'] as double;
+              final longitude = data['longitude'] as double;
 
-            locationDataByTask[taskId] ??= {};
+              locationDataByTask[taskId] ??= {};
 
-            locationDataByTask[taskId]?[key.toString()] = {
-              'coordinates': [latitude, longitude],
-              'timestamp': timestamp,
-            };
+              // ✅ Format consistent with SyncService
+              locationDataByTask[taskId]![key.toString()] = {
+                'coordinates': [latitude, longitude],
+                'timestamp': timestamp,
+              };
+            }
+          } catch (e) {
+            print('❌ Error processing location data $key: $e');
           }
         }
 
+        // Sync location data for each task
         for (final taskId in locationDataByTask.keys) {
           try {
+            print(
+                '🔄 Syncing ${locationDataByTask[taskId]!.length} location points for: $taskId');
+
+            // Get existing route path from Firebase
             Map<String, dynamic> existingRoutePath = {};
             try {
               final taskSnapshot = await repository.getTaskById(taskId: taskId);
@@ -533,30 +663,63 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
                 existingRoutePath =
                     Map<String, dynamic>.from(taskSnapshot.routePath as Map);
               }
-            } catch (e) {}
+            } catch (e) {
+              print('⚠️ Could not get existing route path: $e');
+            }
 
+            // Merge with offline data
             final mergedRoutePath = {
               ...existingRoutePath,
               ...locationDataByTask[taskId]!
             };
 
-            await repository.updateTask(
-              taskId,
-              {'route_path': mergedRoutePath},
-            );
+            // ✅ Retry mechanism for route path update
+            int retryCount = 0;
+            bool updateSuccess = false;
 
-            for (final key in locationDataByTask[taskId]!.keys) {
-              await _offlineLocationBox!.delete(key);
+            while (!updateSuccess && retryCount < 3) {
+              try {
+                await repository.updateTask(taskId, {
+                  'route_path': mergedRoutePath,
+                  'syncedAt': DateTime.now().toIso8601String(),
+                }).timeout(
+                  Duration(seconds: 30),
+                  onTimeout: () => throw Exception('Route update timeout'),
+                );
+                updateSuccess = true;
+                print('✅ Route path synced on attempt ${retryCount + 1}');
+              } catch (e) {
+                retryCount++;
+                print('❌ Route sync attempt $retryCount failed: $e');
+                if (retryCount < 3) {
+                  await Future.delayed(Duration(seconds: retryCount * 2));
+                } else {
+                  throw e;
+                }
+              }
             }
-          } catch (e) {}
+
+            // ✅ Delete location data after successful sync
+            if (updateSuccess) {
+              for (final key in locationDataByTask[taskId]!.keys) {
+                await _offlineLocationBox!.delete(key);
+              }
+              print(
+                  '✅ Deleted ${locationDataByTask[taskId]!.length} location points for: $taskId');
+            }
+          } catch (e) {
+            print('❌ Error syncing location data for $taskId: $e');
+          }
         }
 
+        // ✅ 4. SYNC MOCK DETECTION DATA
         final mockDetectionKeys = _offlineLocationBox!.keys
             .where((k) => k.toString().startsWith('mock_detection_'))
             .toList();
 
         if (mockDetectionKeys.isNotEmpty) {
-          final database = FirebaseDatabase.instance.ref();
+          print(
+              '🔄 Syncing ${mockDetectionKeys.length} mock detection records...');
 
           for (final key in mockDetectionKeys) {
             try {
@@ -564,98 +727,123 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               if (data != null && data is Map) {
                 final taskId = data['taskId'] as String;
 
-                await repository.updateTask(
-                  taskId,
-                  {
-                    'mockLocationDetected': true,
-                    'mockLocationCount': data['mockCount'] ?? 1,
-                    'lastMockDetection': data['timestamp'],
-                  },
-                );
+                // ✅ Retry mechanism for mock detection
+                int retryCount = 0;
+                bool updateSuccess = false;
 
-                await database
-                    .child('tasks/$taskId/mock_detections')
-                    .push()
-                    .set({
-                  'timestamp': data['timestamp'],
-                  'coordinates': [data['latitude'], data['longitude']],
-                  'accuracy': data['accuracy'],
-                  'speed': data['speed'],
-                  'altitude': data['altitude'],
-                  'heading': data['heading'],
-                  'count': data['mockCount'],
-                  'syncedFromOffline': true,
-                });
+                while (!updateSuccess && retryCount < 3) {
+                  try {
+                    await repository.updateTask(taskId, {
+                      'mockLocationDetected': true,
+                      'mockLocationCount': data['mockCount'] ?? 1,
+                      'lastMockDetection': data['timestamp'],
+                      'syncedAt': DateTime.now().toIso8601String(),
+                    }).timeout(
+                      Duration(seconds: 30),
+                      onTimeout: () =>
+                          throw Exception('Mock detection update timeout'),
+                    );
 
-                await database.child('mock_location_logs').push().set({
-                  'timestamp': data['timestamp'],
-                  'coordinates': [data['latitude'], data['longitude']],
-                  'accuracy': data['accuracy'] ?? 0,
-                  'speed': data['speed'] ?? 0,
-                  'altitude': data['altitude'] ?? 0,
-                  'heading': data['heading'] ?? 0,
-                  'count': data['mockCount'] ?? 1,
-                  'taskId': taskId,
-                  'userId': data['userId'],
-                  'detectionTime': ServerValue.timestamp,
-                  'syncedFromOffline': true,
-                  'deviceInfo':
-                      data['deviceInfo'] ?? {'syncedFromOffline': true},
-                });
+                    // Also log to Firebase
+                    final database = FirebaseDatabase.instance.ref();
+                    await database
+                        .child('tasks/$taskId/mock_detections')
+                        .push()
+                        .set({
+                      'timestamp': data['timestamp'],
+                      'coordinates': [data['latitude'], data['longitude']],
+                      'accuracy': data['accuracy'],
+                      'speed': data['speed'],
+                      'altitude': data['altitude'],
+                      'heading': data['heading'],
+                      'count': data['mockCount'],
+                      'syncedFromOffline': true,
+                    }).timeout(
+                      Duration(seconds: 30),
+                      onTimeout: () => throw Exception('Mock log timeout'),
+                    );
 
-                await _offlineLocationBox!.delete(key);
+                    updateSuccess = true;
+                    print(
+                        '✅ Mock detection synced on attempt ${retryCount + 1}');
+                  } catch (e) {
+                    retryCount++;
+                    print('❌ Mock sync attempt $retryCount failed: $e');
+                    if (retryCount < 3) {
+                      await Future.delayed(Duration(seconds: retryCount * 2));
+                    } else {
+                      throw e;
+                    }
+                  }
+                }
+
+                // ✅ Delete after successful sync
+                if (updateSuccess) {
+                  await _offlineLocationBox!.delete(key);
+                  print('✅ Deleted mock detection data: $key');
+                }
               }
-            } catch (e) {}
-          }
-        }
-
-        if (stopKeys.isNotEmpty) {
-          for (final key in stopKeys) {
-            final data = _offlineLocationBox!.get(key);
-            if (data != null && data is Map) {
-              final taskId = data['taskId'] as String;
-              final endTime = DateTime.parse(data['endTime'] as String);
-              final distance = data['distance'] as double;
-
-              try {
-                await repository.updateTaskStatus(taskId, 'finished');
-
-                await repository.updateTask(
-                  taskId,
-                  {
-                    'endTime': endTime.toIso8601String(),
-                    'distance': distance,
-                    'status': 'finished',
-                  },
-                );
-
-                await _offlineLocationBox!.delete(key);
-              } catch (e) {}
+            } catch (e) {
+              print('❌ Error syncing mock detection $key: $e');
             }
           }
         }
 
-        final updateKeyPattern = 'task_update_';
+        // ✅ 5. SYNC TASK UPDATE DATA
         final updateKeys = _offlineLocationBox!.keys
-            .where((k) => k.toString().startsWith(updateKeyPattern))
+            .where((k) => k.toString().startsWith('task_update_'))
             .toList();
 
         for (final key in updateKeys) {
-          final data = _offlineLocationBox!.get(key);
-          if (data != null && data is Map) {
-            final taskId = data['taskId'] as String;
-            final updates = data['updates'] as Map<dynamic, dynamic>;
+          try {
+            final data = _offlineLocationBox!.get(key);
+            if (data != null && data is Map) {
+              final taskId = data['taskId'] as String;
+              final updates = data['updates'] as Map<dynamic, dynamic>;
 
-            try {
-              await repository.updateTask(
-                taskId,
-                Map<String, dynamic>.from(updates),
-              );
-              await _offlineLocationBox!.delete(key);
-            } catch (e) {}
+              print('🔄 Syncing task update for: $taskId');
+
+              // ✅ Retry mechanism
+              int retryCount = 0;
+              bool updateSuccess = false;
+
+              while (!updateSuccess && retryCount < 3) {
+                try {
+                  await repository.updateTask(
+                    taskId,
+                    {
+                      ...Map<String, dynamic>.from(updates),
+                      'syncedAt': DateTime.now().toIso8601String(),
+                    },
+                  ).timeout(
+                    Duration(seconds: 30),
+                    onTimeout: () => throw Exception('Task update timeout'),
+                  );
+                  updateSuccess = true;
+                  print('✅ Task update synced on attempt ${retryCount + 1}');
+                } catch (e) {
+                  retryCount++;
+                  print('❌ Task update attempt $retryCount failed: $e');
+                  if (retryCount < 3) {
+                    await Future.delayed(Duration(seconds: retryCount * 2));
+                  } else {
+                    throw e;
+                  }
+                }
+              }
+
+              // ✅ Delete after successful sync
+              if (updateSuccess) {
+                await _offlineLocationBox!.delete(key);
+                print('✅ Deleted task update data: $key');
+              }
+            }
+          } catch (e) {
+            print('❌ Error syncing task update $key: $e');
           }
         }
 
+        // ✅ Update finished tasks if needed
         List<PatrolTask> finishedTasks = [];
         try {
           if (currentState.task != null) {
@@ -663,17 +851,27 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
                 await repository.getFinishedTasks(currentState.task!.userId);
           }
         } catch (e) {
+          print('⚠️ Could not refresh finished tasks: $e');
           finishedTasks = currentState.finishedTasks;
         }
 
         emit(currentState.copyWith(
           isSyncing: false,
           finishedTasks: finishedTasks,
+          isOffline: false,
         ));
 
-        if (_offlineLocationBox!.length > 0) {}
+        final remainingItems = _offlineLocationBox!.length;
+        if (remainingItems > 0) {
+          print('⚠️ ${remainingItems} offline items remain after sync');
+        } else {
+          print('✅ All offline data synced successfully');
+        }
       }
     } catch (e, stack) {
+      print('❌ Error during offline sync: $e');
+      print('📍 Stack trace: $stack');
+
       if (state is PatrolLoaded) {
         emit((state as PatrolLoaded).copyWith(isSyncing: false));
       }
@@ -708,67 +906,68 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) async {
     try {
-    final currentState = state;
-    if (currentState is! PatrolLoaded) {
-      emit(PatrolLoaded(
-        task: event.task,
-        isPatrolling: true,
-        distance: event.currentDistance,
-        isOffline: false,
-      ));
-      return;
-    }
-
-    // ✅ SYNC RESUMED STATE TO FIREBASE IMMEDIATELY
-    try {
-      DatabaseReference _firebaseDatabase = FirebaseDatabase.instance.ref();
-      final taskRef = _firebaseDatabase.child('tasks/${event.task.taskId}');
-      
-      final resumeUpdate = {
-        'status': 'ongoing',
-        'startTime': event.startTime.toIso8601String(),
-        'distance': event.currentDistance,
-        'lastUpdated': DateTime.now().toIso8601String(),
-        'resumedAt': DateTime.now().toIso8601String(),
-      };
-
-      // Include route path if available
-      if (event.existingRoutePath!.isNotEmpty) {
-        resumeUpdate['route_path'] = event.existingRoutePath!;
-        print('🔄 Syncing existing route path: ${event.existingRoutePath!.length} points');
+      final currentState = state;
+      if (currentState is! PatrolLoaded) {
+        emit(PatrolLoaded(
+          task: event.task,
+          isPatrolling: true,
+          distance: event.currentDistance,
+          isOffline: false,
+        ));
+        return;
       }
 
-      await taskRef.update(resumeUpdate).timeout(
-        Duration(seconds: 15),
-        onTimeout: () => throw Exception('Resume sync timeout'),
+      // ✅ SYNC RESUMED STATE TO FIREBASE IMMEDIATELY
+      try {
+        DatabaseReference _firebaseDatabase = FirebaseDatabase.instance.ref();
+        final taskRef = _firebaseDatabase.child('tasks/${event.task.taskId}');
+
+        final resumeUpdate = {
+          'status': 'ongoing',
+          'startTime': event.startTime.toIso8601String(),
+          'distance': event.currentDistance,
+          'lastUpdated': DateTime.now().toIso8601String(),
+          'resumedAt': DateTime.now().toIso8601String(),
+        };
+
+        // Include route path if available
+        if (event.existingRoutePath!.isNotEmpty) {
+          resumeUpdate['route_path'] = event.existingRoutePath!;
+          print(
+              '🔄 Syncing existing route path: ${event.existingRoutePath!.length} points');
+        }
+
+        await taskRef.update(resumeUpdate).timeout(
+              Duration(seconds: 15),
+              onTimeout: () => throw Exception('Resume sync timeout'),
+            );
+
+        print('✅ Resume state synced to Firebase');
+      } catch (e) {
+        print('❌ Failed to sync resume state to Firebase: $e');
+        // Continue anyway - local state is more important
+      }
+
+      // Update local state
+      final updatedTask = event.task.copyWith(
+        status: 'ongoing',
+        startTime: event.startTime,
+        distance: event.currentDistance,
+        routePath: event.existingRoutePath,
       );
-      
-      print('✅ Resume state synced to Firebase');
+
+      emit(currentState.copyWith(
+        task: updatedTask,
+        isPatrolling: true,
+        distance: event.currentDistance,
+      ));
+
+      print('✅ Patrol resumed successfully');
     } catch (e) {
-      print('❌ Failed to sync resume state to Firebase: $e');
-      // Continue anyway - local state is more important
+      print('❌ Error resuming patrol: $e');
+      emit(PatrolError('Failed to resume patrol: $e'));
     }
-
-    // Update local state
-    final updatedTask = event.task.copyWith(
-      status: 'ongoing',
-      startTime: event.startTime,
-      distance: event.currentDistance,
-      routePath: event.existingRoutePath,
-    );
-
-    emit(currentState.copyWith(
-      task: updatedTask,
-      isPatrolling: true,
-      distance: event.currentDistance,
-    ));
-
-    print('✅ Patrol resumed successfully');
-  } catch (e) {
-    print('❌ Error resuming patrol: $e');
-    emit(PatrolError('Failed to resume patrol: $e'));
   }
-}
 
   Future<void> _onLoadPatrolHistory(
     LoadPatrolHistory event,
@@ -1294,8 +1493,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         }
       }
 
-      DatabaseReference _firebaseDatabase =
-          FirebaseDatabase.instance.ref();
+      DatabaseReference _firebaseDatabase = FirebaseDatabase.instance.ref();
 
       // ✅ PERFORM FIREBASE UPDATE WITH RETRY
       final taskRef =
