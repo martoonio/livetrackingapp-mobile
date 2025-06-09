@@ -45,6 +45,10 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
   Officer? _selectedOfficer;
   String? _selectedClusterName;
 
+  List<PatrolTask> _autoPreviewTasks = [];
+  Set<int> _selectedTaskIndices = {}; // Track which tasks are selected
+  bool _selectAllTasks = true;
+
   String? _createdTaskId;
   String? get taskId => _createdTaskId;
 
@@ -94,7 +98,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
   final List<LatLng> _autoSelectedPoints = [];
   int _autoPatrolDurationMinutes = 15;
   int _autoRestDurationMinutes = 15;
-  List<PatrolTask> _autoPreviewTasks = [];
+  // List<PatrolTask> _autoPreviewTasks = [];
 
   @override
   void initState() {
@@ -1377,6 +1381,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
     }
 
     final officer = _autoSelectedOfficer!;
+    // ✅ PERBAIKAN: Hitung siklus lengkap (patroli + istirahat) tapi task hanya durasi patroli
     final totalCycleDuration =
         _autoPatrolDurationMinutes + _autoRestDurationMinutes;
 
@@ -1416,7 +1421,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
         break;
     }
 
-    // Hitung jumlah patroli yang bisa dilakukan
+    // ✅ PERBAIKAN: Hitung jumlah patroli berdasarkan siklus lengkap (patroli + istirahat)
     final shiftDurationMinutes = shiftDurationHours * 60;
     final maxPatrols = (shiftDurationMinutes / totalCycleDuration).floor();
 
@@ -1440,6 +1445,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
     DateTime baseDate = _autoScheduleDate;
 
     for (int i = 0; i < maxPatrols; i++) {
+      // ✅ PERBAIKAN: Hitung start time berdasarkan siklus lengkap
       final minutesFromShiftStart = i * totalCycleDuration;
 
       DateTime taskStartTime;
@@ -1455,8 +1461,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
           0,
         ).add(Duration(minutes: minutesFromShiftStart));
 
-        // PERBAIKAN: End time = start time + patrol duration + rest duration
-        taskEndTime = taskStartTime.add(Duration(minutes: totalCycleDuration));
+        // ✅ PERBAIKAN: End time = start time + HANYA durasi patroli (tanpa istirahat)
+        taskEndTime =
+            taskStartTime.add(Duration(minutes: _autoPatrolDurationMinutes));
 
         // Cek apakah task melewati batas shift
         final shiftEndTime = DateTime(
@@ -1467,8 +1474,12 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
           0,
         );
 
-        if (taskEndTime.isAfter(shiftEndTime)) {
-          print('  - Task ${i + 1} would exceed shift end time, stopping');
+        // ✅ PERBAIKAN: Cek dengan end time setelah ditambah istirahat untuk validasi siklus
+        final nextCycleStartTime =
+            taskStartTime.add(Duration(minutes: totalCycleDuration));
+        if (nextCycleStartTime.isAfter(shiftEndTime)) {
+          print(
+              '  - Task ${i + 1} cycle would exceed shift end time, stopping');
           break;
         }
       } else {
@@ -1481,8 +1492,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
           0,
         ).add(Duration(minutes: minutesFromShiftStart));
 
-        // PERBAIKAN: End time = start time + patrol duration + rest duration
-        taskEndTime = taskStartTime.add(Duration(minutes: totalCycleDuration));
+        // ✅ PERBAIKAN: End time = start time + HANYA durasi patroli (tanpa istirahat)
+        taskEndTime =
+            taskStartTime.add(Duration(minutes: _autoPatrolDurationMinutes));
 
         // Cek apakah task melewati batas shift
         final shiftEndTime = DateTime(
@@ -1493,8 +1505,12 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
           0,
         );
 
-        if (taskEndTime.isAfter(shiftEndTime)) {
-          print('  - Task ${i + 1} would exceed shift end time, stopping');
+        // ✅ PERBAIKAN: Cek dengan end time setelah ditambah istirahat untuk validasi siklus
+        final nextCycleStartTime =
+            taskStartTime.add(Duration(minutes: totalCycleDuration));
+        if (nextCycleStartTime.isAfter(shiftEndTime)) {
+          print(
+              '  - Task ${i + 1} cycle would exceed shift end time, stopping');
           break;
         }
       }
@@ -1507,7 +1523,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
         assignedRoute:
             _autoSelectedPoints.map((p) => [p.latitude, p.longitude]).toList(),
         assignedStartTime: taskStartTime,
-        assignedEndTime: taskEndTime,
+        assignedEndTime: taskEndTime, // ✅ Hanya durasi patroli
         officerName: officer.name,
         clusterName: _autoSelectedClusterName ?? 'Unknown Cluster',
         status: 'assigned',
@@ -1517,11 +1533,16 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
       generatedTasks.add(task);
 
       print(
-          '  - Task ${i + 1}: ${DateFormat('dd/MM/yyyy HH:mm').format(taskStartTime)} - ${DateFormat('dd/MM/yyyy HH:mm').format(taskEndTime)}');
+          '  - Task ${i + 1}: ${DateFormat('dd/MM/yyyy HH:mm').format(taskStartTime)} - ${DateFormat('dd/MM/yyyy HH:mm').format(taskEndTime)} (Patroli: ${_autoPatrolDurationMinutes}min, Istirahat: ${_autoRestDurationMinutes}min)');
     }
 
     setState(() {
       _autoPreviewTasks = generatedTasks;
+      // ✅ TAMBAHAN: Reset selection state dan select all by default
+      _selectedTaskIndices.clear();
+      _selectedTaskIndices
+          .addAll(List.generate(generatedTasks.length, (index) => index));
+      _selectAllTasks = true;
     });
 
     showCustomSnackbar(
@@ -1546,14 +1567,29 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
       return;
     }
 
-    final result = await _showAutoScheduleConfirmationDialog();
+    // ✅ TAMBAHAN: Check if any tasks are selected
+    if (_selectedTaskIndices.isEmpty) {
+      showCustomSnackbar(
+        context: context,
+        title: 'Error',
+        subtitle: 'Silakan pilih minimal satu tugas untuk dibuat.',
+        type: SnackbarType.warning,
+      );
+      return;
+    }
+
+    // ✅ TAMBAHAN: Get only selected tasks
+    final selectedTasks =
+        _selectedTaskIndices.map((index) => _autoPreviewTasks[index]).toList();
+
+    final result = await _showAutoScheduleConfirmationDialog(selectedTasks);
     if (result != true) {
       return;
     }
 
     setState(() {
       _isCreatingAutoSchedule = true;
-      _totalTasksToCreate = _autoPreviewTasks.length;
+      _totalTasksToCreate = selectedTasks.length; // ✅ Use selected tasks count
       _tasksCreated = 0;
     });
 
@@ -1562,9 +1598,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
       _showProgressDialog();
       await Future.delayed(const Duration(milliseconds: 500));
 
-      // PERBAIKAN: Create tasks dengan progress tracking yang lebih akurat
-      for (int i = 0; i < _autoPreviewTasks.length; i++) {
-        final task = _autoPreviewTasks[i];
+      // ✅ PERBAIKAN: Create only selected tasks
+      for (int i = 0; i < selectedTasks.length; i++) {
+        final task = selectedTasks[i];
         final String assignedOfficerId = task.officerId ?? task.userId ?? '';
 
         if (assignedOfficerId.isEmpty) {
@@ -1573,12 +1609,11 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
           continue;
         }
 
-        print(
-            'Creating auto schedule task ${i + 1}/${_autoPreviewTasks.length}:');
+        print('Creating auto schedule task ${i + 1}/${selectedTasks.length}:');
         print(
             '  ${DateFormat('dd/MM/yyyy HH:mm').format(task.assignedStartTime!)} - ${DateFormat('dd/MM/yyyy HH:mm').format(task.assignedEndTime!)}');
 
-        // PERBAIKAN: Update progress SEBELUM API call
+        // Update progress SEBELUM API call
         _updateProgress(i + 1);
 
         try {
@@ -1596,21 +1631,20 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
                 ),
               );
 
-          // PERBAIKAN: Small delay between tasks
           await Future.delayed(const Duration(milliseconds: 200));
         } catch (e) {
           print('Error creating auto schedule task ${i + 1}: $e');
-          // Continue with next task even if this one fails
         }
       }
 
-      // PERBAIKAN: Wait sebentar sebelum close dialog
       await Future.delayed(const Duration(milliseconds: 1500));
       _hideProgressDialog();
 
       setState(() {
         _isCreatingAutoSchedule = false;
         _autoPreviewTasks.clear();
+        _selectedTaskIndices.clear(); // ✅ Clear selection
+        _selectAllTasks = true;
         _autoSelectedClusterId = null;
         _autoSelectedOfficerId = null;
         _autoSelectedOfficer = null;
@@ -1624,7 +1658,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
           context: context,
           title: 'Berhasil',
           subtitle:
-              'Semua jadwal patroli shift berhasil dibuat dan notifikasi terkirim',
+              '${selectedTasks.length} jadwal patroli shift berhasil dibuat dan notifikasi terkirim',
           type: SnackbarType.success,
         );
         Navigator.pop(context);
@@ -1643,7 +1677,9 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
     }
   }
 
-  Future<bool?> _showAutoScheduleConfirmationDialog() async {
+  // ✅ PERBAIKAN: Update confirmation dialog untuk menampilkan only selected tasks
+  Future<bool?> _showAutoScheduleConfirmationDialog(
+      List<PatrolTask> selectedTasks) async {
     return showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -1664,42 +1700,83 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
                     '${_autoSelectedOfficer?.name ?? 'Unknown'} (${getShiftDisplayText(_autoSelectedOfficer?.shift ?? ShiftType.pagi)})'),
                 _infoRow('Tanggal',
                     DateFormat('dd/MM/yyyy').format(_autoScheduleDate)),
-                _infoRow('Jumlah Tugas', _autoPreviewTasks.length.toString()),
-                _infoRow(
-                    'Durasi Patroli', '${_autoPatrolDurationMinutes} menit'),
-                _infoRow(
-                    'Durasi Istirahat', '${_autoRestDurationMinutes} menit'),
-                _infoRow('Total Siklus',
-                    '${_autoPatrolDurationMinutes + _autoRestDurationMinutes} menit'),
+                _infoRow('Total Jadwal yang Dibuat',
+                    '${selectedTasks.length} dari ${_autoPreviewTasks.length} tugas'),
+                _infoRow('Durasi per Sesi Patroli',
+                    '${_autoPatrolDurationMinutes} menit'),
+                _infoRow('Waktu Istirahat antar Sesi',
+                    '${_autoRestDurationMinutes} menit'),
 
                 const SizedBox(height: 16),
-                Text('Preview Jadwal:', style: semiBoldTextStyle()),
+                Text('Jadwal yang Akan Dibuat:', style: semiBoldTextStyle()),
 
-                // Show first 5 tasks as preview
-                ...List.generate(
-                  _autoPreviewTasks.length > 5 ? 5 : _autoPreviewTasks.length,
-                  (index) {
-                    final task = _autoPreviewTasks[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(left: 8.0, top: 4.0),
-                      child: Text(
-                        'Task ${index + 1}: ${DateFormat('dd/MM/yyyy HH:mm').format(task.assignedStartTime!)} - ${DateFormat('dd/MM/yyyy HH:mm').format(task.assignedEndTime!)}',
-                        style: const TextStyle(fontSize: 12),
+                // Show selected tasks preview
+                Container(
+                  constraints: BoxConstraints(maxHeight: 200),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: List.generate(
+                        selectedTasks.length > 8 ? 8 : selectedTasks.length,
+                        (index) {
+                          final task = selectedTasks[index];
+                          final originalIndex =
+                              _autoPreviewTasks.indexOf(task) + 1;
+
+                          return Padding(
+                            padding: const EdgeInsets.only(left: 8.0, top: 4.0),
+                            child: Text(
+                              'Task $originalIndex: ${DateFormat('dd/MM/yyyy HH:mm').format(task.assignedStartTime!)} - ${DateFormat('dd/MM/yyyy HH:mm').format(task.assignedEndTime!)}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
+                    ),
+                  ),
                 ),
 
-                if (_autoPreviewTasks.length > 5) ...[
+                if (selectedTasks.length > 8) ...[
                   Padding(
                     padding: const EdgeInsets.only(left: 8.0, top: 4.0),
                     child: Text(
-                      '... dan ${_autoPreviewTasks.length - 5} tugas lainnya',
+                      '... dan ${selectedTasks.length - 8} tugas lainnya',
                       style: const TextStyle(
                           fontSize: 12, fontStyle: FontStyle.italic),
                     ),
                   ),
                 ],
+
+                // Info box untuk klarifikasi
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: kbpBlue50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: kbpBlue200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Konfirmasi:',
+                        style: semiBoldTextStyle(size: 12, color: kbpBlue700),
+                      ),
+                      Text(
+                        '• ${selectedTasks.length} tugas akan dibuat dari ${_autoPreviewTasks.length} jadwal yang di-generate',
+                        style: regularTextStyle(size: 11, color: kbpBlue600),
+                      ),
+                      Text(
+                        '• Setiap tugas patroli berlangsung ${_autoPatrolDurationMinutes} menit',
+                        style: regularTextStyle(size: 11, color: kbpBlue600),
+                      ),
+                      Text(
+                        '• Waktu istirahat ${_autoRestDurationMinutes} menit akan otomatis terjadwal di antara setiap sesi',
+                        style: regularTextStyle(size: 11, color: kbpBlue600),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -1720,8 +1797,8 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: kbpBlue900,
               ),
-              child: const Text('Ya, Buat Jadwal Shift',
-                  style: TextStyle(color: Colors.white)),
+              child: Text('Ya, Buat ${selectedTasks.length} Jadwal Shift',
+                  style: const TextStyle(color: Colors.white)),
               onPressed: () {
                 Navigator.of(context).pop(true);
               },
@@ -2100,6 +2177,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
             ),
           ],
 
+          // Update info box di _buildAutoScheduleSelectionForm
           if (_autoSelectedOfficer != null) ...[
             const SizedBox(height: 16),
             Container(
@@ -2113,7 +2191,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Info Shift',
+                    'Info Shift dan Jadwal',
                     style: semiBoldTextStyle(size: 12, color: warningY500),
                   ),
                   Text(
@@ -2121,8 +2199,29 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
                     style: regularTextStyle(size: 11, color: warningY500),
                   ),
                   Text(
-                    'Siklus: ${_autoPatrolDurationMinutes + _autoRestDurationMinutes} menit (${_autoPatrolDurationMinutes}min patroli + ${_autoRestDurationMinutes}min istirahat)',
+                    'Durasi patroli per sesi: ${_autoPatrolDurationMinutes} menit',
                     style: regularTextStyle(size: 11, color: warningY500),
+                  ),
+                  Text(
+                    'Waktu istirahat antar sesi: ${_autoRestDurationMinutes} menit',
+                    style: regularTextStyle(size: 11, color: warningY500),
+                  ),
+                  Text(
+                    'Total siklus: ${_autoPatrolDurationMinutes + _autoRestDurationMinutes} menit',
+                    style: regularTextStyle(size: 11, color: warningY500),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: kbpBlue50,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: kbpBlue200),
+                    ),
+                    child: Text(
+                      'Catatan: assignedStartTime sampai assignedEndTime hanya mencakup waktu patroli aktif (${_autoPatrolDurationMinutes} menit). Waktu istirahat otomatis terjadwal di antara setiap sesi.',
+                      style: regularTextStyle(size: 10, color: kbpBlue600),
+                    ),
                   ),
                 ],
               ),
@@ -2133,7 +2232,6 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
     );
   }
 
-  // TAMBAHAN: Widget untuk preview auto schedule
   Widget _buildAutoSchedulePreview() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2149,9 +2247,115 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
             children: [
               Icon(Icons.preview, color: successG500, size: 24),
               const SizedBox(width: 8),
-              Text(
-                'Preview Jadwal Shift (${_autoPreviewTasks.length} tugas)',
-                style: boldTextStyle(size: 16, color: successG500),
+              Expanded(
+                child: Text(
+                  'Preview Jadwal Shift (${_autoPreviewTasks.length} tugas)',
+                  style: boldTextStyle(size: 16, color: successG500),
+                ),
+              ),
+              // ✅ TAMBAHAN: Quick action buttons
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: successG500),
+                onSelected: (value) async {
+                  switch (value) {
+                    case 'select_all':
+                      _toggleSelectAll();
+                      break;
+                    case 'select_morning':
+                      _selectTasksByTimeRange(
+                        TimeOfDay(hour: 6, minute: 0),
+                        TimeOfDay(hour: 12, minute: 0),
+                      );
+                      break;
+                    case 'select_afternoon':
+                      _selectTasksByTimeRange(
+                        TimeOfDay(hour: 12, minute: 0),
+                        TimeOfDay(hour: 18, minute: 0),
+                      );
+                      break;
+                    case 'select_evening':
+                      _selectTasksByTimeRange(
+                        TimeOfDay(hour: 18, minute: 0),
+                        TimeOfDay(hour: 23, minute: 59),
+                      );
+                      break;
+                    case 'select_night':
+                      _selectTasksByTimeRange(
+                        TimeOfDay(hour: 0, minute: 0),
+                        TimeOfDay(hour: 6, minute: 0),
+                      );
+                      break;
+                    case 'select_custom':
+                      await _showCustomTimeRangeSelector();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'select_all',
+                    child: Row(
+                      children: [
+                        Icon(Icons.select_all, size: 20, color: successG300),
+                        SizedBox(width: 8),
+                        Text(_selectAllTasks ? 'Unselect All' : 'Select All'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: 'select_morning',
+                    child: Row(
+                      children: [
+                        Icon(Icons.wb_sunny, size: 20, color: Colors.orange),
+                        SizedBox(width: 8),
+                        Text('Pilih Pagi (06:00-12:00)'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'select_afternoon',
+                    child: Row(
+                      children: [
+                        Icon(Icons.wb_sunny_outlined,
+                            size: 20, color: Colors.amber),
+                        SizedBox(width: 8),
+                        Text('Pilih Siang (12:00-18:00)'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'select_evening',
+                    child: Row(
+                      children: [
+                        Icon(Icons.wb_twilight,
+                            size: 20, color: Colors.deepOrange),
+                        SizedBox(width: 8),
+                        Text('Pilih Sore (18:00-24:00)'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'select_night',
+                    child: Row(
+                      children: [
+                        Icon(Icons.nightlight, size: 20, color: Colors.indigo),
+                        SizedBox(width: 8),
+                        Text('Pilih Malam (00:00-06:00)'),
+                      ],
+                    ),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    value: 'select_custom',
+                    child: Row(
+                      children: [
+                        Icon(Icons.schedule, size: 20, color: kbpBlue600),
+                        SizedBox(width: 8),
+                        Text('Rentang Waktu Custom'),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -2163,21 +2367,132 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
           ),
           const SizedBox(height: 8),
 
-          // Preview tasks (show all)
-          ...List.generate(_autoPreviewTasks.length, (index) {
-            final task = _autoPreviewTasks[index];
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                'Task ${index + 1}: ${DateFormat('dd/MM HH:mm').format(task.assignedStartTime!)} - ${DateFormat('dd/MM HH:mm').format(task.assignedEndTime!)}',
-                style: regularTextStyle(size: 12, color: successG500),
+          // ✅ TAMBAHAN: Master checkbox untuk select all
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+            decoration: BoxDecoration(
+              color: kbpBlue50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: kbpBlue200),
+            ),
+            child: Row(
+              children: [
+                Checkbox(
+                  value: _selectAllTasks,
+                  onChanged: (value) => _toggleSelectAll(),
+                  activeColor: kbpBlue600,
+                ),
+                Text(
+                  'Pilih Semua (${_selectedTaskIndices.length}/${_autoPreviewTasks.length})',
+                  style: semiBoldTextStyle(size: 14, color: kbpBlue700),
+                ),
+                Spacer(),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _selectedTaskIndices.isNotEmpty
+                        ? successG100
+                        : warningY100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${_selectedTaskIndices.length} dipilih',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _selectedTaskIndices.isNotEmpty
+                          ? successG300
+                          : warningY500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // ✅ PERBAIKAN: Preview tasks dengan checkbox individual
+          Container(
+            constraints: BoxConstraints(maxHeight: 300),
+            child: SingleChildScrollView(
+              child: Column(
+                children: List.generate(_autoPreviewTasks.length, (index) {
+                  final task = _autoPreviewTasks[index];
+                  final isSelected = _selectedTaskIndices.contains(index);
+                  final nextTaskStart = index < _autoPreviewTasks.length - 1
+                      ? _autoPreviewTasks[index + 1].assignedStartTime!
+                      : null;
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    decoration: BoxDecoration(
+                      color: isSelected ? kbpBlue50 : Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isSelected ? kbpBlue300 : neutral200,
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: CheckboxListTile(
+                      value: isSelected,
+                      onChanged: (value) => _toggleTaskSelection(index),
+                      activeColor: kbpBlue600,
+                      dense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      title: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Task ${index + 1}: ${DateFormat('dd/MM HH:mm').format(task.assignedStartTime!)} - ${DateFormat('dd/MM HH:mm').format(task.assignedEndTime!)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                              color: isSelected ? kbpBlue700 : successG300,
+                            ),
+                          ),
+                          if (nextTaskStart != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              'Istirahat: ${DateFormat('HH:mm').format(task.assignedEndTime!)} - ${DateFormat('HH:mm').format(nextTaskStart)} (${_autoRestDurationMinutes}min)',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: isSelected ? kbpBlue500 : successG400,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      subtitle: Row(
+                        children: [
+                          Icon(
+                            Icons.access_time,
+                            size: 12,
+                            color: isSelected ? kbpBlue500 : neutral500,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            '${_autoPatrolDurationMinutes}min patroli',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: isSelected ? kbpBlue500 : neutral500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
               ),
-            );
-          }),
+            ),
+          ),
 
           const SizedBox(height: 16),
 
-          // Info box
+          // Info box yang lebih jelas
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -2189,19 +2504,23 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Keterangan',
+                  'Keterangan Jadwal',
                   style: semiBoldTextStyle(size: 12, color: warningY500),
                 ),
                 Text(
-                  '• Waktu istirahat sudah termasuk dalam jadwal patroli',
+                  '• Tugas patroli: ${_autoPatrolDurationMinutes} menit setiap sesi',
                   style: regularTextStyle(size: 11, color: warningY500),
                 ),
                 Text(
-                  '• Total durasi per task: ${_autoPatrolDurationMinutes + _autoRestDurationMinutes} menit',
+                  '• Waktu istirahat: ${_autoRestDurationMinutes} menit antara setiap sesi patroli',
                   style: regularTextStyle(size: 11, color: warningY500),
                 ),
                 Text(
-                  '• Jadwal akan dibuat untuk tanggal ${DateFormat('dd/MM/yyyy').format(_autoScheduleDate)}',
+                  '• assignedStartTime & assignedEndTime hanya mencakup waktu patroli',
+                  style: regularTextStyle(size: 11, color: warningY500),
+                ),
+                Text(
+                  '• Centang tugas yang ingin dibuat, uncheck yang tidak diperlukan',
                   style: regularTextStyle(size: 11, color: warningY500),
                 ),
               ],
@@ -2210,12 +2529,14 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
 
           const SizedBox(height: 16),
 
-          // Create button
+          // Create button dengan info selected count
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
               onPressed:
-                  _isCreatingAutoSchedule ? null : _createAutoScheduleTasks,
+                  (_isCreatingAutoSchedule || _selectedTaskIndices.isEmpty)
+                      ? null
+                      : _createAutoScheduleTasks,
               icon: _isCreatingAutoSchedule
                   ? const SizedBox(
                       width: 18,
@@ -2228,9 +2549,10 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
                   : const Icon(Icons.add_task, color: Colors.white, size: 18),
               label: Text(_isCreatingAutoSchedule
                   ? 'Membuat Jadwal...'
-                  : 'Buat Jadwal Shift'),
+                  : 'Buat ${_selectedTaskIndices.length} Jadwal Terpilih'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: successG500,
+                backgroundColor:
+                    _selectedTaskIndices.isEmpty ? Colors.grey : successG500,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
@@ -2243,6 +2565,191 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
         ],
       ),
     );
+  }
+
+  // ✅ TAMBAHAN: Method untuk custom time range selector
+  Future<void> _showCustomTimeRangeSelector() async {
+    TimeOfDay? startTime;
+    TimeOfDay? endTime;
+
+    final result = await showDialog<Map<String, TimeOfDay>>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                'Pilih Rentang Waktu',
+                style: boldTextStyle(size: 16),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Start Time
+                  ListTile(
+                    title: Text('Waktu Mulai'),
+                    subtitle:
+                        Text(startTime?.format(context) ?? 'Belum dipilih'),
+                    trailing: Icon(Icons.access_time),
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: startTime ?? TimeOfDay.now(),
+                        builder: (BuildContext context, Widget? child) {
+                          return MediaQuery(
+                            data: MediaQuery.of(context).copyWith(
+                              alwaysUse24HourFormat: true,
+                            ),
+                            child: child!,
+                          );
+                        },
+                      );
+                      if (picked != null) {
+                        setDialogState(() {
+                          startTime = picked;
+                        });
+                      }
+                    },
+                  ),
+
+                  // End Time
+                  ListTile(
+                    title: Text('Waktu Selesai'),
+                    subtitle: Text(endTime?.format(context) ?? 'Belum dipilih'),
+                    trailing: Icon(Icons.access_time),
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: endTime ?? TimeOfDay.now(),
+                        builder: (BuildContext context, Widget? child) {
+                          return MediaQuery(
+                            data: MediaQuery.of(context).copyWith(
+                              alwaysUse24HourFormat: true,
+                            ),
+                            child: child!,
+                          );
+                        },
+                      );
+                      if (picked != null) {
+                        setDialogState(() {
+                          endTime = picked;
+                        });
+                      }
+                    },
+                  ),
+
+                  SizedBox(height: 16),
+
+                  // Info text
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: kbpBlue50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: kbpBlue200),
+                    ),
+                    child: Text(
+                      'Tugas yang berada dalam rentang waktu ini akan dipilih secara otomatis.',
+                      style: regularTextStyle(size: 12, color: kbpBlue600),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text('Batal'),
+                ),
+                ElevatedButton(
+                  onPressed: (startTime != null && endTime != null)
+                      ? () {
+                          Navigator.of(context).pop({
+                            'startTime': startTime!,
+                            'endTime': endTime!,
+                          });
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kbpBlue600,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: Text('Terapkan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != null) {
+      _selectTasksByTimeRange(
+        result['startTime']!,
+        result['endTime']!,
+      );
+    }
+  }
+
+  // ✅ TAMBAHAN: Helper methods untuk task selection
+  void _toggleTaskSelection(int index) {
+    setState(() {
+      if (_selectedTaskIndices.contains(index)) {
+        _selectedTaskIndices.remove(index);
+      } else {
+        _selectedTaskIndices.add(index);
+      }
+
+      // Update select all state
+      _selectAllTasks = _selectedTaskIndices.length == _autoPreviewTasks.length;
+    });
+  }
+
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selectAllTasks) {
+        // Unselect all
+        _selectedTaskIndices.clear();
+        _selectAllTasks = false;
+      } else {
+        // Select all
+        _selectedTaskIndices.clear();
+        _selectedTaskIndices
+            .addAll(List.generate(_autoPreviewTasks.length, (index) => index));
+        _selectAllTasks = true;
+      }
+    });
+  }
+
+  void _selectTasksByTimeRange(TimeOfDay startTime, TimeOfDay endTime) {
+    setState(() {
+      _selectedTaskIndices.clear();
+
+      for (int i = 0; i < _autoPreviewTasks.length; i++) {
+        final task = _autoPreviewTasks[i];
+        final taskTime = TimeOfDay.fromDateTime(task.assignedStartTime!);
+
+        // Check if task time is within the specified range
+        if (_isTimeInRange(taskTime, startTime, endTime)) {
+          _selectedTaskIndices.add(i);
+        }
+      }
+
+      _selectAllTasks = _selectedTaskIndices.length == _autoPreviewTasks.length;
+    });
+  }
+
+  bool _isTimeInRange(TimeOfDay time, TimeOfDay start, TimeOfDay end) {
+    final timeMinutes = time.hour * 60 + time.minute;
+    final startMinutes = start.hour * 60 + start.minute;
+    final endMinutes = end.hour * 60 + end.minute;
+
+    if (startMinutes <= endMinutes) {
+      // Normal range (e.g., 09:00 - 17:00)
+      return timeMinutes >= startMinutes && timeMinutes <= endMinutes;
+    } else {
+      // Overnight range (e.g., 23:00 - 07:00)
+      return timeMinutes >= startMinutes || timeMinutes <= endMinutes;
+    }
   }
 
   // Helper method to build the common task form section
@@ -2906,13 +3413,22 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
     }
   }
 
+  // ✅ TAMBAHAN: Method untuk clear selection ketika task di-reset
+  void _clearAutoScheduleSelection() {
+    setState(() {
+      _autoPreviewTasks.clear();
+      _selectedTaskIndices.clear();
+      _selectAllTasks = true;
+    });
+  }
+
+// ✅ Update existing method untuk include selection reset
   @override
   void dispose() {
     _mapController?.dispose();
     _tabController.dispose();
     _progressStreamController.close();
 
-    // TAMBAHAN: Hide progress dialog jika masih tampil
     if (_showingProgressDialog) {
       _hideProgressDialog();
     }
