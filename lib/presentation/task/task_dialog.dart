@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
-import 'package:livetrackingapp/presentation/component/intExtension.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import '../../domain/entities/patrol_task.dart';
 import '../../map_screen.dart';
@@ -68,6 +67,9 @@ class TaskDetailDialog extends StatelessWidget {
             backgroundColor: kbpBlue900,
           ),
           onPressed: () {
+            // Simpan reference ke PatrolBloc sebelum menutup dialog
+            final patrolBloc = context.read<PatrolBloc>();
+            
             Navigator.pop(context); // Close dialog first
             Navigator.push(
               context,
@@ -75,11 +77,11 @@ class TaskDetailDialog extends StatelessWidget {
                 builder: (_) => MapScreen(
                   task: task,
                   onStart: () {
-                    // This will be called from MapScreen when starting patrol
-                    context.read<PatrolBloc>().add(StartPatrol(
-                          task: task,
-                          startTime: DateTime.now(),
-                        ));
+                    // Gunakan reference yang disimpan sebelumnya
+                    patrolBloc.add(StartPatrol(
+                      task: task,
+                      startTime: DateTime.now(),
+                    ));
                   },
                 ),
               ),

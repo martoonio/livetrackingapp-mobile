@@ -708,61 +708,67 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) async {
     try {
-      if (event.task.clusterId.isNotEmpty) {
-        await _loadClusterValidationRadius(event.task.clusterId);
-      }
-
-      Map<String, dynamic> initialRoutePath = {};
-
-      if (_isConnected) {
-        try {
-          final taskSnapshot =
-              await repository.getTaskById(taskId: event.task.taskId);
-          if (taskSnapshot != null && taskSnapshot.routePath != null) {
-            final dbRoutePath =
-                Map<String, dynamic>.from(taskSnapshot.routePath as Map);
-            dbRoutePath.forEach((key, value) {
-              initialRoutePath[key.toString()] = value;
-            });
-          }
-        } catch (e) {}
-      }
-
-      // Jika dari database kosong atau tidak ada koneksi, coba dari event/task object
-      if (initialRoutePath.isEmpty) {
-        if (event.existingRoutePath != null &&
-            event.existingRoutePath!.isNotEmpty) {
-          event.existingRoutePath!.forEach((key, value) {
-            initialRoutePath[key.toString()] = value;
-          });
-        } else if (event.task.routePath != null) {
-          try {
-            final taskRoutePath =
-                Map<String, dynamic>.from(event.task.routePath as Map);
-            taskRoutePath.forEach((key, value) {
-              initialRoutePath[key.toString()] = value;
-            });
-          } catch (e) {}
-        }
-      }
-
+    final currentState = state;
+    if (currentState is! PatrolLoaded) {
       emit(PatrolLoaded(
         task: event.task,
         isPatrolling: true,
-        startTime: event.startTime,
         distance: event.currentDistance,
-        routePath:
-            initialRoutePath, // Menggunakan initialRoutePath yang sudah digabungkan
-        finishedTasks:
-            state is PatrolLoaded ? (state as PatrolLoaded).finishedTasks : [],
-        isOffline: !_isConnected,
+        isOffline: false,
       ));
-
-      _startLocationTracking();
-    } catch (e) {
-      emit(PatrolError('Failed to resume patrol: $e'));
+      return;
     }
+
+    // ✅ SYNC RESUMED STATE TO FIREBASE IMMEDIATELY
+    try {
+      DatabaseReference _firebaseDatabase = FirebaseDatabase.instance.ref();
+      final taskRef = _firebaseDatabase.child('tasks/${event.task.taskId}');
+      
+      final resumeUpdate = {
+        'status': 'ongoing',
+        'startTime': event.startTime.toIso8601String(),
+        'distance': event.currentDistance,
+        'lastUpdated': DateTime.now().toIso8601String(),
+        'resumedAt': DateTime.now().toIso8601String(),
+      };
+
+      // Include route path if available
+      if (event.existingRoutePath!.isNotEmpty) {
+        resumeUpdate['route_path'] = event.existingRoutePath!;
+        print('🔄 Syncing existing route path: ${event.existingRoutePath!.length} points');
+      }
+
+      await taskRef.update(resumeUpdate).timeout(
+        Duration(seconds: 15),
+        onTimeout: () => throw Exception('Resume sync timeout'),
+      );
+      
+      print('✅ Resume state synced to Firebase');
+    } catch (e) {
+      print('❌ Failed to sync resume state to Firebase: $e');
+      // Continue anyway - local state is more important
+    }
+
+    // Update local state
+    final updatedTask = event.task.copyWith(
+      status: 'ongoing',
+      startTime: event.startTime,
+      distance: event.currentDistance,
+      routePath: event.existingRoutePath,
+    );
+
+    emit(currentState.copyWith(
+      task: updatedTask,
+      isPatrolling: true,
+      distance: event.currentDistance,
+    ));
+
+    print('✅ Patrol resumed successfully');
+  } catch (e) {
+    print('❌ Error resuming patrol: $e');
+    emit(PatrolError('Failed to resume patrol: $e'));
   }
+}
 
   Future<void> _onLoadPatrolHistory(
     LoadPatrolHistory event,
@@ -1254,122 +1260,89 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
   }
 
   Future<void> _onStopPatrol(
-    StopPatrol event,
-    Emitter<PatrolState> emit,
-  ) async {
-    if (state is PatrolLoaded) {
-      final currentState = state as PatrolLoaded;
-      try {
-        // TAMBAHAN: Validate task integrity before stopping
-        if (currentState.task?.startTime == null) {
-          // Try to fix first
-          await repository.checkAndFixTaskIntegrity(currentState.task!.taskId);
-
-          // Re-check
-          final updatedTask =
-              await repository.getTaskById(taskId: currentState.task!.taskId);
-          if (updatedTask?.startTime == null) {
-            emit(PatrolError(
-                'Cannot stop patrol: patrol was never started properly. Please start patrol first.'));
-            return;
-          }
-        }
-
-        final actualStartTime = currentState.task!.startTime!;
-
-        // TAMBAHAN: Validate end time
-        if (event.endTime.isBefore(actualStartTime)) {
-          emit(PatrolError('Invalid end time: cannot be before start time'));
-          return;
-        }
-
-        // TAMBAHAN: Check if already finished
-        if (currentState.task!.status == 'finished') {
-          emit(PatrolError('Patrol is already finished'));
-          return;
-        }
-
-        // Rest of existing logic with additional validation...
-        Map<String, dynamic>? existingRoutePathFromDb;
-        if (_isConnected && currentState.task != null) {
-          try {
-            final taskSnapshot =
-                await repository.getTaskById(taskId: currentState.task!.taskId);
-            if (taskSnapshot != null && taskSnapshot.routePath != null) {
-              existingRoutePathFromDb =
-                  Map<String, dynamic>.from(taskSnapshot.routePath as Map);
-            }
-          } catch (e) {
-            print('Error getting existing route path: $e');
-          }
-        }
-
-        Map<String, dynamic> routePathToSave = {
-          ...?existingRoutePathFromDb,
-          ...?currentState.routePath,
-          ...?event.finalRoutePath,
-        };
-
-        // PERBAIKAN: Ensure critical fields in stop update
-        final stopUpdateData = {
-          'endTime': event.endTime.toIso8601String(),
-          'distance': event.distance,
-          'route_path': routePathToSave,
-          'status': 'finished',
-          // TAMBAHAN: Preserve critical start data
-          'startTime': actualStartTime.toIso8601String(),
-          'actualEndTime': event.endTime.toIso8601String(),
-          'finishedFromApp': true,
-        };
-
-        if (_isConnected) {
-          await repository.updateTaskStatus(
-              currentState.task!.taskId, 'finished');
-          await repository.updateTask(
-              currentState.task!.taskId, stopUpdateData);
-        } else {
-          if (_offlineLocationBox != null) {
-            await _offlineLocationBox!
-                .put('patrol_stop_${currentState.task!.taskId}', {
-              'taskId': currentState.task!.taskId,
-              ...stopUpdateData,
-            });
-          }
-        }
-
-        // Emit state update
-        final updatedTask = currentState.task!.copyWith(
-          endTime: event.endTime,
-          distance: event.distance,
-          status: 'finished',
-          routePath: routePathToSave,
-          // actualEndTime: event.endTime,
-        );
-        emit(currentState.copyWith(
-          task: updatedTask,
-          isPatrolling: false,
-          routePath: routePathToSave,
-          distance: event.distance,
-          startTime: actualStartTime,
-          isOffline: !_isConnected,
-        ));
-        _localPatrollingState = false;
-        _localPatrollingTaskId = null;
-        _locationSubscription?.cancel();
-        _timelinessTimer?.cancel();
-        _stateStabilityTimer?.cancel();
-        _locationSubscription = null;
-        _timelinessTimer = null;
-        _stateStabilityTimer = null;
-        print(
-            'Patrol stopped successfully for task ${currentState.task!.taskId} at ${event.endTime.toIso8601String()}');
-        // TAMBAHAN: Check and fix data integrity after stopping
-        await checkAndFixTaskIntegrity(currentState.task!.taskId);
-
-      } catch (e, stackTrace) {
-        print('Error in _onStopPatrol: $e');
-        emit(PatrolError('Failed to stop patrol: $e'));
+      StopPatrol event, Emitter<PatrolState> emit) async {
+    try {
+      final currentState = state;
+      if (currentState is! PatrolLoaded) {
+        return;
       }
+
+      // ✅ PREPARE COMPREHENSIVE FIREBASE UPDATE
+      Map<String, dynamic> firebaseUpdate = {
+        'status': 'finished',
+        'endTime': event.endTime.toIso8601String(),
+        'distance': event.distance,
+        'lastUpdated': DateTime.now().toIso8601String(),
+      };
+
+      // ✅ Include route path if available
+      if (event.finalRoutePath!.isNotEmpty) {
+        Map<String, dynamic> routePathForFirebase = {};
+        event.finalRoutePath!.forEach((key, value) {
+          if (value is Map && value['coordinates'] != null) {
+            routePathForFirebase[key] = {
+              'coordinates': value['coordinates'],
+              'timestamp': value['timestamp'],
+            };
+          }
+        });
+
+        if (routePathForFirebase.isNotEmpty) {
+          firebaseUpdate['route_path'] = routePathForFirebase;
+          print(
+              '🔄 Including route path in Firebase update: ${routePathForFirebase.length} points');
+        }
+      }
+
+      DatabaseReference _firebaseDatabase =
+          FirebaseDatabase.instance.ref();
+
+      // ✅ PERFORM FIREBASE UPDATE WITH RETRY
+      final taskRef =
+          _firebaseDatabase.child('tasks/${currentState.task!.taskId}');
+
+      int retryCount = 0;
+      bool updateSuccess = false;
+
+      while (!updateSuccess && retryCount < 3) {
+        try {
+          print('🔄 Attempting Firebase update (attempt ${retryCount + 1})...');
+          await taskRef.update(firebaseUpdate).timeout(
+                Duration(seconds: 30),
+                onTimeout: () => throw Exception('Firebase update timeout'),
+              );
+          updateSuccess = true;
+          print('✅ Firebase update successful');
+        } catch (e) {
+          retryCount++;
+          print('❌ Firebase update attempt $retryCount failed: $e');
+
+          if (retryCount < 3) {
+            await Future.delayed(Duration(seconds: retryCount * 2));
+          } else {
+            print('❌ All Firebase update attempts failed');
+            // Don't throw - continue with local state update
+          }
+        }
+      }
+
+      // ✅ UPDATE LOCAL STATE REGARDLESS OF FIREBASE SUCCESS
+      final updatedTask = currentState.task!.copyWith(
+        status: 'finished',
+        endTime: event.endTime,
+        distance: event.distance,
+        routePath: event.finalRoutePath,
+      );
+
+      emit(currentState.copyWith(
+        task: updatedTask,
+        isPatrolling: false,
+      ));
+
+      print('✅ Patrol stopped successfully');
+    } catch (e) {
+      print('❌ Error stopping patrol: $e');
+      emit(PatrolError('Failed to stop patrol: $e'));
     }
   }
 

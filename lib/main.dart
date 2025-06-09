@@ -1,6 +1,7 @@
 import 'dart:developer';
 import 'dart:async';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -23,6 +24,8 @@ import 'package:livetrackingapp/main_nav_screen.dart';
 import 'package:livetrackingapp/notification_utils.dart';
 import 'package:livetrackingapp/presentation/admin/admin_bloc.dart';
 import 'package:livetrackingapp/presentation/auth/login_screen.dart';
+import 'package:livetrackingapp/presentation/patrol/services/local_patrol_service.dart';
+import 'package:livetrackingapp/presentation/patrol/services/sync_service.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
 import 'package:livetrackingapp/presentation/survey/bloc/survey_bloc.dart';
@@ -34,6 +37,7 @@ import 'data/repositories/auth_repositoryImpl.dart';
 import 'domain/repositories/auth_repository.dart';
 import 'domain/repositories/route_repository.dart';
 import 'presentation/auth/bloc/auth_bloc.dart';
+import 'presentation/patrol/services/local_patrol_data.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'presentation/component/utils.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -43,6 +47,8 @@ final getIt = GetIt.instance;
 final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+StreamSubscription<dynamic>? _connectivitySubscription;
 
 late Box offlineReportsBox;
 
@@ -315,6 +321,58 @@ Future<void> initializeApp() async {
   await initializeDateFormatting('id_ID', null);
 
   await Hive.initFlutter();
+
+  try {
+    if (!Hive.isAdapterRegistered(0)) {
+      Hive.registerAdapter(LocalPatrolDataAdapter());
+      print('✅ LocalPatrolDataAdapter registered');
+    } else {
+      print('✅ LocalPatrolDataAdapter already registered');
+    }
+  } catch (e) {
+    print('❌ Error registering Hive adapter: $e');
+  }
+
+  // Initialize local patrol service with retry
+  bool serviceInitialized = false;
+  int retryCount = 0;
+
+  while (!serviceInitialized && retryCount < 3) {
+    try {
+      await LocalPatrolService.init();
+      serviceInitialized = true;
+      print('✅ LocalPatrolService initialized successfully');
+    } catch (e) {
+      retryCount++;
+      print('❌ LocalPatrolService init attempt $retryCount failed: $e');
+
+      if (retryCount < 3) {
+        await Future.delayed(Duration(seconds: 1));
+      } else {
+        print('⚠️ LocalPatrolService failed to initialize after 3 attempts');
+        // Continue without local patrol service - app should still work
+      }
+    }
+  }
+
+  // Initialize offline reports box
+  try {
+    offlineReportsBox = await Hive.openBox('offline_reports');
+    print('✅ Offline reports box opened');
+  } catch (e) {
+    print('❌ Error opening offline reports box: $e');
+    // Try with a backup name
+    try {
+      offlineReportsBox = await Hive.openBox('offline_reports_backup');
+      print('✅ Offline reports backup box opened');
+    } catch (backupError) {
+      print('❌ Failed to open backup box: $backupError');
+      throw Exception('Failed to initialize offline storage');
+    }
+  }
+
+  // Initialize local patrol service
+  await LocalPatrolService.init();
   offlineReportsBox = await Hive.openBox('offline_reports');
 
   if (FirebaseAuth.instance.currentUser != null) {
@@ -331,6 +389,30 @@ Future<void> initializeApp() async {
   // Initialize battery monitoring with delay to ensure all plugins are ready
   Future.delayed(const Duration(seconds: 3), () {
     BatteryService.initializeBatteryMonitoring();
+  });
+}
+
+Timer? _periodicSyncTimer;
+
+void _startPeriodicSync() {
+  _periodicSyncTimer = Timer.periodic(Duration(minutes: 2), (timer) async {
+    try {
+      final connectivity = await Connectivity().checkConnectivity();
+      if (connectivity != ConnectivityResult.none) {
+        final stats = LocalPatrolService.getStatistics();
+        if (stats['unsynced']! > 0) {
+          print('🔄 Periodic sync: ${stats['unsynced']} unsynced patrols');
+          await SyncService.syncUnsyncedPatrols();
+
+          // Log results
+          final newStats = LocalPatrolService.getStatistics();
+          print(
+              '📊 Post-periodic sync: ${newStats['unsynced']} unsynced patrols remaining');
+        }
+      }
+    } catch (e) {
+      print('❌ Periodic sync error: $e');
+    }
   });
 }
 
@@ -405,6 +487,47 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         BatteryService.dispose();
       }
     });
+
+    _initConnectivityListener();
+
+    _performInitialSync();
+    _startPeriodicSync();
+  }
+
+  Future<void> _performInitialSync() async {
+    await Future.delayed(Duration(seconds: 2)); // Wait for app to stabilize
+
+    final connectivity = await Connectivity().checkConnectivity();
+    if (connectivity != ConnectivityResult.none) {
+      final stats = LocalPatrolService.getStatistics();
+      if (stats['unsynced']! > 0) {
+        print('📱 Found ${stats['unsynced']} unsynced patrols on app start');
+        SyncService.syncUnsyncedPatrols();
+      }
+    }
+  }
+
+  ConnectivityResult _previousConnectivity = ConnectivityResult.none;
+
+  void _handleConnectivityChange(ConnectivityResult result) {
+    // If we just got back online
+    if (_previousConnectivity == ConnectivityResult.none &&
+        result != ConnectivityResult.none) {
+      print('🌐 Internet connection restored');
+      SyncService.onConnectivityRestored();
+    }
+
+    _previousConnectivity = result;
+  }
+
+  void _initConnectivityListener() {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
+      (List<ConnectivityResult> results) {
+        Future.delayed(Duration(seconds: 2), () {
+          SyncService.onConnectivityRestored();
+        });
+      },
+    );
   }
 
   @override
@@ -421,6 +544,17 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
     if (state == AppLifecycleState.resumed) {
       log('App resumed, checking for pending notifications');
+      Future.delayed(Duration(seconds: 1), () async {
+        try {
+          final connectivity = await Connectivity().checkConnectivity();
+          if (connectivity != ConnectivityResult.none) {
+            print('📱 App resumed, performing immediate sync...');
+            await SyncService.syncUnsyncedPatrols();
+          }
+        } catch (e) {
+          print('❌ Resume sync error: $e');
+        }
+      });
 
       // Restart battery monitoring when app resumes with delay
       Future.delayed(const Duration(seconds: 1), () {
@@ -451,9 +585,24 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         }
 
         _syncOfflineReports(context);
+        if (state == AppLifecycleState.resumed) {
+          print('📱 App resumed, checking for sync');
+          _performInitialSync();
+        }
       });
     } else if (state == AppLifecycleState.paused) {
       log('App paused, battery monitoring continues in background');
+      Future.delayed(Duration(milliseconds: 500), () async {
+        try {
+          final connectivity = await Connectivity().checkConnectivity();
+          if (connectivity != ConnectivityResult.none) {
+            print('📱 App pausing, performing final sync...');
+            await SyncService.syncUnsyncedPatrols();
+          }
+        } catch (e) {
+          print('❌ Pause sync error: $e');
+        }
+      });
     } else if (state == AppLifecycleState.detached) {
       // App is being terminated, dispose battery monitoring
       BatteryService.dispose();

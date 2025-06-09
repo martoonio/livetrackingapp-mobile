@@ -11,6 +11,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:livetrackingapp/domain/entities/report.dart';
 import 'package:livetrackingapp/patrol_summary_screen.dart';
+import 'package:livetrackingapp/presentation/patrol/services/local_patrol_data.dart';
+import 'package:livetrackingapp/presentation/patrol/services/local_patrol_service.dart';
+import 'package:livetrackingapp/presentation/patrol/services/sync_service.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_state.dart';
@@ -70,6 +73,9 @@ class _MapScreenState extends State<MapScreen> {
   final Set<Polyline> _polylines = {};
   final List<LatLng> _routePoints = [];
 
+  bool _isRecoveringFromLocal = false;
+  LocalPatrolData? _localPatrolData;
+
   bool isWakeLockEnabled = false;
 
   // Warna untuk polyline
@@ -90,6 +96,153 @@ class _MapScreenState extends State<MapScreen> {
         }
       });
     });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeAppWithLocalRecovery();
+  }
+
+  Future<void> _initializeAppWithLocalRecovery() async {
+    if (_isInitializing) return;
+    _isInitializing = true;
+
+    final task = widget.task;
+    print('🚀 Initializing app with local recovery for task: ${task.taskId}');
+
+    // 1. Check for local patrol data first
+    _localPatrolData = LocalPatrolService.getPatrolData(task.taskId);
+
+    if (_localPatrolData != null) {
+      print('📱 Found local patrol data: ${_localPatrolData!.status}');
+      await _recoverFromLocalData();
+    }
+
+    // 2. Continue with normal initialization
+    await _initializeApp();
+
+    _isInitializing = false;
+  }
+
+  Future<void> _recoverFromLocalData() async {
+    if (_localPatrolData == null) return;
+
+    setState(() {
+      _isRecoveringFromLocal = true;
+    });
+
+    try {
+      final localData = _localPatrolData!;
+
+      // Restore basic state
+      if (localData.status == 'started' || localData.status == 'ongoing') {
+        setState(() {
+          _localIsPatrolling = true;
+          _localPatrollingTaskId = localData.taskId;
+          _totalDistance = localData.distance;
+          _elapsedTime = Duration(seconds: localData.elapsedTimeSeconds);
+
+          // Restore route points
+          _routePoints.clear();
+          if (localData.routePath.isNotEmpty) {
+            final sortedEntries = localData.routePath.entries.toList()
+              ..sort((a, b) => a.value['timestamp']
+                  .toString()
+                  .compareTo(b.value['timestamp'].toString()));
+
+            for (var entry in sortedEntries) {
+              final coordinates = entry.value['coordinates'] as List;
+              _routePoints.add(LatLng(
+                (coordinates[0] as num).toDouble(),
+                (coordinates[1] as num).toDouble(),
+              ));
+            }
+
+            // Update polyline
+            if (_routePoints.isNotEmpty) {
+              _polylines.clear();
+              _polylines.add(
+                Polyline(
+                  polylineId: const PolylineId('patrol_route'),
+                  points: _routePoints,
+                  color: _polylineColor,
+                  width: 5,
+                ),
+              );
+            }
+          }
+        });
+
+        // Start systems if patrol was ongoing
+        if (localData.status == 'ongoing') {
+          _startPatrolTimer();
+          _startLocationTracking();
+        }
+
+        // ✅ FORCE SYNC RECOVERED DATA TO FIREBASE IMMEDIATELY
+        Future.delayed(Duration(seconds: 2), () async {
+          try {
+            print('🔄 Force syncing recovered patrol data to Firebase...');
+
+            // Check internet connection first
+            final connectivityResult = await Connectivity().checkConnectivity();
+            if (connectivityResult != ConnectivityResult.none) {
+              final syncSuccess =
+                  await SyncService.forceSyncPatrol(localData.taskId);
+
+              if (syncSuccess) {
+                print(
+                    '✅ Recovered patrol data synced to Firebase successfully');
+
+                // ✅ ALSO UPDATE FIREBASE BLOC STATE TO MATCH LOCAL DATA
+                if (mounted) {
+                  try {
+                    // Update Firebase with current local state
+                    context.read<PatrolBloc>().add(ResumePatrol(
+                          task: widget.task,
+                          startTime: DateTime.parse(localData.startTime!),
+                          currentDistance: localData.distance,
+                          existingRoutePath: localData.routePath,
+                        ));
+
+                    print('✅ Firebase BLoC state updated with recovered data');
+                  } catch (e) {
+                    print('❌ Failed to update Firebase BLoC: $e');
+                  }
+                }
+              } else {
+                print('⚠️ Failed to sync recovered data, will retry later');
+              }
+            } else {
+              print(
+                  '⚠️ No internet connection, sync will retry when connection restored');
+            }
+          } catch (e) {
+            print('❌ Error syncing recovered data: $e');
+          }
+        });
+
+        showCustomSnackbar(
+          context: context,
+          title: 'Patroli Dipulihkan',
+          subtitle: 'Data patroli lokal berhasil dipulihkan dan disinkronisasi',
+          type: SnackbarType.success,
+        );
+      }
+    } catch (e) {
+      print('❌ Error recovering from local data: $e');
+      showCustomSnackbar(
+        context: context,
+        title: 'Gagal Memulihkan Data',
+        subtitle: 'Terjadi error saat memulihkan data lokal',
+        type: SnackbarType.warning,
+      );
+    } finally {
+      setState(() {
+        _isRecoveringFromLocal = false;
+      });
+    }
   }
 
   void _resetLongPressAnimation() {
@@ -196,12 +349,6 @@ class _MapScreenState extends State<MapScreen> {
     } else {
       return '${timeDifference.inMinutes} menit lagi';
     }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeApp();
   }
 
   // ✅ Centralized initialization method
@@ -623,23 +770,11 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _startLocationTracking() {
+  void _startLocationTracking() async {
     String timeNow = DateTime.now().toIso8601String();
     print('🚀 Starting location tracking at: $timeNow');
 
-    // Cancel any existing subscription
     _positionStreamSubscription?.cancel();
-
-    // Preserve existing route points if applicable
-    final isResuming = widget.task.status == 'ongoing' && _routePoints.isEmpty;
-    if (isResuming && widget.task.routePath != null) {
-      // Route points will be loaded by _displaySavedRoute
-    } else if (!isResuming) {
-      setState(() {
-        _routePoints.clear();
-        _polylines.clear();
-      });
-    }
 
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
@@ -649,116 +784,7 @@ class _MapScreenState extends State<MapScreen> {
     ).listen(
       (Position position) async {
         if (mounted) {
-          // Log lokasi untuk debugging
-
-          // Check for mock location
-          final isMocked = await LocationValidator.isLocationMocked(position);
-
-          if (isMocked) {
-            // TAMBAHAN: Log langsung ke Firebase tanpa melalui bloc
-            try {
-              // Ambil state untuk cek apakah sedang patroli
-              final state = context.read<PatrolBloc>().state;
-              final isPatrollingInBloc =
-                  state is PatrolLoaded && state.isPatrolling;
-              final isPatrollingInTask = widget.task.status == 'ongoing' ||
-                  widget.task.status == 'in_progress';
-              final isPatrolActive = isPatrollingInBloc ||
-                  isPatrollingInTask ||
-                  _localIsPatrolling;
-              if (isPatrolActive) {
-                // Ambil mockCount dari bloc atau gunakan nilai default
-                int mockCount = 1;
-                if (state is PatrolLoaded) {
-                  mockCount = state.mockLocationCount + 1;
-                }
-
-                // Siapkan data mock location
-                final mockData = {
-                  'timestamp': DateTime.now().toIso8601String(),
-                  'coordinates': [position.latitude, position.longitude],
-                  'accuracy': position.accuracy,
-                  'speed': position.speed,
-                  'altitude': position.altitude,
-                  'heading': position.heading,
-                  'count': mockCount,
-                  // 'deviceInfo': await getDeviceInfo(), // Dihapus karena tidak ada di file ini
-                };
-
-                // 1. Update flag pada task
-                final taskRef = FirebaseDatabase.instance
-                    .ref()
-                    .child('tasks/${widget.task.taskId}');
-                await taskRef.update({
-                  'mockLocationDetected': true,
-                  'mockLocationCount': mockCount,
-                  'lastMockDetection': mockData['timestamp'],
-                });
-
-                // 2. Catat detail percobaan ke node khusus di database
-                await taskRef.child('mock_detections').push().set(mockData);
-
-                // 3. Simpan juga di koleksi terpisah untuk analisis
-                await FirebaseDatabase.instance
-                    .ref()
-                    .child('mock_location_logs')
-                    .push()
-                    .set({
-                  ...mockData,
-                  'taskId': widget.task.taskId,
-                  'userId': widget.task.userId,
-                  'detectionTime': ServerValue.timestamp,
-                });
-
-                // 4. Update mockCount dalam state bloc supaya UI terupdate
-                context
-                    .read<PatrolBloc>()
-                    .add(UpdateMockCount(mockCount: mockCount));
-
-                // --- FITUR BARU: KIRIM NOTIFIKASI MOCK LOCATION KE COMMAND CENTER ---
-                if (widget.task.officerName.isNotEmpty &&
-                    widget.task.clusterName.isNotEmpty) {
-                  await sendMockLocationNotificationToCommandCenter(
-                    patrolTaskId: widget.task.taskId,
-                    officerId: widget.task.userId,
-                    officerName: widget.task.officerName,
-                    clusterName: widget.task.clusterName,
-                    latitude: position.latitude,
-                    longitude: position.longitude,
-                  );
-                }
-                // --- AKHIR FITUR BARU ---
-              }
-            } catch (e) {}
-
-            // Tampilkan peringatan di UI
-            setState(() {
-              _mockLocationDetected = true;
-            });
-
-            // Tampilkan snackbar jika belum ditampilkan
-            if (!_snackbarShown) {
-              _snackbarShown = true;
-              showCustomSnackbar(
-                context: context,
-                title: 'Fake GPS Terdeteksi!',
-                subtitle:
-                    'Penggunaan fake GPS tidak diperbolehkan dan akan dilaporkan',
-                type: SnackbarType.danger,
-              );
-
-              // Reset flag setelah beberapa detik
-              Future.delayed(Duration(seconds: 6), () {
-                _snackbarShown = false;
-              });
-            }
-          } else if (_mockLocationDetected) {
-            // Reset mock flag jika sudah tidak terdeteksi lagi
-            setState(() {
-              _mockLocationDetected = false;
-            });
-          }
-
+          // Update UI state
           setState(() {
             userCurrentLocation = position;
             if (mapController != null) {
@@ -766,69 +792,192 @@ class _MapScreenState extends State<MapScreen> {
             }
           });
 
-          // Check both local state and bloc state
-          final state = context.read<PatrolBloc>().state;
-          final isPatrollingInBloc =
-              state is PatrolLoaded && state.isPatrolling;
-          final isPatrollingInTask = widget.task.status == 'ongoing' ||
-              widget.task.status == 'in_progress';
-          final isPatrolActive = isPatrollingInBloc || isPatrollingInTask;
           final actuallyPatrolling = _isCurrentlyPatrolling();
 
           if (actuallyPatrolling) {
-            // IMPORTANT: This is where we send location updates to bloc
             final timestamp = DateTime.now();
-            context.read<PatrolBloc>().add(UpdatePatrolLocation(
-                  position: position,
-                  timestamp: timestamp,
-                ));
 
-            // For local UI updates
+            // Update distance and route locally
             _updateDistance(position);
             _updatePolyline(position);
-          } else {}
+
+            // Save to local storage
+            await LocalPatrolService.updatePatrolLocation(
+              taskId: widget.task.taskId,
+              position: position,
+              timestamp: timestamp,
+              totalDistance: _totalDistance,
+              elapsedSeconds: _elapsedTime.inSeconds,
+            );
+
+            // Try to update Firebase (don't block if it fails)
+            try {
+              context.read<PatrolBloc>().add(UpdatePatrolLocation(
+                    position: position,
+                    timestamp: timestamp,
+                  ));
+            } catch (e) {
+              print('❌ Failed to update Firebase location: $e');
+              // Continue with local tracking
+            }
+
+            // Handle mock location detection
+            final isMocked = await LocationValidator.isLocationMocked(position);
+            if (isMocked) {
+              await _handleMockLocationDetection(position);
+            }
+          }
         }
       },
-      onError: (error) {},
+      onError: (error) {
+        print('❌ Location stream error: $error');
+      },
     );
+  }
+
+  Future<void> _handleMockLocationDetection(Position position) async {
+    try {
+      final localData = LocalPatrolService.getPatrolData(widget.task.taskId);
+      final newCount = (localData?.mockLocationCount ?? 0) + 1;
+
+      // Update local storage
+      await LocalPatrolService.updateMockLocationDetection(
+        taskId: widget.task.taskId,
+        detected: true,
+        count: newCount,
+      );
+
+      // Update UI
+      setState(() {
+        _mockLocationDetected = true;
+      });
+
+      // Try to update Firebase
+      try {
+        final mockData = {
+          'timestamp': DateTime.now().toIso8601String(),
+          'coordinates': [position.latitude, position.longitude],
+          'accuracy': position.accuracy,
+          'count': newCount,
+        };
+
+        final taskRef = FirebaseDatabase.instance
+            .ref()
+            .child('tasks/${widget.task.taskId}');
+
+        await taskRef.update({
+          'mockLocationDetected': true,
+          'mockLocationCount': newCount,
+          'lastMockDetection': mockData['timestamp'],
+        });
+
+        await taskRef.child('mock_detections').push().set(mockData);
+      } catch (e) {
+        print('❌ Failed to update mock location in Firebase: $e');
+      }
+
+      // Show warning to user
+      if (!_snackbarShown) {
+        _snackbarShown = true;
+        showCustomSnackbar(
+          context: context,
+          title: 'Fake GPS Terdeteksi!',
+          subtitle:
+              'Penggunaan fake GPS tidak diperbolehkan dan akan dilaporkan',
+          type: SnackbarType.danger,
+        );
+
+        Future.delayed(Duration(seconds: 6), () {
+          _snackbarShown = false;
+        });
+      }
+    } catch (e) {
+      print('❌ Error handling mock location: $e');
+    }
   }
 
   void _startPatrol(BuildContext context) async {
     final startTime = DateTime.now();
 
-    setState(() {
-      _localIsPatrolling = true;
-      _localPatrollingTaskId = widget.task.taskId;
-    });
+    print('🚀 Starting patrol for task: ${widget.task.taskId}');
 
-    // Update task status
-    context.read<PatrolBloc>().add(UpdateTask(
-          taskId: widget.task.taskId,
-          updates: {
-            'status': 'ongoing',
-            'startTime': startTime.toIso8601String(),
-          },
-        ));
+    try {
+      // ✅ 1. UPDATE LOCAL STATE IMMEDIATELY (sudah dilakukan di dialog)
+      // Pastikan state sudah diset
+      if (!_localIsPatrolling) {
+        setState(() {
+          _localIsPatrolling = true;
+          _localPatrollingTaskId = widget.task.taskId;
+        });
+      }
 
-    // Start patrol
-    context.read<PatrolBloc>().add(
-          StartPatrol(
-            task: widget.task,
-            startTime: startTime,
-          ),
+      // ✅ 2. START LOCAL SYSTEMS IMMEDIATELY
+      await Future.delayed(
+          const Duration(milliseconds: 100)); // Small delay for UI stability
+      _startPatrolTimer();
+      _elapsedTime = Duration.zero;
+      _totalDistance = 0;
+      _lastPosition = null;
+      _startLocationTracking();
+      widget.onStart();
+
+      // ✅ 3. UPDATE FIREBASE ASYNC (NON-BLOCKING)
+      try {
+        // Update task status in Firebase
+        context.read<PatrolBloc>().add(UpdateTask(
+              taskId: widget.task.taskId,
+              updates: {
+                'status': 'ongoing',
+                'startTime': startTime.toIso8601String(),
+              },
+            ));
+
+        // Start patrol in bloc
+        context.read<PatrolBloc>().add(
+              StartPatrol(
+                task: widget.task,
+                startTime: startTime,
+              ),
+            );
+
+        // Update local status to ongoing
+        await LocalPatrolService.updatePatrolToOngoing(widget.task.taskId);
+
+        print('✅ Patrol started in Firebase successfully');
+      } catch (firebaseError) {
+        print('❌ Error starting patrol in Firebase: $firebaseError');
+        // Show warning but don't stop patrol
+        if (mounted) {
+          showCustomSnackbar(
+            context: context,
+            title: 'Peringatan',
+            subtitle:
+                'Patroli berjalan offline, data akan disinkronisasi nanti',
+            type: SnackbarType.warning,
+          );
+        }
+      }
+    } catch (e) {
+      print('❌ Critical error in _startPatrol: $e');
+
+      // Rollback on critical error
+      if (mounted) {
+        setState(() {
+          _localIsPatrolling = false;
+          _localPatrollingTaskId = null;
+        });
+
+        _patrolTimer?.cancel();
+        _positionStreamSubscription?.cancel();
+
+        showCustomSnackbar(
+          context: context,
+          title: 'Gagal memulai patroli',
+          subtitle: 'Terjadi kesalahan sistem: $e',
+          type: SnackbarType.danger,
         );
-
-    await Future.delayed(
-      const Duration(milliseconds: 200),
-    ); // Delay to ensure state is set
-
-    _startPatrolTimer(); // Start timer
-    _elapsedTime = Duration.zero; // Reset timer
-    _totalDistance = 0; // Reset distance
-    _lastPosition = null;
-    _startLocationTracking(); // Start location tracking
-
-    widget.onStart();
+      }
+    }
   }
 
   void _handlePatrolButtonPress(BuildContext context, PatrolState state) async {
@@ -837,7 +986,19 @@ class _MapScreenState extends State<MapScreen> {
     final isPatrollingInBloc = state is PatrolLoaded && state.isPatrolling;
     final isPatrollingInTask =
         widget.task.status == 'ongoing' || widget.task.status == 'in_progress';
-    final isPatrolActive = isPatrollingInBloc || isPatrollingInTask;
+    final isPatrolActive =
+        isPatrollingInBloc || isPatrollingInTask || _localIsPatrolling;
+
+    // 🔍 DEBUG: Compare different state detection methods
+    final isPatrollingViaFunction = _isCurrentlyPatrolling();
+
+    print('🔍 PATROL STATE DEBUG:');
+    print('   - BLoC state: $isPatrollingInBloc');
+    print('   - Task status: $isPatrollingInTask (${widget.task.status})');
+    print('   - Local state: $_localIsPatrolling');
+    print('   - isPatrolActive (old logic): $isPatrolActive');
+    print('   - _isCurrentlyPatrolling(): $isPatrollingViaFunction');
+    print('   - Connectivity: ${isOffline ? "OFFLINE" : "ONLINE"}');
 
     if (isOffline && !isPatrolActive) {
       showCustomSnackbar(
@@ -862,7 +1023,7 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
 
-    if (isPatrolActive) {
+    if (_isCurrentlyPatrolling()) {
       if (state is PatrolLoaded) {
         await _stopPatrol(context, state);
       } else {
@@ -1068,9 +1229,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
 // Tambahkan metode untuk menampilkan dialog laporan awal
-  Future<bool> _showInitialReportDialog(
-    BuildContext context,
-  ) async {
+  Future<bool> _showInitialReportDialog(BuildContext context) async {
     File? capturedImage;
     final noteController = TextEditingController();
     bool isSubmitting = false;
@@ -1097,18 +1256,14 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                     actions: [
                       TextButton(
-                        onPressed: () {
-                          Navigator.pop(context, false);
-                        },
+                        onPressed: () => Navigator.pop(context, false),
                         child: Text(
                           'Tidak',
                           style: mediumTextStyle(color: kbpBlue900),
                         ),
                       ),
                       ElevatedButton(
-                        onPressed: () {
-                          Navigator.pop(context, true);
-                        },
+                        onPressed: () => Navigator.pop(context, true),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: kbpBlue900,
                         ),
@@ -1120,7 +1275,6 @@ class _MapScreenState extends State<MapScreen> {
                     ],
                   ),
                 );
-
                 return exitConfirmed;
               },
               child: Dialog(
@@ -1340,107 +1494,188 @@ class _MapScreenState extends State<MapScreen> {
                           Expanded(
                             child: ElevatedButton(
                               onPressed: isSubmitting || capturedImage == null
-                                  ? null // Disable jika belum ada foto atau sedang submit
+                                  ? null
                                   : () async {
                                       setState(() {
                                         isSubmitting = true;
                                       });
 
                                       try {
-                                        // Upload foto ke Firebase Storage
-                                        final fileName =
-                                            'initial_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-                                        // Simpan referensi context dialog untuk digunakan nanti
-                                        final currentDialogContext =
-                                            dialogContext;
-
-                                        // Upload foto ke Firebase Storage menggunakan fungsi yang sudah diperbaiki
-                                        final photoUrl =
-                                            await _uploadPhotoToFirebase(
-                                                capturedImage!, fileName);
-
+                                        // ✅ 1. SET STATE PATROLI DIMULAI DULU SEBELUM UPLOAD
+                                        // Ini untuk memastikan button UI berubah ke "stop" meskipun upload gagal
                                         if (mounted) {
-                                          setState(() {
-                                            initialReportPhotoUrl = photoUrl;
-                                            isSubmitting = false;
+                                          this.setState(() {
                                             _localIsPatrolling = true;
                                             _localPatrollingTaskId =
                                                 widget.task.taskId;
                                           });
                                         }
 
-                                        // Set result ke true untuk menandakan dialog berhasil
-                                        result = true;
+                                        // ✅ 2. SAVE TO LOCAL STORAGE IMMEDIATELY
+                                        await LocalPatrolService
+                                            .savePatrolStart(
+                                          taskId: widget.task.taskId,
+                                          userId: widget.task.userId,
+                                          startTime: DateTime.now(),
+                                          initialPhotoUrl:
+                                              null, // Set null dulu, akan diupdate setelah upload
+                                        );
 
-                                        // Tutup dialog laporan akhir
-                                        if (Navigator.canPop(
-                                            currentDialogContext)) {
-                                          Navigator.pop(
-                                              currentDialogContext, true);
+                                        // ✅ 3. MULAI PATROLI SYSTEMS DULU
+                                        // Jangan tunggu upload foto selesai
+                                        if (mounted) {
+                                          _startPatrol(context);
                                         }
 
-                                        // Beri jeda singkat untuk memastikan dialog tertutup
-                                        await Future.delayed(
-                                            const Duration(milliseconds: 100));
+                                        String? uploadedPhotoUrl;
 
-                                        if (mounted) {
-                                          // Update task dengan data laporan awal
-                                          context
-                                              .read<PatrolBloc>()
-                                              .add(SubmitInitialReport(
-                                                photoUrl:
-                                                    initialReportPhotoUrl!,
-                                                note: noteController.text,
-                                                reportTime: DateTime.now(),
-                                              ));
+                                        // ✅ 4. UPLOAD FOTO (ASYNC, TIDAK MENGHALANGI PATROLI)
+                                        try {
+                                          final fileName =
+                                              'initial_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                                          uploadedPhotoUrl =
+                                              await _uploadPhotoToFirebase(
+                                                  capturedImage!, fileName);
 
-                                          await Future.delayed(const Duration(
-                                              milliseconds: 500));
+                                          // Update local storage dengan URL foto
+                                          final localData =
+                                              LocalPatrolService.getPatrolData(
+                                                  widget.task.taskId);
+                                          if (localData != null) {
+                                            localData.initialReportPhotoUrl =
+                                                uploadedPhotoUrl;
+                                            await localData.save();
+                                          }
 
-                                          final patrolState =
-                                              context.read<PatrolBloc>().state;
-
-                                          if (mounted &&
-                                              patrolState is PatrolLoaded &&
-                                              patrolState.task
-                                                      ?.initialReportPhotoUrl !=
-                                                  null) {
-                                            _startPatrol(
-                                                context); // Panggil _startPatrol hanya setelah laporan awal disubmit dan state terupdate
-                                            showCustomSnackbar(
-                                              context: context,
-                                              title: 'Laporan awal berhasil',
-                                              subtitle:
-                                                  'Patroli akan segera dimulai',
-                                              type: SnackbarType.success,
-                                            );
-
-                                            Future.delayed(Duration(seconds: 5),
-                                                () {
-                                              if (mounted) {
-                                                setState(() {
-                                                  _localIsPatrolling = false;
-                                                  _localPatrollingTaskId = null;
-                                                });
-                                              }
+                                          if (mounted) {
+                                            setState(() {
+                                              initialReportPhotoUrl =
+                                                  uploadedPhotoUrl;
                                             });
-                                          } else {
-                                            // Jika ada masalah update state, tangani di sini (misal: tampilkan error)
-                                            showCustomSnackbar(
-                                              context: context,
-                                              title: 'Gagal Memulai Patroli',
-                                              subtitle:
-                                                  'Terjadi masalah saat menyiapkan laporan awal. Coba lagi.',
-                                              type: SnackbarType.danger,
-                                            );
+                                          }
+
+                                          print(
+                                              '✅ Initial report photo uploaded successfully: $uploadedPhotoUrl');
+                                        } catch (uploadError) {
+                                          print(
+                                              '❌ Failed to upload initial photo: $uploadError');
+                                          // Patroli tetap lanjut meskipun upload foto gagal
+
+                                          // Simpan foto ke local storage untuk diupload nanti
+                                          try {
+                                            final directory = Directory(
+                                                '${(await getApplicationDocumentsDirectory()).path}/pending_uploads');
+                                            if (!await directory.exists()) {
+                                              await directory.create(
+                                                  recursive: true);
+                                            }
+
+                                            final localPhotoPath =
+                                                '${directory.path}/initial_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                                            await capturedImage!
+                                                .copy(localPhotoPath);
+
+                                            // Update local storage dengan path lokal
+                                            final localData = LocalPatrolService
+                                                .getPatrolData(
+                                                    widget.task.taskId);
+                                            if (localData != null) {
+                                              localData.initialReportPhotoUrl =
+                                                  localPhotoPath; // Simpan path lokal
+                                              await localData.save();
+                                            }
+
+                                            print(
+                                                '📱 Initial photo saved locally: $localPhotoPath');
+                                          } catch (localSaveError) {
+                                            print(
+                                                '❌ Failed to save photo locally: $localSaveError');
                                           }
                                         }
+
+                                        // ✅ 5. SUBMIT INITIAL REPORT TO FIREBASE (JIKA ADA FOTO)
+                                        if (uploadedPhotoUrl != null) {
+                                          try {
+                                            context
+                                                .read<PatrolBloc>()
+                                                .add(SubmitInitialReport(
+                                                  photoUrl: uploadedPhotoUrl,
+                                                  note: noteController.text
+                                                      .trim(),
+                                                  reportTime: DateTime.now(),
+                                                ));
+                                            print(
+                                                '✅ Initial report submitted to Firebase');
+                                          } catch (e) {
+                                            print(
+                                                '❌ Failed to submit initial report to Firebase: $e');
+                                          }
+                                        }
+
+                                        if (mounted) {
+                                          setState(() {
+                                            isSubmitting = false;
+                                          });
+                                        }
+
+                                        result = true;
+
+                                        // ✅ 6. CLOSE DIALOG
+                                        if (Navigator.canPop(context)) {
+                                          Navigator.pop(context, true);
+                                        }
+
+                                        // ✅ 7. SHOW SUCCESS MESSAGE
+                                        if (mounted) {
+                                          showCustomSnackbar(
+                                            context: context,
+                                            title: uploadedPhotoUrl != null
+                                                ? 'Patroli dimulai'
+                                                : 'Patroli dimulai (foto akan diupload nanti)',
+                                            subtitle: uploadedPhotoUrl != null
+                                                ? 'Laporan awal berhasil dikirim'
+                                                : 'Foto akan dikirim saat koneksi stabil',
+                                            type: SnackbarType.success,
+                                          );
+
+                                          // ✅ 8. TRANSITION FROM LOCAL STATE SETELAH DELAY
+                                          Future.delayed(Duration(seconds: 3),
+                                              () {
+                                            if (mounted) {
+                                              this.setState(() {
+                                                _localIsPatrolling = false;
+                                                _localPatrollingTaskId = null;
+                                              });
+                                            }
+                                          });
+                                        }
                                       } catch (e) {
-                                        // Tangani error
-                                        setState(() {
-                                          isSubmitting = false;
-                                        });
+                                        // ✅ HANDLE CRITICAL ERROR - ROLLBACK STATE
+                                        print(
+                                            '❌ Critical error in initial report: $e');
+
+                                        if (mounted) {
+                                          setState(() {
+                                            isSubmitting = false;
+                                          });
+
+                                          // Rollback local state
+                                          this.setState(() {
+                                            _localIsPatrolling = false;
+                                            _localPatrollingTaskId = null;
+                                          });
+
+                                          // Stop patrol systems
+                                          _patrolTimer?.cancel();
+                                          _positionStreamSubscription?.cancel();
+
+                                          showCustomSnackbar(
+                                            context: context,
+                                            title: 'Gagal memulai patroli',
+                                            subtitle: 'Terjadi kesalahan: $e',
+                                            type: SnackbarType.danger,
+                                          );
+                                        }
                                       }
                                     },
                               style: ElevatedButton.styleFrom(
@@ -1975,18 +2210,30 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   bool _isCurrentlyPatrolling() {
-    // Check local state first (highest priority during transitions)
+    // ✅ 1. PRIORITAS TERTINGGI: Local state yang sedang dalam transisi
     if (_localIsPatrolling && _localPatrollingTaskId == widget.task.taskId) {
       return true;
     }
 
-    // Check bloc state
+    // ✅ 2. PRIORITAS KEDUA: Local storage data
+    try {
+      final localData = LocalPatrolService.getPatrolData(widget.task.taskId);
+      if (localData != null &&
+          (localData.status == 'started' || localData.status == 'ongoing')) {
+        print('🗺️ Local patrol data found for task ${widget.task.taskId}');
+        return true;
+      }
+    } catch (e) {
+      print('❌ Error checking local patrol data: $e');
+    }
+
+    // ✅ 3. PRIORITAS KETIGA: BLoC state
     final state = context.read<PatrolBloc>().state;
     if (state is PatrolLoaded && state.isPatrolling) {
       return true;
     }
 
-    // Check task status as fallback
+    // ✅ 4. PRIORITAS TERAKHIR: Task status
     final taskOngoing =
         widget.task.status == 'ongoing' || widget.task.status == 'in_progress';
 
@@ -2022,15 +2269,34 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   LatLngBounds _getRouteBounds(List<List<double>> coordinates) {
-    double minLat = 90.0, maxLat = -90.0;
-    double minLng = 180.0, maxLng = -180.0;
+    if (coordinates.isEmpty) {
+      // Return default bounds if no coordinates
+      return LatLngBounds(
+        southwest: LatLng(-6.927872391717073, 107.76910906700982),
+        northeast: LatLng(-6.927872391717073, 107.76910906700982),
+      );
+    }
+
+    double minLat = coordinates[0][0];
+    double maxLat = coordinates[0][0];
+    double minLng = coordinates[0][1];
+    double maxLng = coordinates[0][1];
 
     for (var coord in coordinates) {
-      minLat = minLat < coord[0] ? minLat : coord[0];
-      maxLat = maxLat > coord[0] ? maxLat : coord[0];
-      minLng = minLng < coord[1] ? minLng : coord[1];
-      maxLng = maxLng > coord[1] ? maxLng : coord[1];
+      if (coord.length >= 2) {
+        minLat = minLat < coord[0] ? minLat : coord[0];
+        maxLat = maxLat > coord[0] ? maxLat : coord[0];
+        minLng = minLng < coord[1] ? minLng : coord[1];
+        maxLng = maxLng > coord[1] ? maxLng : coord[1];
+      }
     }
+
+    // Add padding to bounds
+    const padding = 0.001; // roughly 100m
+    minLat -= padding;
+    maxLat += padding;
+    minLng -= padding;
+    maxLng += padding;
 
     return LatLngBounds(
       southwest: LatLng(minLat, minLng),
@@ -2040,14 +2306,60 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _initializeMap() async {
     await _getUserLocation();
-    if (widget.task.assignedRoute != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _addRouteMarkers(widget.task.assignedRoute!);
-      });
+
+    // ✅ Add route markers AFTER getting user location and BEFORE setting map ready
+    if (widget.task.assignedRoute != null &&
+        widget.task.assignedRoute!.isNotEmpty) {
+      print(
+          '🗺️ Adding ${widget.task.assignedRoute!.length} route markers to map');
+      await _addRouteMarkers(widget.task.assignedRoute!);
     }
+
     setState(() {
       _isMapReady = true;
     });
+
+    // ✅ Focus camera to assigned route after map is ready
+    if (widget.task.assignedRoute != null &&
+        widget.task.assignedRoute!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _focusCameraToAssignedRoute();
+      });
+    }
+  }
+
+  void _focusCameraToAssignedRoute() {
+    if (widget.task.assignedRoute == null ||
+        widget.task.assignedRoute!.isEmpty ||
+        mapController == null) {
+      print('⚠️ Cannot focus camera: route empty or controller null');
+      return;
+    }
+
+    try {
+      final coordinates = widget.task.assignedRoute!;
+
+      if (coordinates.length == 1) {
+        // Single point - just zoom to it
+        final coord = coordinates[0];
+        mapController!.animateCamera(
+          CameraUpdate.newLatLngZoom(
+            LatLng(coord[0], coord[1]),
+            16,
+          ),
+        );
+        print('📍 Focused camera to single route point');
+      } else {
+        // Multiple points - fit all in view
+        final bounds = _getRouteBounds(coordinates);
+        mapController!.animateCamera(
+          CameraUpdate.newLatLngBounds(bounds, 100),
+        );
+        print('📍 Focused camera to route bounds');
+      }
+    } catch (e) {
+      print('❌ Error focusing camera to route: $e');
+    }
   }
 
   Future<Position?> _getUserLocation() async {
@@ -2097,24 +2409,32 @@ class _MapScreenState extends State<MapScreen> {
 
   void _updateUserMarker(Position position) {
     setState(() {
+      // ✅ Only remove existing user location marker, keep route markers
       _markers.removeWhere(
           (marker) => marker.markerId == const MarkerId('user-location'));
+
+      // Add user location marker
       _markers.add(
         Marker(
           markerId: const MarkerId('user-location'),
           position: LatLng(position.latitude, position.longitude),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-          infoWindow: const InfoWindow(title: 'Current Location'),
+          infoWindow: InfoWindow(
+            title: 'Lokasi Saya',
+            snippet:
+                'Lat: ${position.latitude.toStringAsFixed(6)}, Lng: ${position.longitude.toStringAsFixed(6)}',
+          ),
         ),
       );
     });
 
-    // Update camera to follow user if patrolling
-    final state = context.read<PatrolBloc>().state;
-    if (state is PatrolLoaded && state.isPatrolling) {
-      // Update polyline jika sedang patroli
+    // ✅ Only auto-follow if patrolling, otherwise let user control camera
+    final actuallyPatrolling = _isCurrentlyPatrolling();
+    if (actuallyPatrolling) {
+      // Update polyline for patrol route
       _updatePolyline(position);
 
+      // Auto-follow only during patrol
       mapController?.animateCamera(
         CameraUpdate.newLatLng(
           LatLng(position.latitude, position.longitude),
@@ -2247,25 +2567,40 @@ class _MapScreenState extends State<MapScreen> {
 
   void _onMapCreated(GoogleMapController controller) {
     try {
+      print('🗺️ Map created, setting up controller');
       setState(() {
         mapController = controller;
         _isMapReady = true;
       });
-      _debugMapStatus();
 
-      // Add initial position check
-      if (userCurrentLocation != null) {
-        controller.animateCamera(
-          CameraUpdate.newLatLngZoom(
-            LatLng(
-              userCurrentLocation!.latitude,
-              userCurrentLocation!.longitude,
+      // ✅ Add route markers immediately after map is created
+      if (widget.task.assignedRoute != null &&
+          widget.task.assignedRoute!.isNotEmpty) {
+        print('🗺️ Map ready, adding assigned route markers');
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          await _addRouteMarkers(widget.task.assignedRoute!);
+
+          // Focus camera to route after small delay
+          await Future.delayed(Duration(milliseconds: 500));
+          _focusCameraToAssignedRoute();
+        });
+      } else {
+        print('⚠️ No assigned route to display');
+
+        // If no assigned route but have user location, focus there
+        if (userCurrentLocation != null) {
+          controller.animateCamera(
+            CameraUpdate.newLatLngZoom(
+              LatLng(userCurrentLocation!.latitude,
+                  userCurrentLocation!.longitude),
+              15,
             ),
-            15,
-          ),
-        );
+          );
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      print('❌ Error in map creation: $e');
+    }
   }
 
   void _debugMapStatus() {}
@@ -2273,21 +2608,13 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _stopPatrol(BuildContext context, PatrolLoaded state) async {
     final endTime = DateTime.now();
 
-    // Convert route path
-    List<List<double>> convertedPath = [];
-    Map<String, dynamic> finalRoutePath = {};
-
-    try {
-      if (state.task?.routePath != null && state.task!.routePath is Map) {
-        finalRoutePath =
-            Map<String, dynamic>.from(state.task!.routePath as Map);
-      }
-    } catch (e) {}
+    // Get final route path from local storage
+    final localData = LocalPatrolService.getPatrolData(widget.task.taskId);
+    Map<String, dynamic> finalRoutePath = localData?.routePath ?? {};
 
     if (mounted) {
       final result =
           await _showFinalReportDialog(context, state, endTime, finalRoutePath);
-
       if (result != true) {
         return;
       }
@@ -2567,7 +2894,7 @@ class _MapScreenState extends State<MapScreen> {
                           Expanded(
                             child: ElevatedButton(
                               onPressed: isSubmitting || capturedImage == null
-                                  ? null // Disable jika belum ada foto atau sedang submit
+                                  ? null
                                   : () async {
                                       setState(() {
                                         isSubmitting = true;
@@ -2577,15 +2904,21 @@ class _MapScreenState extends State<MapScreen> {
                                         // Upload foto ke Firebase Storage
                                         final fileName =
                                             'final_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-                                        // Simpan referensi context dialog untuk digunakan nanti
-                                        final currentDialogContext =
-                                            dialogContext;
-
-                                        // Upload foto ke Firebase Storage menggunakan fungsi yang sudah diperbaiki
                                         final photoUrl =
                                             await _uploadPhotoToFirebase(
                                                 capturedImage!, fileName);
+
+                                        // Complete patrol in local storage first
+                                        await LocalPatrolService.completePatrol(
+                                          taskId: widget.task.taskId,
+                                          endTime: endTime,
+                                          finalPhotoUrl: photoUrl,
+                                          finalNote: noteController.text
+                                                  .trim()
+                                                  .isNotEmpty
+                                              ? noteController.text.trim()
+                                              : null,
+                                        );
 
                                         if (mounted) {
                                           setState(() {
@@ -2594,33 +2927,31 @@ class _MapScreenState extends State<MapScreen> {
                                           });
                                         }
 
-                                        // Set result ke true untuk menandakan dialog berhasil
                                         result = true;
 
-                                        // Tutup dialog laporan akhir
-                                        if (Navigator.canPop(
-                                            currentDialogContext)) {
-                                          Navigator.pop(
-                                              currentDialogContext, true);
+                                        // Close dialog
+                                        if (Navigator.canPop(context)) {
+                                          Navigator.pop(context, true);
                                         }
 
-                                        // Beri jeda singkat untuk memastikan dialog tertutup
                                         await Future.delayed(
                                             const Duration(milliseconds: 100));
 
                                         if (mounted) {
-                                          // Kirim event stop patrol dan final report
-                                          context
-                                              .read<PatrolBloc>()
-                                              .add(StopPatrol(
-                                                endTime: endTime,
-                                                distance: _totalDistance,
-                                                finalRoutePath: finalRoutePath,
-                                              ));
+                                          // Try to update Firebase
+                                          try {
+                                            context
+                                                .read<PatrolBloc>()
+                                                .add(StopPatrol(
+                                                  endTime: endTime,
+                                                  distance: _totalDistance,
+                                                  finalRoutePath:
+                                                      finalRoutePath,
+                                                ));
 
-                                          // Kirim event submit final report
-                                          context.read<PatrolBloc>().add(
-                                                SubmitFinalReport(
+                                            context
+                                                .read<PatrolBloc>()
+                                                .add(SubmitFinalReport(
                                                   photoUrl: photoUrl,
                                                   note: noteController.text
                                                           .trim()
@@ -2629,208 +2960,32 @@ class _MapScreenState extends State<MapScreen> {
                                                           .trim()
                                                       : null,
                                                   reportTime: endTime,
-                                                ),
-                                              );
-
-                                          // Tampilkan loading dialog untuk persiapan ringkasan
-                                          if (mounted) {
-                                            showDialog(
-                                              context: context,
-                                              barrierDismissible: false,
-                                              builder: (loadingContext) =>
-                                                  WillPopScope(
-                                                onWillPop: () async => false,
-                                                child: Center(
-                                                  child: Container(
-                                                    padding:
-                                                        const EdgeInsets.all(
-                                                            16),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.white,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              8),
-                                                    ),
-                                                    child: Column(
-                                                      mainAxisSize:
-                                                          MainAxisSize.min,
-                                                      children: [
-                                                        const CircularProgressIndicator(),
-                                                        const SizedBox(
-                                                            height: 16),
-                                                        Text(
-                                                          ' patroli...',
-                                                          style:
-                                                              mediumTextStyle(),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            );
-                                          }
-
-                                          // Ambil data lengkap dari database
-                                          try {
-                                            // Ambil data task terbaru dari Firebase
-                                            final taskSnapshot =
-                                                await FirebaseDatabase.instance
-                                                    .ref()
-                                                    .child(
-                                                        'tasks/${widget.task.taskId}')
-                                                    .get();
-
-                                            // Tutup dialog loading
-                                            if (mounted &&
-                                                Navigator.canPop(context)) {
-                                              Navigator.pop(
-                                                  context); // Close loading dialog
-                                            }
-
-                                            if (!taskSnapshot.exists) {
-                                              throw Exception(
-                                                  'Task tidak ditemukan di database');
-                                            }
-
-                                            // Konversi data rute
-                                            final taskData =
-                                                Map<String, dynamic>.from(
-                                                    taskSnapshot.value as Map);
-                                            List<List<double>>
-                                                completeRoutePath = [];
-
-                                            // Ekstrak route path dari database
-                                            if (taskData['route_path'] !=
-                                                    null &&
-                                                taskData['route_path'] is Map) {
-                                              final routePathMap =
-                                                  Map<String, dynamic>.from(
-                                                      taskData['route_path']
-                                                          as Map);
-
-                                              // Urutkan entry berdasarkan timestamp
-                                              final sortedEntries = routePathMap
-                                                  .entries
-                                                  .toList()
-                                                ..sort((a, b) =>
-                                                    (a.value['timestamp']
-                                                            as String)
-                                                        .compareTo(
-                                                            b.value['timestamp']
-                                                                as String));
-
-                                              // Konversi ke format List<List<double>>
-                                              for (var entry in sortedEntries) {
-                                                if (entry.value is Map &&
-                                                    entry.value[
-                                                            'coordinates'] !=
-                                                        null) {
-                                                  final coordinates =
-                                                      entry.value['coordinates']
-                                                          as List;
-                                                  if (coordinates.length >= 2) {
-                                                    completeRoutePath.add([
-                                                      (coordinates[0] as num)
-                                                          .toDouble(),
-                                                      (coordinates[1] as num)
-                                                          .toDouble(),
-                                                    ]);
-                                                  }
-                                                }
-                                              }
-                                            }
-
-                                            // Navigasi ke PatrolSummaryScreen
-                                            if (mounted) {
-                                              Navigator.pushReplacement(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      PatrolSummaryScreen(
-                                                    task: widget.task,
-                                                    routePath: completeRoutePath
-                                                            .isNotEmpty
-                                                        ? completeRoutePath
-                                                        : _routePoints
-                                                            .map((point) => [
-                                                                  point
-                                                                      .latitude,
-                                                                  point
-                                                                      .longitude
-                                                                ])
-                                                            .toList(),
-                                                    startTime:
-                                                        state.task?.startTime ??
-                                                            DateTime.now(),
-                                                    endTime: endTime,
-                                                    distance: _totalDistance,
-                                                    finalReportPhotoUrl:
-                                                        photoUrl,
-                                                    initialReportPhotoUrl: state
-                                                        .task
-                                                        ?.initialReportPhotoUrl,
-                                                  ),
-                                                ),
-                                              );
-                                            }
+                                                ));
                                           } catch (e) {
-                                            // Tutup dialog loading jika masih ada
-                                            if (mounted &&
-                                                Navigator.canPop(context)) {
-                                              Navigator.pop(context);
-                                            }
-
-                                            // Fallback: gunakan data yang ada di memory
-                                            if (mounted) {
-                                              Navigator.pushReplacement(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      PatrolSummaryScreen(
-                                                    task: widget.task,
-                                                    routePath: _routePoints
-                                                        .map((point) => [
-                                                              point.latitude,
-                                                              point.longitude
-                                                            ])
-                                                        .toList(),
-                                                    startTime:
-                                                        state.task?.startTime ??
-                                                            DateTime.now(),
-                                                    endTime: endTime,
-                                                    distance: _totalDistance,
-                                                    finalReportPhotoUrl:
-                                                        photoUrl,
-                                                    initialReportPhotoUrl: state
-                                                        .task
-                                                        ?.initialReportPhotoUrl,
-                                                  ),
-                                                ),
-                                              );
-                                            }
-
-                                            // Tampilkan pesan warning
-                                            showCustomSnackbar(
-                                              context: context,
-                                              title: 'Perhatian',
-                                              subtitle:
-                                                  'Data rute mungkin tidak lengkap karena error',
-                                              type: SnackbarType.warning,
-                                            );
+                                            print(
+                                                '❌ Failed to update Firebase on stop patrol: $e');
                                           }
+
+                                          print(
+                                              'ini isi data route path: $finalRoutePath');
+
+                                          // Navigate to summary regardless of Firebase success
+                                          _navigateToSummary(endTime, photoUrl,
+                                              finalRoutePath);
                                         }
                                       } catch (e) {
-                                        // Tangani error dan kembalikan state dialog
+                                        // Handle error
                                         if (mounted) {
                                           setState(() {
                                             isSubmitting = false;
                                           });
 
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(
-                                            SnackBar(
-                                                content: Text('Error: $e')),
+                                          showCustomSnackbar(
+                                            context: context,
+                                            title: 'Error',
+                                            subtitle:
+                                                'Gagal menyelesaikan patroli: $e',
+                                            type: SnackbarType.danger,
                                           );
                                         }
                                       }
@@ -2873,6 +3028,84 @@ class _MapScreenState extends State<MapScreen> {
     );
 
     return result;
+  }
+
+  void _navigateToSummary(
+      DateTime endTime, String photoUrl, Map<String, dynamic> finalRoutePath) {
+    // Get complete data from local storage FIRST (before navigation)
+    final localData = LocalPatrolService.getPatrolData(widget.task.taskId);
+
+    List<List<double>> completeRoutePath = [];
+    if (localData?.routePath.isNotEmpty == true) {
+      final sortedEntries = localData!.routePath.entries.toList()
+        ..sort((a, b) => a.value['timestamp']
+            .toString()
+            .compareTo(b.value['timestamp'].toString()));
+
+      for (var entry in sortedEntries) {
+        final coordinates = entry.value['coordinates'] as List;
+        if (coordinates.length >= 2) {
+          completeRoutePath.add([
+            (coordinates[0] as num).toDouble(),
+            (coordinates[1] as num).toDouble(),
+          ]);
+        }
+      }
+    }
+
+    // ✅ IMMEDIATE SYNC BEFORE NAVIGATION
+    _performImmediateSync(widget.task.taskId);
+
+    // Navigate immediately to prevent unmounting issues
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PatrolSummaryScreen(
+          task: widget.task,
+          routePath: completeRoutePath.isNotEmpty
+              ? completeRoutePath
+              : _routePoints
+                  .map((point) => [point.latitude, point.longitude])
+                  .toList(),
+          startTime: localData?.startTime != null
+              ? DateTime.parse(localData!.startTime!)
+              : DateTime.now(),
+          endTime: endTime,
+          distance: localData?.distance ?? _totalDistance,
+          finalReportPhotoUrl: photoUrl,
+          initialReportPhotoUrl: localData?.initialReportPhotoUrl,
+        ),
+      ),
+    );
+  }
+
+// ✅ NEW METHOD: Immediate sync without waiting
+  void _performImmediateSync(String taskId) {
+    // Don't await this - let it run in background
+    Future.microtask(() async {
+      try {
+        print('🔄 Performing immediate sync for completed patrol...');
+
+        // Check connection
+        final connectivityResult = await Connectivity().checkConnectivity();
+        if (connectivityResult == ConnectivityResult.none) {
+          print('❌ No internet for immediate sync');
+          return;
+        }
+
+        // Force sync without delay
+        final success = await SyncService.forceSyncPatrol(taskId);
+
+        if (success) {
+          print('✅ Immediate sync completed successfully');
+          _cleanupCompletedPatrol();
+        } else {
+          print('⚠️ Immediate sync failed, will retry via periodic sync');
+        }
+      } catch (e) {
+        print('❌ Error in immediate sync: $e');
+      }
+    });
   }
 
   void _showMockLocationInfoDialog(BuildContext context, int detectionCount) {
@@ -3093,6 +3326,26 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  Future<void> _cleanupCompletedPatrol() async {
+    try {
+      final localData = LocalPatrolService.getPatrolData(widget.task.taskId);
+      if (localData != null && localData.status == 'completed') {
+        print(
+            '🧹 Cleaning up completed patrol data for: ${widget.task.taskId}');
+
+        // Check if data is synced before deleting
+        if (localData.isSynced) {
+          await LocalPatrolService.deletePatrolData(widget.task.taskId);
+          print('✅ Deleted synced completed patrol data');
+        } else {
+          print('⚠️ Completed patrol not synced yet, keeping local data');
+        }
+      }
+    } catch (e) {
+      print('❌ Error cleaning up completed patrol: $e');
+    }
+  }
+
   @override
   void dispose() {
     _patrolTimer?.cancel();
@@ -3137,6 +3390,28 @@ class _MapScreenState extends State<MapScreen> {
             (state is PatrolLoaded && state.mockLocationDetected) ||
                 _mockLocationDetected;
         final mockCount = state is PatrolLoaded ? state.mockLocationCount : 0;
+        if (_isRecoveringFromLocal) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Memulihkan Data Patroli...',
+                    style: semiBoldTextStyle(size: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Mohon tunggu sebentar',
+                    style: regularTextStyle(color: neutral600),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
         return Scaffold(
           appBar: AppBar(
             title: Text(
