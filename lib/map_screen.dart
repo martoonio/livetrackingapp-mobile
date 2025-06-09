@@ -793,8 +793,13 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  void _startPatrol(BuildContext context) {
+  void _startPatrol(BuildContext context) async {
     final startTime = DateTime.now();
+
+    setState(() {
+      _localIsPatrolling = true;
+      _localPatrollingTaskId = widget.task.taskId;
+    });
 
     // Update task status
     context.read<PatrolBloc>().add(UpdateTask(
@@ -812,6 +817,10 @@ class _MapScreenState extends State<MapScreen> {
             startTime: startTime,
           ),
         );
+
+    await Future.delayed(
+      const Duration(milliseconds: 200),
+    ); // Delay to ensure state is set
 
     _startPatrolTimer(); // Start timer
     _elapsedTime = Duration.zero; // Reset timer
