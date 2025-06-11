@@ -101,7 +101,39 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeAppWithLocalRecovery();
+
+    final task = widget.task;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
+      // Untuk memastikan clusterName juga terisi jika belum
+      await widget.task.fetchClusterName(FirebaseDatabase.instance.ref());
+      if (mounted) {
+        setState(() {}); // Refresh UI after name is loaded
+      }
+    });
+
+    currentState = context.read<PatrolBloc>().state;
+
+    if (task.status == 'ongoing' || task.status == 'in_progress') {
+      // We need to wait for widget to be built before triggering resume
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _resumeExistingPatrol(task);
+      });
+    } else {}
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<PatrolBloc>().add(LoadRouteData(userId: widget.task.userId));
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final patrolState = context.read<PatrolBloc>().state;
+      if (patrolState is PatrolLoaded && patrolState.isPatrolling) {
+        _enableWakelock();
+      }
+    });
+
+    _initializeMap();
   }
 
   Future<void> _initializeAppWithLocalRecovery() async {
@@ -139,6 +171,8 @@ class _MapScreenState extends State<MapScreen> {
       if (localData.status == 'started' || localData.status == 'ongoing') {
         print('📱 Local recovery: Checking if Firebase data exists...');
 
+        bool shouldUseFirebaseData = false;
+
         // Check if Firebase already has this data
         try {
           final taskRef = FirebaseDatabase.instance
@@ -152,22 +186,21 @@ class _MapScreenState extends State<MapScreen> {
 
             if (firebaseStartTime != null) {
               print(
-                  '✅ Firebase data exists, using Firebase data instead of local recovery');
-              setState(() {
-                _isRecoveringFromLocal = false;
-              });
-              return; // Exit early, let normal resume handle this
+                  '✅ Firebase data exists, will use Firebase data with UI restoration');
+              shouldUseFirebaseData = true;
             }
           }
 
-          print('⚠️ No Firebase data found, proceeding with local recovery');
+          if (!shouldUseFirebaseData) {
+            print('⚠️ No Firebase data found, proceeding with local recovery');
+          }
         } catch (e) {
           print(
               '❌ Error checking Firebase data: $e, proceeding with local recovery');
         }
 
-        // ✅ RESTORE LOCAL STATE HANYA JIKA FIREBASE TIDAK ADA DATA
-        print('📱 Restoring from local data (true offline recovery)...');
+        // ✅ RESTORE UI STATE REGARDLESS OF DATA SOURCE
+        print('📱 Restoring UI state from local data...');
 
         setState(() {
           _localIsPatrolling = true;
@@ -200,7 +233,7 @@ class _MapScreenState extends State<MapScreen> {
               ));
             }
 
-            // ✅ UPDATE POLYLINE
+            // ✅ UPDATE POLYLINE IMMEDIATELY
             if (_routePoints.isNotEmpty) {
               _polylines.clear();
               _polylines.add(
@@ -211,6 +244,8 @@ class _MapScreenState extends State<MapScreen> {
                   width: 5,
                 ),
               );
+              print(
+                  '🗺️ Restored ${_routePoints.length} route points and polyline');
             }
           }
 
@@ -239,6 +274,8 @@ class _MapScreenState extends State<MapScreen> {
                   altitudeAccuracy: 0,
                   headingAccuracy: 0,
                 );
+                print(
+                    '📍 Restored last position: ${_lastPosition!.latitude}, ${_lastPosition!.longitude}');
               }
             } catch (e) {
               print('❌ Error restoring last position: $e');
@@ -246,14 +283,43 @@ class _MapScreenState extends State<MapScreen> {
           }
         });
 
-        // ✅ START SYSTEMS
+        // ✅ START SYSTEMS IMMEDIATELY (CRITICAL!)
+        print('🚀 Starting patrol systems...');
         _startPatrolTimer();
         _startLocationTracking();
 
-        // ✅ TRY TO SYNC TO FIREBASE IMMEDIATELY
-        Future.delayed(Duration(seconds: 2), () async {
+        // ✅ DETERMINE WHICH DATA TO USE FOR BLOC
+        Map<String, dynamic> routePathForBloc = {};
+        DateTime startTimeForBloc = DateTime.now();
+        double distanceForBloc = 0.0;
+
+        if (shouldUseFirebaseData) {
+          // Use fresh Firebase data
+          if (widget.task.routePath != null) {
+            routePathForBloc =
+                Map<String, dynamic>.from(widget.task.routePath!);
+          }
+          startTimeForBloc = widget.task.startTime ?? DateTime.now();
+          distanceForBloc = widget.task.distance ?? 0.0;
+
+          print('📡 Using Firebase data for BLoC:');
+          print('   - Route points: ${routePathForBloc.length}');
+          print('   - Distance: $distanceForBloc');
+        } else {
+          // Use local data
+          routePathForBloc = localData.routePath;
+          startTimeForBloc = DateTime.parse(localData.startTime!);
+          distanceForBloc = localData.distance;
+
+          print('📱 Using local data for BLoC:');
+          print('   - Route points: ${routePathForBloc.length}');
+          print('   - Distance: $distanceForBloc');
+        }
+
+        // ✅ SYNC TO BLOC AND FIREBASE
+        Future.delayed(Duration(seconds: 1), () async {
           try {
-            print('🔄 Syncing local recovery data to Firebase...');
+            print('🔄 Syncing recovery data to BLoC...');
 
             final connectivityResult = await Connectivity().checkConnectivity();
             if (connectivityResult != ConnectivityResult.none) {
@@ -262,36 +328,43 @@ class _MapScreenState extends State<MapScreen> {
                 try {
                   context.read<PatrolBloc>().add(ResumePatrol(
                         task: widget.task,
-                        startTime: DateTime.parse(localData.startTime!),
-                        currentDistance: localData.distance,
-                        existingRoutePath: localData.routePath,
+                        startTime: startTimeForBloc,
+                        currentDistance: distanceForBloc,
+                        existingRoutePath: routePathForBloc,
                       ));
 
-                  print('✅ Local recovery data synced to BLoC');
+                  print('✅ Recovery data synced to BLoC');
                 } catch (e) {
-                  print('❌ Failed to sync local recovery to BLoC: $e');
+                  print('❌ Failed to sync recovery to BLoC: $e');
                 }
               }
 
-              // Force sync to Firebase
-              final syncSuccess =
-                  await SyncService.forceSyncPatrol(localData.taskId);
-              if (syncSuccess) {
-                print('✅ Local recovery data synced to Firebase successfully');
-              } else {
-                print('⚠️ Failed to sync local recovery data');
+              // Force sync to Firebase if using local data
+              if (!shouldUseFirebaseData) {
+                final syncSuccess =
+                    await SyncService.forceSyncPatrol(localData.taskId);
+                if (syncSuccess) {
+                  print(
+                      '✅ Local recovery data synced to Firebase successfully');
+                } else {
+                  print('⚠️ Failed to sync local recovery data');
+                }
               }
             }
           } catch (e) {
-            print('❌ Error syncing local recovery data: $e');
+            print('❌ Error syncing recovery data: $e');
           }
         });
 
         // ✅ SHOW SUCCESS MESSAGE
         showCustomSnackbar(
           context: context,
-          title: 'Patroli Dipulihkan dari Data Lokal',
-          subtitle: 'Data lokal berhasil dipulihkan dan akan disinkronisasi',
+          title: shouldUseFirebaseData
+              ? 'Patroli Dilanjutkan'
+              : 'Patroli Dipulihkan dari Data Lokal',
+          subtitle: shouldUseFirebaseData
+              ? 'Melanjutkan patroli yang sedang berlangsung'
+              : 'Data lokal berhasil dipulihkan dan akan disinkronisasi',
           type: SnackbarType.success,
         );
 
@@ -329,6 +402,9 @@ class _MapScreenState extends State<MapScreen> {
   void _startPatrolTimer() {
     _patrolTimer?.cancel(); // Cancel existing timer if any
 
+    print('⏱️ Starting patrol timer...');
+    print('   - Current elapsed time: ${_formatDuration(_elapsedTime)}');
+
     _patrolTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {
@@ -337,13 +413,16 @@ class _MapScreenState extends State<MapScreen> {
 
         // ✅ UPDATE LOCAL STORAGE EVERY MINUTE
         if (_elapsedTime.inSeconds % 60 == 0) {
+          print('⏱️ Timer milestone: ${_formatDuration(_elapsedTime)}');
           _updateLocalPatrolTime();
         }
+      } else {
+        print('⚠️ Widget not mounted, stopping timer');
+        timer.cancel();
       }
     });
 
-    print(
-        '⏱️ Patrol timer started, current elapsed: ${_formatDuration(_elapsedTime)}');
+    print('✅ Patrol timer started successfully');
   }
 
 // ✅ NEW METHOD: Update local storage with current time
@@ -458,6 +537,15 @@ class _MapScreenState extends State<MapScreen> {
     print(
         '🚀 Initializing app for task: ${task.taskId}, status: ${task.status}');
 
+    // ✅ PERBAIKAN: Enhanced logging untuk debugging
+    print('📊 Task details:');
+    print('   - Task ID: ${task.taskId}');
+    print('   - Status: ${task.status}');
+    print('   - Start time: ${task.startTime}');
+    print('   - Distance: ${task.distance}');
+    print('   - Route path: ${task.routePath?.length ?? 0} points');
+    print('   - Officer: ${task.officerName}');
+
     // 1. Load officer and cluster names first
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
@@ -467,12 +555,23 @@ class _MapScreenState extends State<MapScreen> {
       }
     });
 
-    // 2. Check if patrol is ongoing and set state IMMEDIATELY
-    final isOngoingPatrol =
-        task.status == 'ongoing' || task.status == 'in_progress';
+    // ✅ PERBAIKAN: Enhanced detection untuk ongoing patrol
+    final isOngoingPatrol = _isTaskOngoing(task);
+    final hasLocalPatrolData = _localPatrolData != null;
 
-    if (isOngoingPatrol && !_hasResumedPatrol) {
-      print('📍 Task is ongoing, setting local state immediately');
+    print('🔍 Patrol status check:');
+    print('   - Is ongoing: $isOngoingPatrol');
+    print('   - Has local data: $hasLocalPatrolData');
+    print('   - Has resumed before: $_hasResumedPatrol');
+    print('   - Local state: $_localIsPatrolling');
+
+    // ✅ RESUME HANYA JIKA BELUM RECOVERY LOCAL DAN BELUM RESUME
+    if (isOngoingPatrol &&
+        !_hasResumedPatrol &&
+        !hasLocalPatrolData &&
+        !_localIsPatrolling) {
+      print(
+          '📍 Task is ongoing and no local recovery done, setting up resume...');
 
       // ✅ Set local state SYNCHRONOUSLY before any async operations
       setState(() {
@@ -484,12 +583,14 @@ class _MapScreenState extends State<MapScreen> {
       // ✅ Resume patrol after a frame to ensure UI is stable
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         await Future.delayed(Duration(milliseconds: 100));
-        if (mounted && _hasResumedPatrol) {
-          _resumeExistingPatrolSafe(task);
+        if (mounted && _hasResumedPatrol && !hasLocalPatrolData) {
+          _resumeExistingPatrol(task);
         }
       });
+    } else if (_localIsPatrolling) {
+      print('📍 Local state already active, skipping resume');
     } else {
-      print('📍 Task not ongoing, status: ${task.status}');
+      print('📍 Task not ongoing or already resumed, status: ${task.status}');
     }
 
     // 3. Initialize other components
@@ -515,35 +616,65 @@ class _MapScreenState extends State<MapScreen> {
     _isInitializing = false;
   }
 
-  void _resumeExistingPatrolSafe(PatrolTask task) async {
-    if (task.startTime == null || !mounted) {
+  bool _isTaskOngoing(PatrolTask task) {
+    // Cek apakah task sudah dimulai dan belum selesai
+    if (task.startTime != null &&
+        (task.status == 'ongoing' || task.status == 'in_progress')) {
+      return true;
+    }
+    return false;
+  }
+
+  void _resumeExistingPatrol(PatrolTask task) {
+    if (task.startTime == null) {
       return;
     }
 
-    print('🔄 Resuming patrol for task: ${task.taskId}');
+    // Get route path data
+    final routePath = task.routePath as Map<dynamic, dynamic>?;
 
-    try {
-      // ✅ STEP 1: Set local state immediately and stable
-      setState(() {
-        _localIsPatrolling = true;
-        _localPatrollingTaskId = task.taskId;
+    // Simpan route path yang sudah ada dengan struktur yang benar
+    Map<String, dynamic> existingRoutePath = {};
+    if (routePath != null) {
+      // Konversi ke Map<String, dynamic> untuk konsistensi
+      routePath.forEach((key, value) {
+        if (value is Map) {
+          Map<String, dynamic> pointData = {};
+          value.forEach((k, v) {
+            pointData[k.toString()] = v;
+          });
+          existingRoutePath[key.toString()] = pointData;
+        } else {
+          existingRoutePath[key.toString()] = value;
+        }
       });
+    }
 
-      // ✅ STEP 2: Calculate and set local variables from Firebase data
+    // Resume patrol in bloc with existing route path
+    context.read<PatrolBloc>().add(ResumePatrol(
+          task: task,
+          startTime: task.startTime!,
+          currentDistance: task.distance ?? 0.0,
+          existingRoutePath:
+              existingRoutePath, // Passing the existing route path
+        ));
+
+    // Set local variables
+    setState(() {
       _elapsedTime = DateTime.now().difference(task.startTime!);
       _totalDistance = task.distance ?? 0.0;
 
-      // ✅ STEP 3: Process route points from Firebase
+      // Inisialisasi _routePoints untuk polyline
       _routePoints.clear();
-      final routePath = task.routePath as Map<dynamic, dynamic>?;
-
       if (routePath != null && routePath.isNotEmpty) {
         try {
+          // Sort entries by timestamp to ensure correct order
           final List<MapEntry<dynamic, dynamic>> sortedEntries =
               routePath.entries.toList()
                 ..sort((a, b) => (a.value['timestamp'].toString())
                     .compareTo(b.value['timestamp'].toString()));
 
+          // Add points to _routePoints for polyline display
           for (var entry in sortedEntries) {
             if (entry.value is Map && entry.value['coordinates'] != null) {
               final coordinates = entry.value['coordinates'] as List;
@@ -555,17 +686,13 @@ class _MapScreenState extends State<MapScreen> {
               }
             }
           }
-
-          print(
-              '📍 Restored ${_routePoints.length} route points from Firebase');
-        } catch (e) {
-          print('Error processing route points: $e');
-        }
+        } catch (e) {}
       }
 
-      // ✅ STEP 4: Set last position from Firebase data
+      // Update lastPosition to the most recent point if available
       if (routePath != null && routePath.isNotEmpty) {
         try {
+          // Get the most recent point by timestamp
           final sortedEntries = routePath.entries.toList()
             ..sort((a, b) => (b.value['timestamp'].toString())
                 .compareTo(a.value['timestamp'].toString()));
@@ -587,132 +714,47 @@ class _MapScreenState extends State<MapScreen> {
               altitudeAccuracy: 0,
               headingAccuracy: 0,
             );
-
-            print(
-                '📍 Last position restored from Firebase: ${_lastPosition!.latitude}, ${_lastPosition!.longitude}');
           }
-        } catch (e) {
-          print('Error setting last position: $e');
-        }
+        } catch (e) {}
       }
+    });
 
-      // ✅ STEP 5: Update polyline
-      setState(() {
-        _polylines.clear();
-        if (_routePoints.isNotEmpty) {
-          _polylines.add(
-            Polyline(
-              polylineId: const PolylineId('patrol_route'),
-              points: _routePoints,
-              color: _polylineColor,
-              width: 5,
-            ),
-          );
-        }
-      });
+    // Start systems
+    _startPatrolTimer();
+    _startLocationTracking();
 
-      // ✅ STEP 6: Start patrol systems
-      _startPatrolTimer();
-      _startLocationTracking();
-
-      // ✅ STEP 7: Prepare route path for BLoC
-      Map<String, dynamic> existingRoutePath = {};
-      if (routePath != null) {
-        routePath.forEach((key, value) {
-          if (value is Map) {
-            Map<String, dynamic> pointData = {};
-            value.forEach((k, v) {
-              pointData[k.toString()] = v;
-            });
-            existingRoutePath[key.toString()] = pointData;
-          } else {
-            existingRoutePath[key.toString()] = value;
-          }
-        });
-      }
-
-      // ✅ STEP 8: Send resume event to BLoC AFTER local state is stable
-      await Future.delayed(Duration(milliseconds: 200));
-
-      if (mounted) {
-        context.read<PatrolBloc>().add(ResumePatrol(
-              task: task,
-              startTime: task.startTime!,
-              currentDistance: task.distance ?? 0.0,
-              existingRoutePath: existingRoutePath,
-            ));
-      }
-
-      // ✅ STEP 9: Update local storage for offline backup
-      try {
-        await LocalPatrolService.savePatrolStart(
-          taskId: task.taskId,
-          userId: task.userId,
-          startTime: task.startTime!,
-          initialPhotoUrl: task.initialReportPhotoUrl,
-        );
-
-        final localData = LocalPatrolService.getPatrolData(task.taskId);
-        if (localData != null) {
-          localData.status = 'ongoing';
-          localData.distance = task.distance ?? 0.0;
-          localData.routePath = existingRoutePath;
-          localData.lastUpdated = DateTime.now().toIso8601String();
-          await localData.save();
-        }
-      } catch (e) {
-        print('❌ Error updating local backup: $e');
-      }
-
-      // ✅ STEP 10: Zoom to show route
-      if (_routePoints.isNotEmpty && mapController != null) {
-        Future.delayed(Duration(milliseconds: 500), () {
-          if (mounted) _zoomToPolyline();
-        });
-      }
-
-      // ✅ STEP 11: Notify user
-      showCustomSnackbar(
-        context: context,
-        title: 'Patroli Dilanjutkan',
-        subtitle: 'Melanjutkan patroli yang sedang berlangsung',
-        type: SnackbarType.success,
-      );
-
-      // ✅ STEP 12: Transition from local state after BLoC is stable
-      Future.delayed(Duration(seconds: 3), () {
-        if (mounted) {
-          final state = context.read<PatrolBloc>().state;
-          if (state is PatrolLoaded && state.isPatrolling) {
-            print('🔄 Transitioning from local state to BLoC state');
-            setState(() {
-              _localIsPatrolling = false;
-              _localPatrollingTaskId = null;
-            });
-          }
-        }
-      });
-    } catch (e) {
-      print('❌ Error in resume patrol: $e');
-
-      // Reset local state on error
-      if (mounted) {
+    // Load saved route if exists
+    if (routePath != null && routePath.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _displaySavedRoute(routePath.cast<String, dynamic>());
         setState(() {
-          _localIsPatrolling = false;
-          _localPatrollingTaskId = null;
+          _polylines.clear();
+          if (_routePoints.isNotEmpty) {
+            _polylines.add(
+              Polyline(
+                polylineId: const PolylineId('patrol_route'),
+                points: _routePoints,
+                color: _polylineColor,
+                width: 5,
+              ),
+            );
+          }
         });
 
-        _patrolTimer?.cancel();
-        _positionStreamSubscription?.cancel();
-
-        showCustomSnackbar(
-          context: context,
-          title: 'Gagal melanjutkan patroli',
-          subtitle: 'Terjadi error: $e',
-          type: SnackbarType.danger,
-        );
-      }
+        // Zoom to show the entire route
+        if (_routePoints.isNotEmpty && mapController != null) {
+          _zoomToPolyline();
+        }
+      });
     }
+
+    // Notify user
+    showCustomSnackbar(
+      context: context,
+      title: 'Patroli Dilanjutkan',
+      subtitle: 'Melanjutkan patroli yang sedang berlangsung',
+      type: SnackbarType.success,
+    );
   }
 
   Future<String> _uploadPhotoToFirebase(File imageFile, String fileName) async {
@@ -894,7 +936,11 @@ class _MapScreenState extends State<MapScreen> {
     String timeNow = DateTime.now().toIso8601String();
     print('🚀 Starting location tracking at: $timeNow');
 
+    // ✅ CANCEL EXISTING SUBSCRIPTION FIRST
     _positionStreamSubscription?.cancel();
+
+    // ✅ ADD DELAY TO ENSURE SYSTEMS ARE READY
+    await Future.delayed(Duration(milliseconds: 500));
 
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
@@ -904,6 +950,9 @@ class _MapScreenState extends State<MapScreen> {
     ).listen(
       (Position position) async {
         if (mounted) {
+          print(
+              '📍 Location received: ${position.latitude}, ${position.longitude}');
+
           // Update UI state
           setState(() {
             userCurrentLocation = position;
@@ -913,29 +962,37 @@ class _MapScreenState extends State<MapScreen> {
           });
 
           final actuallyPatrolling = _isCurrentlyPatrolling();
+          print('🔍 Currently patrolling check: $actuallyPatrolling');
 
           if (actuallyPatrolling) {
             final timestamp = DateTime.now();
 
-            // Update distance and route locally
+            // ✅ CRITICAL: Update distance and route locally FIRST
+            print('📊 Updating distance and route...');
             _updateDistance(position);
             _updatePolyline(position);
 
-            // Save to local storage
-            await LocalPatrolService.updatePatrolLocation(
-              taskId: widget.task.taskId,
-              position: position,
-              timestamp: timestamp,
-              totalDistance: _totalDistance,
-              elapsedSeconds: _elapsedTime.inSeconds,
-            );
+            // ✅ Save to local storage IMMEDIATELY
+            try {
+              await LocalPatrolService.updatePatrolLocation(
+                taskId: widget.task.taskId,
+                position: position,
+                timestamp: timestamp,
+                totalDistance: _totalDistance,
+                elapsedSeconds: _elapsedTime.inSeconds,
+              );
+              print('💾 Location saved to local storage successfully');
+            } catch (e) {
+              print('❌ Failed to save location to local storage: $e');
+            }
 
-            // Try to update Firebase (don't block if it fails)
+            // ✅ Try to update Firebase (don't block if it fails)
             try {
               context.read<PatrolBloc>().add(UpdatePatrolLocation(
                     position: position,
                     timestamp: timestamp,
                   ));
+              print('📡 Location sent to BLoC');
             } catch (e) {
               print('❌ Failed to update Firebase location: $e');
               // Continue with local tracking
@@ -946,6 +1003,8 @@ class _MapScreenState extends State<MapScreen> {
             if (isMocked) {
               await _handleMockLocationDetection(position);
             }
+          } else {
+            print('⚠️ Not patrolling, skipping location processing');
           }
         }
       },
@@ -953,6 +1012,8 @@ class _MapScreenState extends State<MapScreen> {
         print('❌ Location stream error: $error');
       },
     );
+
+    print('✅ Location tracking stream started');
   }
 
   Future<void> _handleMockLocationDetection(Position position) async {
@@ -2579,11 +2640,19 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _updatePolyline(Position position) {
-    if (!_isMapReady || mapController == null) return;
+    if (!_isMapReady || mapController == null) {
+      print('⚠️ Map not ready for polyline update');
+      return;
+    }
 
     final LatLng newPoint = LatLng(position.latitude, position.longitude);
 
-    // Debug info
+    // ✅ VALIDATION: Check if coordinates are valid
+    if (position.latitude.abs() > 90 || position.longitude.abs() > 180) {
+      print(
+          '⚠️ Invalid coordinates: ${position.latitude}, ${position.longitude}');
+      return;
+    }
 
     // Cek jika titik berubah signifikan
     if (_routePoints.isNotEmpty) {
@@ -2593,6 +2662,7 @@ class _MapScreenState extends State<MapScreen> {
 
       // Hanya tambahkan titik jika jarak cukup signifikan
       if (distance < 5) {
+        print('⚠️ Distance too small ($distance m), skipping polyline update');
         return; // Skip jika kurang dari 5 meter
       }
     }
@@ -2616,12 +2686,15 @@ class _MapScreenState extends State<MapScreen> {
         );
       });
 
-      // Save route count to db
-      final state = context.read<PatrolBloc>().state;
-      if (state is PatrolLoaded &&
-          state.task != null &&
-          _routePoints.length % 10 == 0) {}
-    } catch (e) {}
+      print('✅ Polyline updated: ${_routePoints.length} total points');
+
+      // Save route count to db every 10 points
+      if (_routePoints.length % 10 == 0) {
+        print('📊 Route milestone: ${_routePoints.length} points collected');
+      }
+    } catch (e) {
+      print('❌ Error updating polyline: $e');
+    }
   }
 
 // Metode untuk menampilkan rute yang tersimpan dari database
