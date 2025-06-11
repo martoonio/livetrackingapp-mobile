@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 class User {
@@ -82,22 +83,39 @@ class User {
 
   // Konversi ke Map untuk Firebase
   Map<String, dynamic> toMap() {
+    // Convert cluster coordinates to Firestore-compatible format
+    List<Map<String, double>>? convertedCoordinates;
+    if (clusterCoordinates != null) {
+      convertedCoordinates = clusterCoordinates!.map((point) {
+        if (point.length >= 2) {
+          return {
+            'lat': point[0],
+            'lng': point[1],
+          };
+        }
+        return {'lat': 0.0, 'lng': 0.0};
+      }).toList();
+    }
+
     return {
       'id': id,
       'email': email,
       'name': name,
       'role': role,
       'officers': officers?.map((officer) => officer.toMap()).toList(),
-      'cluster_coordinates': clusterCoordinates,
+      'cluster_coordinates': convertedCoordinates, // ✅ Use converted format
       'push_token': pushToken,
-      'created_at': createdAt?.toIso8601String(),
-      'updated_at': updatedAt?.toIso8601String(),
+      // Convert DateTime to Timestamp for Firestore
+      'created_at': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
+      'updated_at': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
       'updated_by': updatedBy,
       'checkpoint_validation_radius': checkpointValidationRadius,
-      // NEW: Battery fields
+      // Battery fields
       'battery_level': batteryLevel,
       'battery_state': batteryState,
-      'last_battery_update': lastBatteryUpdate?.toIso8601String(),
+      'last_battery_update': lastBatteryUpdate != null
+          ? Timestamp.fromDate(lastBatteryUpdate!)
+          : null,
       'is_online': isOnline,
     };
   }
@@ -112,21 +130,58 @@ class User {
       officers: _parseOfficers(map['officers']),
       clusterCoordinates: _parseCoordinates(map['cluster_coordinates']),
       pushToken: map['push_token'],
-      createdAt:
-          map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
-      updatedAt:
-          map['updated_at'] != null ? DateTime.parse(map['updated_at']) : null,
+      // ✅ FIXED: Use _parseDateTime instead of DateTime.parse
+      createdAt: _parseDateTime(map['createdAt'] ?? map['created_at']),
+      updatedAt: _parseDateTime(map['updatedAt'] ?? map['updated_at']),
       updatedBy: map['updated_by'],
       checkpointValidationRadius:
           _parseDouble(map['checkpoint_validation_radius']),
-      // NEW: Battery fields parsing
+      // ✅ FIXED: Battery fields parsing
       batteryLevel: map['battery_level'],
       batteryState: map['battery_state'],
-      lastBatteryUpdate: map['last_battery_update'] != null
-          ? DateTime.parse(map['last_battery_update'])
-          : null,
+      lastBatteryUpdate: _parseDateTime(map['last_battery_update']),
       isOnline: map['is_online'],
     );
+  }
+
+  // ✅ ADDED: Helper method to parse DateTime from various formats
+  static DateTime? _parseDateTime(dynamic value) {
+    if (value == null) return null;
+
+    try {
+      // Handle Firestore Timestamp
+      if (value is Timestamp) {
+        return value.toDate();
+      }
+      // Handle string format
+      else if (value is String) {
+        if (value.isEmpty) return null;
+        return DateTime.parse(value);
+      }
+      // Handle integer timestamp (milliseconds)
+      else if (value is int) {
+        return DateTime.fromMillisecondsSinceEpoch(value);
+      }
+      // Handle double timestamp (seconds with decimal)
+      else if (value is double) {
+        return DateTime.fromMillisecondsSinceEpoch((value * 1000).round());
+      }
+      // Handle Firestore Timestamp as Map (backup)
+      else if (value is Map && value['_seconds'] != null) {
+        final seconds = value['_seconds'] as int;
+        final nanoseconds = value['_nanoseconds'] as int? ?? 0;
+        return DateTime.fromMillisecondsSinceEpoch(
+          seconds * 1000 + (nanoseconds / 1000000).round(),
+        );
+      } else {
+        print(
+            'User._parseDateTime: Unknown type ${value.runtimeType}, value: $value');
+        return null;
+      }
+    } catch (e) {
+      print('User._parseDateTime: Error parsing value $value: $e');
+      return null;
+    }
   }
 
   static double? _parseDouble(dynamic value) {
@@ -220,24 +275,40 @@ class User {
     return result.isEmpty ? null : result;
   }
 
-  // Helper method untuk parsing coordinates
-  static List<List<double>>? _parseCoordinates(dynamic coordinatesData) {
-    if (coordinatesData == null) return null;
+  // ✅ UPDATED: Helper method to parse cluster coordinates from Firestore
+  static List<List<double>>? _parseCoordinates(dynamic value) {
+    if (value == null) return null;
 
     try {
-      if (coordinatesData is List) {
-        return coordinatesData.map((point) {
-          if (point is List) {
-            return point.map((coord) {
-              if (coord is double) return coord;
-              if (coord is int) return coord.toDouble();
-              return 0.0;
-            }).toList();
-          }
-          return <double>[0.0, 0.0];
-        }).toList();
+      if (value is List) {
+        return value
+            .map<List<double>>((point) {
+              // ✅ Handle new Firestore format (Map with lat/lng)
+              if (point is Map) {
+                final lat = point['lat'];
+                final lng = point['lng'];
+                if (lat != null && lng != null) {
+                  return [
+                    (lat as num).toDouble(),
+                    (lng as num).toDouble(),
+                  ];
+                }
+              }
+              // ✅ Handle legacy format (nested array)
+              else if (point is List && point.length >= 2) {
+                return [
+                  (point[0] as num).toDouble(),
+                  (point[1] as num).toDouble(),
+                ];
+              }
+              return <double>[];
+            })
+            .where((point) => point.isNotEmpty)
+            .toList();
       }
-    } catch (e) {}
+    } catch (e) {
+      print('Error parsing cluster coordinates: $e');
+    }
 
     return null;
   }
@@ -461,6 +532,7 @@ class Officer {
     }
   }
 
+  // Factory constructor untuk membuat Officer dari Map
   factory Officer.fromMap(Map<String, dynamic> map) {
     final typeStr = map['type'] ?? 'organik';
     final shiftStr = map['shift'] ?? 'pagi';
@@ -472,13 +544,51 @@ class Officer {
       shift: _parseShiftType(shiftStr, typeStr),
       clusterId: map['cluster_id'] ?? '',
       photoUrl: map['photo_url'],
-      // NEW: Battery fields parsing
+      // ✅ FIXED: Battery fields parsing
       batteryLevel: map['battery_level'],
       batteryState: map['battery_state'],
-      lastBatteryUpdate: map['last_battery_update'] != null
-          ? DateTime.parse(map['last_battery_update'])
-          : null,
+      lastBatteryUpdate: _parseDateTime(map['last_battery_update']),
     );
+  }
+
+  // ✅ ADDED: Static method for Officer to parse DateTime
+  static DateTime? _parseDateTime(dynamic value) {
+    if (value == null) return null;
+
+    try {
+      // Handle Firestore Timestamp
+      if (value is Timestamp) {
+        return value.toDate();
+      }
+      // Handle string format
+      else if (value is String) {
+        if (value.isEmpty) return null;
+        return DateTime.parse(value);
+      }
+      // Handle integer timestamp
+      else if (value is int) {
+        return DateTime.fromMillisecondsSinceEpoch(value);
+      }
+      // Handle double timestamp
+      else if (value is double) {
+        return DateTime.fromMillisecondsSinceEpoch((value * 1000).round());
+      }
+      // Handle Firestore Timestamp as Map
+      else if (value is Map && value['_seconds'] != null) {
+        final seconds = value['_seconds'] as int;
+        final nanoseconds = value['_nanoseconds'] as int? ?? 0;
+        return DateTime.fromMillisecondsSinceEpoch(
+          seconds * 1000 + (nanoseconds / 1000000).round(),
+        );
+      } else {
+        print(
+            'Officer._parseDateTime: Unknown type ${value.runtimeType}, value: $value');
+        return null;
+      }
+    } catch (e) {
+      print('Officer._parseDateTime: Error parsing value $value: $e');
+      return null;
+    }
   }
 
   // NEW: Copy with method untuk Officer

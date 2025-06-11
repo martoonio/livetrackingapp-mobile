@@ -4628,6 +4628,7 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
               _createdTaskId = state.taskId;
               // No need to show snackbar here, it's handled by _submitSingleTask or _assignMultipleTasks
             } else if (state is CreateTaskError) {
+              print('DEBUG CreateTaskError: ${state.message}');
               showCustomSnackbar(
                 context: context,
                 title: 'Error',

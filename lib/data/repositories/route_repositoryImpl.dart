@@ -1,14 +1,14 @@
 import 'dart:developer';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:livetrackingapp/domain/entities/user.dart';
 import '../../domain/entities/patrol_task.dart';
 import '../../domain/repositories/route_repository.dart';
 import '../../domain/entities/user.dart' as UserModel;
 
 class RouteRepositoryImpl implements RouteRepository {
-  final DatabaseReference _database = FirebaseDatabase.instance.ref();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   RouteRepositoryImpl();
@@ -24,84 +24,30 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       log('getCurrentTask called for userId: $userId');
 
-      // ✅ PERBAIKAN: Hanya gunakan satu orderBy
-      final snapshot = await _database
-          .child('tasks')
-          .orderByChild('userId')
-          .equalTo(userId)
-          .get(); // ← Hapus orderBy kedua
+      final snapshot = await _firestore
+          .collection('tasks')
+          .where('userId', isEqualTo: userId)
+          .where('status', whereIn: ['active', 'ongoing', 'in_progress'])
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .get();
 
-      if (!snapshot.exists) {
+      if (snapshot.docs.isEmpty) {
         log('No tasks found for userId: $userId');
         return null;
       }
 
-      Map<dynamic, dynamic> tasks;
-      try {
-        if (snapshot.value is Map) {
-          tasks = snapshot.value as Map<dynamic, dynamic>;
-        } else if (snapshot.value is List) {
-          final list = snapshot.value as List;
-          tasks = {};
-          for (int i = 0; i < list.length; i++) {
-            if (list[i] != null) {
-              tasks[i.toString()] = list[i];
-            }
-          }
-        } else {
-          return null;
-        }
-      } catch (e) {
-        log('Error converting snapshot value to map in getCurrentTask: $e');
-        return null;
-      }
+      final taskDoc = snapshot.docs.first;
+      final taskData = taskDoc.data();
+      taskData['taskId'] = taskDoc.id;
 
-      MapEntry<dynamic, dynamic>? activeTaskEntry;
-      try {
-        // ✅ PERBAIKAN: Filter dan sorting di client-side
-        final activeEntries = tasks.entries.where((entry) {
-          if (entry.value is! Map) return false;
-          final task = entry.value as Map<dynamic, dynamic>;
-          final status = task['status']?.toString().toLowerCase();
-          return status == 'active' ||
-              status == 'ongoing' ||
-              status == 'in_progress';
-        }).toList();
-
-        if (activeEntries.isEmpty) {
-          log('No active task found for userId: $userId');
-          return null;
-        }
-
-        // ✅ Sort by createdAt atau startTime di client
-        activeEntries.sort((a, b) {
-          final aTime = a.value['startTime'] ?? a.value['createdAt'];
-          final bTime = b.value['startTime'] ?? b.value['createdAt'];
-          if (aTime == null || bTime == null) return 0;
-          return bTime.toString().compareTo(aTime.toString());
-        });
-
-        activeTaskEntry = activeEntries.first;
-      } catch (e) {
-        log('Error finding active task in getCurrentTask: $e');
-        return null;
-      }
-
-      if (activeTaskEntry == null || activeTaskEntry.key == null) {
-        log('No active task found for userId: $userId');
-        return null;
-      }
-
-      final taskData = Map<String, dynamic>.from(activeTaskEntry.value as Map);
-      taskData['taskId'] = activeTaskEntry.key.toString();
-
-      // ✅ Load officer info
+      // Load officer info
       await _loadOfficerInfoForTask(taskData);
 
-      // ✅ Convert to PatrolTask
+      // Convert to PatrolTask
       final task = _convertToPatrolTask(taskData);
 
-      // ✅ Update timeliness if needed
+      // Update timeliness if needed
       final recalculatedTimeliness = determineTimelinessStatus(
           task.assignedStartTime,
           task.startTime,
@@ -126,8 +72,9 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       final task = await getTaskById(taskId: taskId);
 
-      await _database.child('tasks').child(taskId).update({
+      await _firestore.collection('tasks').doc(taskId).update({
         'status': status,
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       if (task != null) {
@@ -135,7 +82,7 @@ class RouteRepositoryImpl implements RouteRepository {
         final timeliness = determineTimelinessStatus(task.assignedStartTime,
             task.startTime, task.assignedEndTime, status);
 
-        await _database.child('tasks').child(taskId).update({
+        await _firestore.collection('tasks').doc(taskId).update({
           'timeliness': timeliness,
         });
       }
@@ -151,35 +98,26 @@ class RouteRepositoryImpl implements RouteRepository {
     DateTime timestamp,
   ) async {
     try {
-      // Skip auth check to avoid permission issues
       final user = _auth.currentUser;
       if (user == null) {
       } else {}
 
-      final taskRef = _database.child('tasks').child(taskId);
-
       // Create timestamp key
       final timestampKey = timestamp.millisecondsSinceEpoch.toString();
 
-      // Format data consistently
+      // ✅ FIXED: Format location data as Map instead of nested array
       final locationData = {
-        'coordinates': coordinates,
+        'lat': coordinates.length > 0 ? coordinates[0] : 0.0,
+        'lng': coordinates.length > 1 ? coordinates[1] : 0.0,
         'timestamp': timestamp.toIso8601String(),
       };
 
-      // Try direct path first for better performance
-      try {
-        await taskRef.child('route_path').child(timestampKey).set(locationData);
-      } catch (e) {
-        // Try alternative approach with update()
-        final updates = {
-          'route_path/$timestampKey': locationData,
-        };
-        await taskRef.update(updates);
-      }
-
-      // Also update lastLocation
-      await taskRef.child('lastLocation').set(locationData);
+      // Update route path
+      await _firestore.collection('tasks').doc(taskId).update({
+        'route_path.$timestampKey': locationData,
+        'lastLocation': locationData,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     } catch (e, stackTrace) {
       throw Exception('Failed to update location: $e');
     }
@@ -188,89 +126,33 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<List<PatrolTask>> getFinishedTasks(String userId) async {
     try {
-      final snapshot = await _database
-          .child('tasks')
-          .orderByChild('userId')
-          .equalTo(userId)
+      final snapshot = await _firestore
+          .collection('tasks')
+          .where('userId', isEqualTo: userId)
+          .where('status', isEqualTo: 'finished')
+          .orderBy('endTime', descending: true)
           .get();
 
-      if (!snapshot.exists) {
-        return [];
-      }
-
-      // PERBAIKAN: Cek tipe data sebelum casting
-      Map<dynamic, dynamic> tasks;
-      if (snapshot.value is Map) {
-        tasks = snapshot.value as Map<dynamic, dynamic>;
-      } else if (snapshot.value is List) {
-        final list = snapshot.value as List;
-        tasks = {};
-        for (int i = 0; i < list.length; i++) {
-          if (list[i] != null) {
-            tasks[i.toString()] = list[i];
-          }
-        }
-      } else {
+      if (snapshot.docs.isEmpty) {
         return [];
       }
 
       List<PatrolTask> finishedTasks = [];
 
-      await Future.forEach(tasks.entries,
-          (MapEntry<dynamic, dynamic> entry) async {
+      for (var doc in snapshot.docs) {
         try {
-          if (entry.value is! Map) {
-            return;
-          }
+          final taskData = doc.data();
+          taskData['taskId'] = doc.id;
 
-          final taskData = entry.value as Map<dynamic, dynamic>;
-          final status = taskData['status']?.toString() ?? '';
+          // Get officer name if possible
+          await _loadOfficerInfoForTask(taskData);
 
-          if (status.toLowerCase() == 'finished') {
-            // Get officer name if possible
-            String? officerName;
-            String? officerPhotoUrl;
-
-            if (taskData['clusterId'] != null) {
-              final clusterId = taskData['clusterId'].toString();
-              final officerId = taskData['userId'].toString();
-
-              try {
-                final officerSnapshot = await _database
-                    .child('users/$clusterId/officers')
-                    .orderByKey()
-                    .equalTo(officerId)
-                    .get();
-
-                if (officerSnapshot.exists) {
-                  if (officerSnapshot.value is Map) {
-                    final officerData = officerSnapshot.value as Map;
-                    if (officerData.containsKey(officerId) &&
-                        officerData[officerId] is Map) {
-                      officerName = officerData[officerId]['name']?.toString();
-                      officerPhotoUrl =
-                          officerData[officerId]['photoUrl']?.toString();
-                    }
-                  }
-                }
-              } catch (e) {}
-            }
-
-            final task = _convertToPatrolTask({
-              ...taskData,
-              'taskId': entry.key,
-              'officerName': officerName,
-              'officerPhotoUrl': officerPhotoUrl,
-            });
-
-            finishedTasks.add(task);
-          }
-        } catch (e) {}
-      });
-
-      // Sort by end time, most recent first
-      finishedTasks.sort((a, b) =>
-          (b.endTime ?? DateTime.now()).compareTo(a.endTime ?? DateTime.now()));
+          final task = _convertToPatrolTask(taskData);
+          finishedTasks.add(task);
+        } catch (e) {
+          // Continue processing other tasks
+        }
+      }
 
       return finishedTasks;
     } catch (e) {
@@ -278,85 +160,50 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
-// Update watchCurrentTask to handle in_progress status
   @override
   Stream<PatrolTask?> watchCurrentTask(String userId) {
-    // Debug print
+    return _firestore
+        .collection('tasks')
+        .where('userId', isEqualTo: userId)
+        .where('status', whereIn: ['active', 'ongoing', 'in_progress'])
+        .orderBy('createdAt', descending: true)
+        .limit(1)
+        .snapshots()
+        .map((snapshot) {
+          if (snapshot.docs.isEmpty) {
+            return null;
+          }
 
-    return _database
-        .child('tasks')
-        .orderByChild('userId')
-        .equalTo(userId)
-        .onValue
-        .map((event) {
-      if (!event.snapshot.exists) {
-        return null;
-      }
+          try {
+            final taskDoc = snapshot.docs.first;
+            final taskData = taskDoc.data();
+            taskData['taskId'] = taskDoc.id;
 
-      try {
-        final tasksMap = event.snapshot.value as Map<dynamic, dynamic>;
-
-        // Find active or ongoing task
-        MapEntry<dynamic, dynamic>? activeTaskEntry;
-        try {
-          activeTaskEntry = tasksMap.entries.firstWhere(
-            (entry) {
-              final task = entry.value as Map<dynamic, dynamic>;
-              final status = task['status']?.toString();
-              return status == 'active' ||
-                  status == 'ongoing' ||
-                  status == 'in_progress';
-            },
-          );
-        } catch (e) {
-          activeTaskEntry = null;
-        }
-
-        if (activeTaskEntry == null) {
+            return _convertToPatrolTask(taskData);
+          } catch (e, stackTrace) {
+            return null;
+          }
+        })
+        .handleError((error) {
           return null;
-        }
-
-        // Log assigned start/end times for debugging
-        final taskData = activeTaskEntry.value as Map<dynamic, dynamic>;
-
-        // Create PatrolTask with the task data
-        return _convertToPatrolTask({
-          ...taskData,
-          'taskId': activeTaskEntry.key,
         });
-      } catch (e, stackTrace) {
-        return null;
-      }
-    }).handleError((error) {
-      return null;
-    });
   }
 
   @override
   Stream<List<PatrolTask>> watchFinishedTasks(String userId) {
-    return _database
-        .child('tasks')
-        .orderByChild('userId')
-        .equalTo(userId)
-        .onValue
-        .map((event) {
-      if (!event.snapshot.exists) {
-        return [];
-      }
-
+    return _firestore
+        .collection('tasks')
+        .where('userId', isEqualTo: userId)
+        .where('status', isEqualTo: 'finished')
+        .orderBy('endTime', descending: true)
+        .snapshots()
+        .map((snapshot) {
       try {
-        final tasksMap = event.snapshot.value as Map<dynamic, dynamic>;
-        final finishedTasks = tasksMap.entries
-            .where((entry) => (entry.value as Map)['status'] == 'finished')
-            .map((entry) => _convertToPatrolTask({
-                  ...entry.value as Map<dynamic, dynamic>,
-                  'taskId': entry.key,
-                }))
-            .toList();
-
-        // Sort by end time, most recent first
-        finishedTasks.sort((a, b) => (b.endTime ?? DateTime.now())
-            .compareTo(a.endTime ?? DateTime.now()));
+        final finishedTasks = snapshot.docs.map((doc) {
+          final taskData = doc.data();
+          taskData['taskId'] = doc.id;
+          return _convertToPatrolTask(taskData);
+        }).toList();
 
         return finishedTasks;
       } catch (e) {
@@ -373,6 +220,8 @@ class RouteRepositoryImpl implements RouteRepository {
         return DateTime.parse(value);
       } else if (value is int) {
         return DateTime.fromMillisecondsSinceEpoch(value);
+      } else if (value is Timestamp) {
+        return value.toDate();
       } else if (value is Map && value['_seconds'] != null) {
         // Firestore Timestamp format
         return DateTime.fromMillisecondsSinceEpoch(
@@ -385,7 +234,6 @@ class RouteRepositoryImpl implements RouteRepository {
     return null;
   }
 
-  // PERBAIKAN: Safe route coordinates parsing
   List<List<double>>? _parseRouteCoordinates(dynamic value) {
     if (value == null) return null;
 
@@ -393,7 +241,19 @@ class RouteRepositoryImpl implements RouteRepository {
       if (value is List) {
         return value
             .map<List<double>>((point) {
-              if (point is List && point.length >= 2) {
+              // ✅ Handle new Firestore format (Map with lat/lng)
+              if (point is Map) {
+                final lat = point['lat'];
+                final lng = point['lng'];
+                if (lat != null && lng != null) {
+                  return [
+                    (lat as num).toDouble(),
+                    (lng as num).toDouble(),
+                  ];
+                }
+              }
+              // ✅ Handle legacy format (nested array)
+              else if (point is List && point.length >= 2) {
                 return [
                   (point[0] as num).toDouble(),
                   (point[1] as num).toDouble(),
@@ -410,8 +270,6 @@ class RouteRepositoryImpl implements RouteRepository {
 
     return null;
   }
-
-  // Perbaiki metode _convertToPatrolTask untuk menangani semua properti penting
 
   PatrolTask _convertToPatrolTask(Map<String, dynamic> data) {
     return PatrolTask(
@@ -454,13 +312,14 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<PatrolTask?> getTaskById({required String taskId}) async {
     try {
-      final snapshot = await _database.child('tasks/$taskId').get();
+      final doc = await _firestore.collection('tasks').doc(taskId).get();
 
-      if (!snapshot.exists) {
+      if (!doc.exists) {
         return null;
       }
 
-      final taskData = Map<String, dynamic>.from(snapshot.value as Map);
+      final taskData = doc.data()!;
+      taskData['taskId'] = doc.id;
       return _convertToPatrolTask(taskData);
     } catch (e) {
       return null;
@@ -470,30 +329,19 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<void> updateTask(String taskId, Map<String, dynamic> updates) async {
     try {
-      // Debug print
-
-      // Get current task data first
-      final taskSnapshot = await _database.child('tasks').child(taskId).get();
-
-      if (!taskSnapshot.exists) {
-        throw Exception('Task not found');
-      }
-
-      // Format any DateTime objects in updates to ISO format
+      // Format any DateTime objects in updates to Timestamp
       final formattedUpdates = Map<String, dynamic>.from(updates);
       for (final key in formattedUpdates.keys) {
         final value = formattedUpdates[key];
         if (value is DateTime) {
-          formattedUpdates[key] = value.toIso8601String();
+          formattedUpdates[key] = Timestamp.fromDate(value);
         }
       }
 
-      // Update task with new data
-      await _database.child('tasks').child(taskId).update(formattedUpdates);
+      formattedUpdates['updatedAt'] = FieldValue.serverTimestamp();
 
-      // Debug print
+      await _firestore.collection('tasks').doc(taskId).update(formattedUpdates);
     } catch (e, stackTrace) {
-      // Debug print
       throw Exception('Failed to update task: $e');
     }
   }
@@ -511,31 +359,41 @@ class RouteRepositoryImpl implements RouteRepository {
   }) async {
     try {
       await _checkAuth();
-      final taskRef = _database.child('tasks').push();
 
-      // Simpan ID task untuk dikembalikan
-      final String taskId = taskRef.key!;
+      // ✅ FIXED: Convert nested array to Firestore-compatible format
+      final List<Map<String, double>> convertedRoute =
+          assignedRoute.map((point) {
+        if (point.length >= 2) {
+          return {
+            'lat': point[0],
+            'lng': point[1],
+          };
+        }
+        return {'lat': 0.0, 'lng': 0.0};
+      }).toList();
 
       final newTask = {
         'clusterId': clusterId,
-        'taskId': taskId,
         'vehicleId': vehicleId,
         'userId': assignedOfficerId,
-        'assigned_route': assignedRoute,
-        'assignedStartTime': assignedStartTime?.toIso8601String(),
-        'assignedEndTime': assignedEndTime?.toIso8601String(),
+        'assigned_route':
+            convertedRoute, // ✅ Use converted format instead of nested array
+        'assignedStartTime': assignedStartTime != null
+            ? Timestamp.fromDate(assignedStartTime)
+            : null,
+        'assignedEndTime': assignedEndTime != null
+            ? Timestamp.fromDate(assignedEndTime)
+            : null,
         'officerName': officerName,
         'clusterName': clusterName,
         'status': 'active',
-        'createdAt': DateTime.now().toIso8601String(),
-        'route_path': null,
+        'createdAt': FieldValue.serverTimestamp(),
+        'route_path': {},
         'lastLocation': null,
       };
 
-      await taskRef.set(newTask);
-
-      // Kembalikan ID task
-      return taskId;
+      final docRef = await _firestore.collection('tasks').add(newTask);
+      return docRef.id;
     } catch (e) {
       throw Exception('Failed to create task: $e');
     }
@@ -550,67 +408,47 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       log('getAllTasks called: limit=$limit, status=$status, lastKey=$lastKey');
 
-      Query query = _database.child('tasks');
+      Query query =
+          _firestore.collection('tasks').orderBy('createdAt', descending: true);
 
-      // ✅ PERBAIKAN: Pilih satu orderBy strategy saja
       if (status != null) {
-        // Strategy 1: Order by status untuk filtering
-        query = query.orderByChild('status').equalTo(status);
-      } else {
-        // Strategy 2: Order by createdAt untuk sorting chronological
-        query = query.orderByChild('createdAt');
+        query = query.where('status', isEqualTo: status);
       }
 
-      // ✅ Tambahkan limit
-      query = query.limitToLast(limit * 2); // Get more for filtering
+      if (lastKey != null) {
+        final lastDoc = await _firestore.collection('tasks').doc(lastKey).get();
+        if (lastDoc.exists) {
+          query = query.startAfterDocument(lastDoc);
+        }
+      }
+
+      query = query.limit(limit);
 
       final snapshot = await query.get();
 
-      if (!snapshot.exists || snapshot.value == null) {
+      if (snapshot.docs.isEmpty) {
         log('No tasks found');
         return [];
       }
 
-      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
       List<PatrolTask> allTasks = [];
 
-      // ✅ Process tasks
-      for (var entry in tasksMap.entries) {
+      for (var doc in snapshot.docs) {
         try {
-          final taskId = entry.key.toString();
-          final taskData = Map<String, dynamic>.from(entry.value as Map);
-          taskData['taskId'] = taskId;
-
-          // ✅ Additional status filtering if needed
-          if (status != null &&
-              taskData['status']?.toString().toLowerCase() !=
-                  status.toLowerCase()) {
-            continue;
-          }
+          final taskData = doc.data() as Map<String, dynamic>;
+          taskData['taskId'] = doc.id;
 
           if (_isValidTaskData(taskData)) {
             final task = _convertToPatrolTask(taskData);
             allTasks.add(task);
           }
         } catch (e) {
-          log('Error processing task ${entry.key}: $e');
+          log('Error processing task ${doc.id}: $e');
         }
       }
 
-      // ✅ Client-side sorting by createdAt
-      allTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      // ✅ Apply pagination
-      if (lastKey != null) {
-        final startIndex = allTasks.indexWhere(
-                (task) => task.createdAt.toIso8601String() == lastKey) +
-            1;
-        allTasks = allTasks.sublist(startIndex.clamp(0, allTasks.length));
-      }
-
-      final result = allTasks.take(limit).toList();
-      log('Fetched ${result.length} tasks total');
-      return result;
+      log('Fetched ${allTasks.length} tasks total');
+      return allTasks;
     } catch (e, stackTrace) {
       log('Error in getAllTasks: $e\n$stackTrace');
       return [];
@@ -620,41 +458,26 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<List<PatrolTask>> getActiveTasks({int limit = 50}) async {
     try {
-      // Query untuk active status
-      final activeSnapshot = await _database
-          .child('tasks')
-          .orderByChild('status')
-          .equalTo('active')
-          .limitToLast(limit)
-          .get();
-
-      // Query untuk ongoing status
-      final ongoingSnapshot = await _database
-          .child('tasks')
-          .orderByChild('status')
-          .equalTo('ongoing')
-          .limitToLast(limit)
+      final snapshot = await _firestore
+          .collection('tasks')
+          .where('status', whereIn: ['active', 'ongoing'])
+          .orderBy('createdAt', descending: true)
+          .limit(limit)
           .get();
 
       List<PatrolTask> allTasks = [];
 
-      if (activeSnapshot.exists && activeSnapshot.value != null) {
-        final activeTasksMap = activeSnapshot.value as Map<dynamic, dynamic>;
-        allTasks.addAll(_convertMapToTaskList(activeTasksMap));
+      for (var doc in snapshot.docs) {
+        try {
+          final taskData = doc.data();
+          taskData['taskId'] = doc.id;
+          allTasks.add(_convertToPatrolTask(taskData));
+        } catch (e) {
+          // Continue processing other tasks
+        }
       }
 
-      if (ongoingSnapshot.exists && ongoingSnapshot.value != null) {
-        final ongoingTasksMap = ongoingSnapshot.value as Map<dynamic, dynamic>;
-        allTasks.addAll(_convertMapToTaskList(ongoingTasksMap));
-      }
-
-      // Remove duplicates berdasarkan taskId
-      final Map<String, PatrolTask> uniqueTasks = {};
-      for (var task in allTasks) {
-        uniqueTasks[task.taskId] = task;
-      }
-
-      return uniqueTasks.values.toList();
+      return allTasks;
     } catch (e) {
       print('Error in getActiveTasks: $e');
       return [];
@@ -664,17 +487,18 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<List<PatrolTask>> getOngoingTasks({int limit = 50}) async {
     try {
-      final snapshot = await _database
-          .child('tasks')
-          .orderByChild('status')
-          .equalTo('ongoing')
-          .limitToLast(limit)
+      final snapshot = await _firestore
+          .collection('tasks')
+          .where('status', isEqualTo: 'ongoing')
+          .orderBy('createdAt', descending: true)
+          .limit(limit)
           .get();
 
-      if (!snapshot.exists) return [];
-
-      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      return _convertMapToTaskList(tasksMap);
+      return snapshot.docs.map((doc) {
+        final taskData = doc.data();
+        taskData['taskId'] = doc.id;
+        return _convertToPatrolTask(taskData);
+      }).toList();
     } catch (e) {
       return [];
     }
@@ -690,34 +514,30 @@ class RouteRepositoryImpl implements RouteRepository {
     String? lastKey,
   }) async {
     try {
-      Query query = _database.child('tasks');
+      Query query = _firestore.collection('tasks');
 
-      // Filter by date range using timestamp
-      final startTimestamp = startDate.millisecondsSinceEpoch;
-      final endTimestamp = endDate.millisecondsSinceEpoch;
+      // Filter by date range
+      query = query
+          .where('createdAt',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+          .where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(endDate));
 
       if (status != null) {
-        query = query.orderByChild('status').equalTo(status);
-      } else {
-        query = query.orderByChild('createdAt');
+        query = query.where('status', isEqualTo: status);
       }
 
-      if (lastKey != null) {
-        query = query.startAfter(lastKey);
+      if (clusterId != null) {
+        query = query.where('clusterId', isEqualTo: clusterId);
       }
 
-      query = query.limitToFirst(limit);
+      query = query.orderBy('createdAt', descending: true).limit(limit);
 
       final snapshot = await query.get();
-      if (!snapshot.exists) return [];
 
-      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      final tasks = _convertMapToTaskList(tasksMap);
-
-      // Filter by date range locally (more efficient than complex queries)
-      return tasks.where((task) {
-        final taskTimestamp = task.createdAt.millisecondsSinceEpoch;
-        return taskTimestamp >= startTimestamp && taskTimestamp <= endTimestamp;
+      return snapshot.docs.map((doc) {
+        final taskData = doc.data() as Map<String, dynamic>;
+        taskData['taskId'] = doc.id;
+        return _convertToPatrolTask(taskData);
       }).toList();
     } catch (e) {
       return [];
@@ -734,65 +554,52 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       log('getClusterTasks called: clusterId=$clusterId, limit=$limit, status=$status, lastKey=$lastKey');
 
-      // ✅ PERBAIKAN: Hanya gunakan satu orderBy
-      final snapshot = await _database
-          .child('tasks')
-          .orderByChild('clusterId')
-          .equalTo(clusterId)
-          .get(); // ← Tidak ada orderBy kedua
+      Query query = _firestore
+          .collection('tasks')
+          .where('clusterId', isEqualTo: clusterId)
+          .orderBy('createdAt', descending: true);
 
-      if (!snapshot.exists || snapshot.value == null) {
+      if (status != null) {
+        query = query.where('status', isEqualTo: status);
+      }
+
+      if (lastKey != null) {
+        final lastDoc = await _firestore.collection('tasks').doc(lastKey).get();
+        if (lastDoc.exists) {
+          query = query.startAfterDocument(lastDoc);
+        }
+      }
+
+      query = query.limit(limit);
+
+      final snapshot = await query.get();
+
+      if (snapshot.docs.isEmpty) {
         log('No tasks found for cluster $clusterId');
         return [];
       }
 
-      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
       List<PatrolTask> allTasks = [];
 
-      // ✅ Process each task
-      await Future.forEach(tasksMap.entries,
-          (MapEntry<dynamic, dynamic> entry) async {
+      for (var doc in snapshot.docs) {
         try {
-          final taskId = entry.key.toString();
-          final taskData = Map<String, dynamic>.from(entry.value as Map);
-          taskData['taskId'] = taskId;
+          final taskData = doc.data() as Map<String, dynamic>;
+          taskData['taskId'] = doc.id;
 
-          // ✅ Filter by status if specified
-          if (status != null &&
-              taskData['status']?.toString().toLowerCase() !=
-                  status.toLowerCase()) {
-            return; // Skip this task
-          }
-
-          // ✅ Load officer info
+          // Load officer info
           await _loadOfficerInfoForTask(taskData);
 
-          // ✅ Convert to PatrolTask
           if (_isValidTaskData(taskData)) {
             final task = _convertToPatrolTask(taskData);
             allTasks.add(task);
           }
         } catch (e) {
-          log('Error processing task ${entry.key}: $e');
+          log('Error processing task ${doc.id}: $e');
         }
-      });
-
-      // ✅ Sort by createdAt (newest first) - client-side sorting
-      allTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      // ✅ Apply pagination client-side
-      int startIndex = 0;
-      if (lastKey != null) {
-        startIndex = allTasks.indexWhere(
-                (task) => task.createdAt.toIso8601String() == lastKey) +
-            1;
       }
 
-      final endIndex = (startIndex + limit).clamp(0, allTasks.length);
-      final paginatedTasks = allTasks.sublist(startIndex, endIndex);
-
-      log('Fetched ${paginatedTasks.length} tasks for cluster $clusterId, status $status');
-      return paginatedTasks;
+      log('Fetched ${allTasks.length} tasks for cluster $clusterId, status $status');
+      return allTasks;
     } catch (e, stackTrace) {
       log('Error in getClusterTasks for $clusterId: $e\n$stackTrace');
       return [];
@@ -806,15 +613,15 @@ class RouteRepositoryImpl implements RouteRepository {
         final clusterId = taskData['clusterId'].toString();
 
         if (clusterId.isNotEmpty) {
-          final officerSnapshot =
-              await _database.child('users/$clusterId/officers').get();
+          final clusterDoc =
+              await _firestore.collection('users').doc(clusterId).get();
 
-          if (officerSnapshot.exists && officerSnapshot.value != null) {
-            final officersData = officerSnapshot.value;
+          if (clusterDoc.exists) {
+            final clusterData = clusterDoc.data()!;
+            final officers = clusterData['officers'] as List?;
 
-            // ✅ Handle both List and Map structures
-            if (officersData is List) {
-              for (var officer in officersData) {
+            if (officers != null) {
+              for (var officer in officers) {
                 if (officer != null && officer['id'] == officerId) {
                   taskData['officerName'] = officer['name']?.toString() ?? '';
                   taskData['officerPhotoUrl'] =
@@ -822,14 +629,6 @@ class RouteRepositoryImpl implements RouteRepository {
                   break;
                 }
               }
-            } else if (officersData is Map) {
-              officersData.forEach((key, officer) {
-                if (officer != null && officer['id'] == officerId) {
-                  taskData['officerName'] = officer['name']?.toString() ?? '';
-                  taskData['officerPhotoUrl'] =
-                      officer['photo_url']?.toString() ?? '';
-                }
-              });
             }
           }
         }
@@ -847,63 +646,23 @@ class RouteRepositoryImpl implements RouteRepository {
   Future<List<PatrolTask>> getActiveAndCancelledTasks(String clusterId,
       {int limit = 20}) async {
     try {
-      final snapshot = await _database
-          .child('tasks')
-          .orderByChild('clusterId')
-          .equalTo(clusterId)
+      final snapshot = await _firestore
+          .collection('tasks')
+          .where('clusterId', isEqualTo: clusterId)
+          .where('status', whereIn: ['active', 'cancelled'])
+          .orderBy('createdAt', descending: true)
+          .limit(limit)
           .get();
 
-      if (!snapshot.exists || snapshot.value == null) {
-        return [];
-      }
-
-      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      final allTasks = _convertMapToTaskList(tasksMap);
-
-      // Filter hanya active dan cancelled
-      final filteredTasks = allTasks
-          .where((task) =>
-              task.status.toLowerCase() == 'active' ||
-              task.status.toLowerCase() == 'cancelled')
-          .toList();
-
-      // Sort by creation date (newest first)
-      filteredTasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-      return filteredTasks.take(limit).toList();
+      return snapshot.docs.map((doc) {
+        final taskData = doc.data();
+        taskData['taskId'] = doc.id;
+        return _convertToPatrolTask(taskData);
+      }).toList();
     } catch (e) {
       print('Error getting active and cancelled tasks for $clusterId: $e');
       return [];
     }
-  }
-
-  List<PatrolTask> _convertMapToTaskList(Map<dynamic, dynamic> tasksMap) {
-    final tasks = <PatrolTask>[];
-
-    tasksMap.forEach((key, value) {
-      if (value is Map) {
-        try {
-          final taskData = Map<String, dynamic>.from(value);
-          taskData['taskId'] = key.toString();
-
-          // PERBAIKAN: Validasi data sebelum konversi
-          if (_isValidTaskData(taskData)) {
-            final task = _convertToPatrolTask(taskData);
-            tasks.add(task);
-          } else {
-            print('Invalid task data for key $key: missing required fields');
-          }
-        } catch (e) {
-          print('Error converting task $key: $e');
-          // Skip invalid tasks instead of failing
-        }
-      }
-    });
-
-    // Sort by creation date descending untuk konsistensi
-    tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-    return tasks;
   }
 
   @override
@@ -911,19 +670,22 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       print('getAllClusterTasks called for: $clusterId');
 
-      final snapshot = await _database
-          .child('tasks')
-          .orderByChild('clusterId')
-          .equalTo(clusterId)
+      final snapshot = await _firestore
+          .collection('tasks')
+          .where('clusterId', isEqualTo: clusterId)
+          .orderBy('createdAt', descending: true)
           .get();
 
-      if (!snapshot.exists || snapshot.value == null) {
+      if (snapshot.docs.isEmpty) {
         print('No tasks found for cluster $clusterId');
         return [];
       }
 
-      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      final allTasks = _convertMapToTaskList(tasksMap);
+      final allTasks = snapshot.docs.map((doc) {
+        final taskData = doc.data();
+        taskData['taskId'] = doc.id;
+        return _convertToPatrolTask(taskData);
+      }).toList();
 
       print('Found ${allTasks.length} total tasks for cluster $clusterId');
       return allTasks;
@@ -933,7 +695,6 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
-  // PERBAIKAN: Enhanced validation
   bool _isValidTaskData(Map<String, dynamic> taskData) {
     return taskData['taskId'] != null &&
         taskData['taskId'].toString().isNotEmpty &&
@@ -941,7 +702,6 @@ class RouteRepositoryImpl implements RouteRepository {
         taskData['clusterId'].toString().isNotEmpty;
   }
 
-  // PERBAIKAN: Hapus getAllTasks() dan ganti dengan pagination
   @override
   Future<List<PatrolTask>> getRecentTasks({
     int limit = 50,
@@ -950,25 +710,32 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       print('getRecentTasks called: limit=$limit, lastKey=$lastKey');
 
-      Query query = _database.child('tasks').orderByKey();
+      Query query =
+          _firestore.collection('tasks').orderBy('createdAt', descending: true);
 
       if (lastKey != null) {
-        query = query.endBefore(lastKey);
+        final lastDoc = await _firestore.collection('tasks').doc(lastKey).get();
+        if (lastDoc.exists) {
+          query = query.startAfterDocument(lastDoc);
+        }
       }
 
-      query = query.limitToLast(limit);
+      query = query.limit(limit);
 
       final snapshot = await query.get();
 
-      if (!snapshot.exists || snapshot.value == null) {
+      if (snapshot.docs.isEmpty) {
         print('No recent tasks found');
         return [];
       }
 
-      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
-      print('Found ${tasksMap.length} recent tasks');
+      print('Found ${snapshot.docs.length} recent tasks');
 
-      return _convertMapToTaskList(tasksMap);
+      return snapshot.docs.map((doc) {
+        final taskData = doc.data() as Map<String, dynamic>;
+        taskData['taskId'] = doc.id;
+        return _convertToPatrolTask(taskData);
+      }).toList();
     } catch (e) {
       print('Error in getRecentTasks: $e');
       return [];
@@ -979,26 +746,17 @@ class RouteRepositoryImpl implements RouteRepository {
   Future<List<String>> getAllVehicles() async {
     try {
       await _checkAuth();
-      final snapshot = await _database.child('vehicle').get();
+      final doc = await _firestore.collection('config').doc('vehicles').get();
 
-      if (!snapshot.exists) {
+      if (!doc.exists) {
         return [];
       }
 
-      final value = snapshot.value;
+      final data = doc.data()!;
+      final vehicles = data['list'] as List?;
 
-      if (value is List) {
-        // Handle list format
-        return value
-            .whereType<String>()
-            .where((item) => item.isNotEmpty)
-            .toList();
-      } else if (value is Map) {
-        // Handle map format
-        return value.values
-            .where((item) => item != null)
-            .map((item) => item.toString())
-            .toList();
+      if (vehicles != null) {
+        return vehicles.map((vehicle) => vehicle.toString()).toList();
       }
 
       return [];
@@ -1007,20 +765,16 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
-  //Tatar Logic
-  // Tambahkan implementasi method-method baru ini ke AdminRepositoryImpl
-
   @override
   Future<UserModel.User> getClusterById(String clusterId) async {
     try {
-      final snapshot = await _database.child('users/$clusterId').get();
+      final doc = await _firestore.collection('users').doc(clusterId).get();
 
-      if (!snapshot.exists) {
-        throw Exception('Tatar not found');
+      if (!doc.exists) {
+        throw Exception('Cluster not found');
       }
 
-      final data = snapshot.value as Map<dynamic, dynamic>;
-      final userData = Map<String, dynamic>.from(data);
+      final userData = doc.data()!;
       userData['id'] = clusterId;
 
       return UserModel.User.fromMap(userData);
@@ -1047,16 +801,27 @@ class RouteRepositoryImpl implements RouteRepository {
 
       final userId = userCredential.user!.uid;
 
-      // Create user data in Realtime Database
-      final now = DateTime.now().toIso8601String();
-      await _database.child('users/$userId').set({
+      // ✅ FIXED: Convert nested array to Firestore-compatible format
+      final List<Map<String, double>> convertedCoordinates =
+          clusterCoordinates.map((point) {
+        if (point.length >= 2) {
+          return {
+            'lat': point[0],
+            'lng': point[1],
+          };
+        }
+        return {'lat': 0.0, 'lng': 0.0};
+      }).toList();
+
+      // Create user data in Firestore
+      await _firestore.collection('users').doc(userId).set({
         'name': name,
         'email': email,
         'role': role,
-        'cluster_coordinates': clusterCoordinates,
+        'cluster_coordinates': convertedCoordinates, // ✅ Use converted format
         'officers': [], // Empty officers list initially
-        'created_at': now,
-        'updated_at': now,
+        'created_at': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
       });
 
       await firebaseAuth.signOut();
@@ -1069,21 +834,33 @@ class RouteRepositoryImpl implements RouteRepository {
 
   Future<void> updateClusterAccount(UserModel.User cluster) async {
     try {
+      // ✅ FIXED: Convert cluster coordinates if they exist
+      List<Map<String, double>>? convertedCoordinates;
+      if (cluster.clusterCoordinates != null) {
+        convertedCoordinates = cluster.clusterCoordinates!.map((point) {
+          if (point.length >= 2) {
+            return {
+              'lat': point[0],
+              'lng': point[1],
+            };
+          }
+          return {'lat': 0.0, 'lng': 0.0};
+        }).toList();
+      }
+
       final updates = {
         'name': cluster.name,
         'role': cluster.role,
-        'cluster_coordinates': cluster.clusterCoordinates,
-        'updated_at': DateTime.now().toIso8601String(),
+        'cluster_coordinates': convertedCoordinates, // ✅ Use converted format
+        'updated_at': FieldValue.serverTimestamp(),
       };
 
-      await _database.child('users/${cluster.id}').update(updates);
+      await _firestore.collection('users').doc(cluster.id).update(updates);
       return;
     } catch (e) {
       throw Exception('Failed to update cluster account: $e');
     }
   }
-
-  // Memperbaiki metode addOfficerToCluster untuk menggunakan push().key sebagai ID
 
   @override
   Future<void> addOfficerToCluster({
@@ -1093,13 +870,10 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       await _checkAuth();
 
-      // Buat referensi baru untuk officer dengan push()
-      final officerRef = _database.child('users/$clusterId/officers').push();
+      // Generate new officer ID
+      final officerId = _firestore.collection('temp').doc().id;
 
-      // Dapatkan key yang dibuat Firebase
-      final String officerId = officerRef.key!;
-
-      // Buat officer dengan ID Firebase
+      // Create officer with generated ID
       final updatedOfficer = Officer(
         id: officerId,
         name: officer.name,
@@ -1109,12 +883,10 @@ class RouteRepositoryImpl implements RouteRepository {
         photoUrl: officer.photoUrl,
       );
 
-      // Simpan officer dengan ID Firebase
-      await officerRef.set(updatedOfficer.toMap());
-
-      // Update timestamp cluster
-      await _database.child('users/$clusterId').update({
-        'updated_at': DateTime.now().toIso8601String(),
+      // Add officer to the officers array
+      await _firestore.collection('users').doc(clusterId).update({
+        'officers': FieldValue.arrayUnion([updatedOfficer.toMap()]),
+        'updated_at': FieldValue.serverTimestamp(),
         'updated_by': _auth.currentUser?.uid,
       });
 
@@ -1137,29 +909,15 @@ class RouteRepositoryImpl implements RouteRepository {
       if (task.endTime != null && task.startTime == null) {
         print('Found corrupted task $taskId: has endTime but no startTime');
 
-        // Option 1: Reset to active state
         fixes['endTime'] = null;
         fixes['status'] = 'active';
         fixes['distance'] = null;
         fixes['corruptionFixed'] = true;
-        fixes['fixedAt'] = DateTime.now().toIso8601String();
+        fixes['fixedAt'] = FieldValue.serverTimestamp();
         needsUpdate = true;
       }
 
-      // Check 2: Has initialReportTime but wrong timing
-      if (task.initialReportTime != null && task.assignedStartTime != null) {
-        final reportTime = task.initialReportTime!;
-        final scheduledTime = task.assignedStartTime!;
-
-        // If report was made significantly before scheduled time
-        if (reportTime.isBefore(scheduledTime.subtract(Duration(hours: 1)))) {
-          print('Warning: Task $taskId has early initial report');
-          fixes['earlyReportDetected'] = true;
-          needsUpdate = true;
-        }
-      }
-
-      // Check 3: Status inconsistency
+      // Check 2: Status inconsistency
       if (task.status == 'finished' && task.startTime == null) {
         print('Found status inconsistency in task $taskId');
         fixes['status'] = 'active';
@@ -1179,26 +937,24 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<void> fixCorruptedTasks() async {
     try {
-      final snapshot = await _database.child('tasks').get();
-      if (!snapshot.exists) return;
+      final snapshot = await _firestore.collection('tasks').get();
+      if (snapshot.docs.isEmpty) return;
 
-      final tasksMap = snapshot.value as Map<dynamic, dynamic>;
       int fixedCount = 0;
 
-      for (var entry in tasksMap.entries) {
-        final taskId = entry.key;
-        final taskData = entry.value as Map<dynamic, dynamic>;
+      for (var doc in snapshot.docs) {
+        final taskData = doc.data();
 
         // Find corrupted tasks
         if (taskData['endTime'] != null && taskData['startTime'] == null) {
-          print('Fixing corrupted task: $taskId');
+          print('Fixing corrupted task: ${doc.id}');
 
-          await _database.child('tasks').child(taskId).update({
+          await _firestore.collection('tasks').doc(doc.id).update({
             'endTime': null,
             'status': 'active',
             'distance': null,
             'corruptionFixed': true,
-            'fixedAt': ServerValue.timestamp,
+            'fixedAt': FieldValue.serverTimestamp(),
             'originalEndTime': taskData['endTime'], // Backup original data
           });
 
@@ -1233,54 +989,37 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
-// Tambahkan method helper untuk generate string random
-
   @override
   Future<void> updateOfficerInCluster({
     required String clusterId,
     required Officer officer,
   }) async {
     try {
-      // Get current officers list
-      final snapshot = await _database.child('users/$clusterId/officers').get();
+      // Get current cluster data
+      final clusterDoc =
+          await _firestore.collection('users').doc(clusterId).get();
 
-      if (!snapshot.exists || snapshot.value == null) {
-        throw Exception('No officers found in cluster');
+      if (!clusterDoc.exists) {
+        throw Exception('Cluster not found');
       }
 
-      List<Map<String, dynamic>> officersList = [];
-      final data = snapshot.value;
-
-      if (data is List) {
-        officersList = List<Map<String, dynamic>>.from(
-          data.map((item) => item is Map
-              ? Map<String, dynamic>.from(item)
-              : <String, dynamic>{}),
-        );
-      } else if (data is Map) {
-        officersList = (data as Map<dynamic, dynamic>)
-            .values
-            .map((item) => item is Map
-                ? Map<String, dynamic>.from(item)
-                : <String, dynamic>{})
-            .toList();
-      }
+      final clusterData = clusterDoc.data()!;
+      final officers =
+          List<Map<String, dynamic>>.from(clusterData['officers'] ?? []);
 
       // Find and update officer
-      final index = officersList.indexWhere(
-        (item) => item['id'] == officer.id,
-      );
+      final index = officers.indexWhere((item) => item['id'] == officer.id);
 
       if (index == -1) {
         throw Exception('Officer not found in cluster');
       }
 
-      officersList[index] = officer.toMap();
+      officers[index] = officer.toMap();
 
       // Update officers list
-      await _database.child('users/$clusterId').update({
-        'officers': officersList,
-        'updated_at': DateTime.now().toIso8601String(),
+      await _firestore.collection('users').doc(clusterId).update({
+        'officers': officers,
+        'updated_at': FieldValue.serverTimestamp(),
       });
 
       return;
@@ -1295,38 +1034,25 @@ class RouteRepositoryImpl implements RouteRepository {
     required String officerId,
   }) async {
     try {
-      // Get current officers list
-      final snapshot = await _database.child('users/$clusterId/officers').get();
+      // Get current cluster data
+      final clusterDoc =
+          await _firestore.collection('users').doc(clusterId).get();
 
-      if (!snapshot.exists || snapshot.value == null) {
-        throw Exception('No officers found in cluster');
+      if (!clusterDoc.exists) {
+        throw Exception('Cluster not found');
       }
 
-      List<Map<String, dynamic>> officersList = [];
-      final data = snapshot.value;
-
-      if (data is List) {
-        officersList = List<Map<String, dynamic>>.from(
-          data.map((item) => item is Map
-              ? Map<String, dynamic>.from(item)
-              : <String, dynamic>{}),
-        );
-      } else if (data is Map) {
-        officersList = (data as Map<dynamic, dynamic>)
-            .values
-            .map((item) => item is Map
-                ? Map<String, dynamic>.from(item)
-                : <String, dynamic>{})
-            .toList();
-      }
+      final clusterData = clusterDoc.data()!;
+      final officers =
+          List<Map<String, dynamic>>.from(clusterData['officers'] ?? []);
 
       // Remove officer
-      officersList.removeWhere((item) => item['id'] == officerId);
+      officers.removeWhere((item) => item['id'] == officerId);
 
       // Update officers list
-      await _database.child('users/$clusterId').update({
-        'officers': officersList,
-        'updated_at': DateTime.now().toIso8601String(),
+      await _firestore.collection('users').doc(clusterId).update({
+        'officers': officers,
+        'updated_at': FieldValue.serverTimestamp(),
       });
 
       return;
@@ -1335,34 +1061,72 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
-  // Tambahkan metode-metode berikut ke class RouteRepositoryImpl
   @override
   Future<List<UserModel.User>> getAllClusters() async {
     try {
       await _checkAuth();
-      final snapshot = await _database
-          .child('users')
-          .orderByChild('role')
-          .equalTo('patrol')
+
+      // ✅ CHANGED: Add more debug logging
+      log('getAllClusters: Starting to fetch clusters...');
+
+      final snapshot = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'patrol')
           .get();
 
-      if (!snapshot.exists) {
+      log('getAllClusters: Found ${snapshot.docs.length} documents with role=patrol');
+
+      if (snapshot.docs.isEmpty) {
+        log('getAllClusters: No clusters found in Firestore');
         return [];
       }
 
-      final clustersMap = Map<String, dynamic>.from(snapshot.value as Map);
       final clusters = <UserModel.User>[];
 
-      for (var entry in clustersMap.entries) {
+      for (var doc in snapshot.docs) {
         try {
-          final clusterData = Map<String, dynamic>.from(entry.value);
-          clusterData['id'] = entry.key;
-          clusters.add(UserModel.User.fromMap(clusterData));
-        } catch (e) {}
+          final clusterData = doc.data();
+          clusterData['id'] = doc.id;
+
+          // ✅ ADDED: Debug log for each document
+          log('getAllClusters: Processing document ${doc.id} with data: ${clusterData.keys.toList()}');
+
+          // ✅ ADDED: Check if required fields exist
+          if (clusterData['name'] == null) {
+            log('getAllClusters: Document ${doc.id} missing name field, skipping');
+            continue;
+          }
+
+          if (clusterData['email'] == null) {
+            log('getAllClusters: Document ${doc.id} missing email field, skipping');
+            continue;
+          }
+
+          // ✅ ADDED: Ensure role is exactly 'patrol'
+          final role = clusterData['role']?.toString()?.toLowerCase();
+          if (role != 'patrol') {
+            log('getAllClusters: Document ${doc.id} has role "$role", expected "patrol", skipping');
+            continue;
+          }
+
+          final cluster = UserModel.User.fromMap(clusterData);
+          clusters.add(cluster);
+
+          log('getAllClusters: Successfully added cluster: ${cluster.name} (${cluster.id})');
+        } catch (e, stackTrace) {
+          // ✅ IMPROVED: Better error logging
+          log('getAllClusters: Error processing document ${doc.id}: $e');
+          log('getAllClusters: Stack trace: $stackTrace');
+          // Continue processing other clusters
+        }
       }
 
+      log('getAllClusters: Fetched ${clusters.length} valid clusters total');
       return clusters;
-    } catch (e) {
+    } catch (e, stackTrace) {
+      // ✅ IMPROVED: Better error logging
+      log('getAllClusters: Fatal error: $e');
+      log('getAllClusters: Stack trace: $stackTrace');
       throw Exception('Failed to get clusters: $e');
     }
   }
@@ -1374,9 +1138,22 @@ class RouteRepositoryImpl implements RouteRepository {
   }) async {
     try {
       await _checkAuth();
-      await _database.child('users/$clusterId').update({
-        'cluster_coordinates': coordinates,
-        'updated_at': DateTime.now().toIso8601String(),
+
+      // ✅ FIXED: Convert nested array to Firestore-compatible format
+      final List<Map<String, double>> convertedCoordinates =
+          coordinates.map((point) {
+        if (point.length >= 2) {
+          return {
+            'lat': point[0],
+            'lng': point[1],
+          };
+        }
+        return {'lat': 0.0, 'lng': 0.0};
+      }).toList();
+
+      await _firestore.collection('users').doc(clusterId).update({
+        'cluster_coordinates': convertedCoordinates, // ✅ Use converted format
+        'updated_at': FieldValue.serverTimestamp(),
         'updated_by': _auth.currentUser?.uid,
       });
       return;
@@ -1390,15 +1167,12 @@ class RouteRepositoryImpl implements RouteRepository {
     try {
       await _checkAuth();
 
-      // Optional: Archive instead of delete
-      await _database.child('users/$clusterId').update({
+      // Archive instead of delete
+      await _firestore.collection('users').doc(clusterId).update({
         'status': 'deleted',
-        'updated_at': DateTime.now().toIso8601String(),
+        'updated_at': FieldValue.serverTimestamp(),
         'updated_by': _auth.currentUser?.uid,
       });
-
-      // Or actually delete (uncomment if needed)
-      // await _database.child('users/$clusterId').remove();
 
       return;
     } catch (e) {
@@ -1412,12 +1186,12 @@ class RouteRepositoryImpl implements RouteRepository {
       await _checkAuth();
       final userId = _auth.currentUser!.uid;
 
-      final snapshot = await _database.child('users/$userId').get();
-      if (!snapshot.exists) {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      if (!doc.exists) {
         return null;
       }
 
-      final userData = Map<String, dynamic>.from(snapshot.value as Map);
+      final userData = doc.data()!;
       userData['id'] = userId;
       return UserModel.User.fromMap(userData);
     } catch (e) {
@@ -1428,33 +1202,30 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<List<Officer>> getClusterOfficers(String clusterId) async {
     try {
-      final snapshot = await _database.child('users/$clusterId/officers').get();
+      final doc = await _firestore.collection('users').doc(clusterId).get();
 
-      if (!snapshot.exists || snapshot.value == null) {
+      if (!doc.exists) {
         return [];
       }
 
-      final dynamic officersData = snapshot.value;
+      final clusterData = doc.data()!;
+      final officersData = clusterData['officers'] as List?;
+
+      if (officersData == null) {
+        return [];
+      }
+
       final officers = <Officer>[];
 
-      if (officersData is List) {
-        for (var i = 0; i < officersData.length; i++) {
-          if (officersData[i] != null) {
-            try {
-              final officerMap = Map<String, dynamic>.from(officersData[i]);
-              officers.add(Officer.fromMap(officerMap));
-            } catch (e) {}
+      for (var officerData in officersData) {
+        if (officerData != null) {
+          try {
+            final officerMap = Map<String, dynamic>.from(officerData);
+            officers.add(Officer.fromMap(officerMap));
+          } catch (e) {
+            // Continue processing other officers
           }
         }
-      } else if (officersData is Map) {
-        officersData.forEach((key, value) {
-          if (value != null) {
-            try {
-              final officerMap = Map<String, dynamic>.from(value);
-              officers.add(Officer.fromMap(officerMap));
-            } catch (e) {}
-          }
-        });
       }
 
       return officers;
@@ -1463,9 +1234,6 @@ class RouteRepositoryImpl implements RouteRepository {
     }
   }
 
-// Metode untuk mendapatkan semua tugas yang terkait dengan cluster tertentu
-
-// Metode untuk mencari cluster berdasarkan nama
   @override
   Future<List<UserModel.User>> searchClustersByName(String searchTerm) async {
     try {
@@ -1488,13 +1256,12 @@ class RouteRepositoryImpl implements RouteRepository {
   }) async {
     try {
       await _checkAuth();
-      await _database.child('users/$clusterId').update(updates);
+      updates['updated_at'] = FieldValue.serverTimestamp();
+      await _firestore.collection('users').doc(clusterId).update(updates);
     } catch (e) {
       throw Exception('Failed to update cluster: $e');
     }
   }
-
-  // Tambahkan metode berikut di class RouteRepositoryImpl
 
   @override
   Future<void> logMockLocationDetection({
@@ -1510,21 +1277,19 @@ class RouteRepositoryImpl implements RouteRepository {
         'lastMockDetection': mockData['timestamp'],
       });
 
-      // Catat detail percobaan ke node khusus di database
-      final database = FirebaseDatabase.instance.ref();
-
-      // Simpan di task
-      await database
-          .child('tasks/$taskId/mock_detections')
-          .push()
-          .set(mockData);
+      // Catat detail percobaan ke subcollection
+      await _firestore
+          .collection('tasks')
+          .doc(taskId)
+          .collection('mock_detections')
+          .add(mockData);
 
       // Simpan juga di koleksi terpisah untuk analisis
-      await database.child('mock_location_logs').push().set({
+      await _firestore.collection('mock_location_logs').add({
         ...mockData,
         'taskId': taskId,
         'userId': userId,
-        'detectionTime': ServerValue.timestamp,
+        'detectionTime': FieldValue.serverTimestamp(),
       });
 
       return;
@@ -1537,27 +1302,14 @@ class RouteRepositoryImpl implements RouteRepository {
   Future<List<Map<String, dynamic>>> getMockLocationDetections(
       String taskId) async {
     try {
-      final snapshot =
-          await _database.child('tasks/$taskId/mock_detections').get();
+      final snapshot = await _firestore
+          .collection('tasks')
+          .doc(taskId)
+          .collection('mock_detections')
+          .orderBy('timestamp')
+          .get();
 
-      if (!snapshot.exists) {
-        return [];
-      }
-
-      final detectionsMap = snapshot.value as Map<dynamic, dynamic>;
-      List<Map<String, dynamic>> detections = [];
-
-      detectionsMap.forEach((key, value) {
-        if (value is Map) {
-          detections.add(Map<String, dynamic>.from(value));
-        }
-      });
-
-      // Sort by timestamp
-      detections.sort((a, b) =>
-          (a['timestamp'] as String).compareTo(b['timestamp'] as String));
-
-      return detections;
+      return snapshot.docs.map((doc) => doc.data()).toList();
     } catch (e) {
       return [];
     }
@@ -1566,13 +1318,13 @@ class RouteRepositoryImpl implements RouteRepository {
   @override
   Future<int> getMockLocationCount(String taskId) async {
     try {
-      final taskSnapshot = await _database.child('tasks/$taskId').get();
+      final doc = await _firestore.collection('tasks').doc(taskId).get();
 
-      if (!taskSnapshot.exists) {
+      if (!doc.exists) {
         return 0;
       }
 
-      final taskData = taskSnapshot.value as Map<dynamic, dynamic>;
+      final taskData = doc.data()!;
       final count = taskData['mockLocationCount'];
 
       if (count is int) {

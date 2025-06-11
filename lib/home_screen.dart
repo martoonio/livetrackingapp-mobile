@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -920,6 +921,70 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  List<List<double>>? _parseAssignedRoute(dynamic routeData) {
+    if (routeData == null) return null;
+
+    try {
+      print(
+          '🔍 Parsing assigned_route: type=${routeData.runtimeType}, value=$routeData');
+
+      if (routeData is List) {
+        final List<List<double>> coordinates = [];
+
+        for (int i = 0; i < routeData.length; i++) {
+          final point = routeData[i];
+          print('  Point $i: type=${point.runtimeType}, value=$point');
+
+          if (point is Map<String, dynamic>) {
+            final lat = point['lat'];
+            final lng = point['lng'];
+
+            print(
+                '    lat=$lat (${lat.runtimeType}), lng=$lng (${lng.runtimeType})');
+
+            if (lat != null && lng != null) {
+              coordinates.add([
+                (lat as num).toDouble(),
+                (lng as num).toDouble(),
+              ]);
+              print(
+                  '    ✅ Added coordinate: [${(lat as num).toDouble()}, ${(lng as num).toDouble()}]');
+            } else {
+              print('    ❌ Skipping point: lat or lng is null');
+            }
+          } else if (point is Map) {
+            // Handle case where it's generic Map
+            final pointMap = Map<String, dynamic>.from(point);
+            final lat = pointMap['lat'];
+            final lng = pointMap['lng'];
+
+            if (lat != null && lng != null) {
+              coordinates.add([
+                (lat as num).toDouble(),
+                (lng as num).toDouble(),
+              ]);
+              print(
+                  '    ✅ Added coordinate (generic map): [${(lat as num).toDouble()}, ${(lng as num).toDouble()}]');
+            }
+          } else {
+            print('    ❌ Unexpected point type: ${point.runtimeType}');
+          }
+        }
+
+        print(
+            '🎯 Final coordinates: $coordinates (${coordinates.length} points)');
+        return coordinates.isNotEmpty ? coordinates : null;
+      }
+
+      print('❌ assigned_route is not a List: ${routeData.runtimeType}');
+      return null;
+    } catch (e, stackTrace) {
+      print('❌ Error parsing assigned route: $e');
+      print('Stack trace: $stackTrace');
+      return null;
+    }
+  }
+
   // PERBAIKAN: Check expired tasks dengan mounted check
   Future<void> _checkForExpiredTasks() async {
     if (!mounted || _currentUser?.role != 'patrol') return;
@@ -1035,7 +1100,6 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // ... existing officer parsing code ...
       Map<dynamic, dynamic> officersData;
       if (officerSnapshot.value is Map) {
         officersData = officerSnapshot.value as Map<dynamic, dynamic>;
@@ -1098,112 +1162,125 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       // PERBAIKAN: Limit query untuk performa yang lebih baik
-      final taskSnapshot = await FirebaseDatabase.instance
-          .ref()
-          .child('tasks')
-          .orderByChild('clusterId')
-          .equalTo(clusterId)
+      // Query tasks from Firestore instead of Realtime Database
+      final taskSnapshot = await FirebaseFirestore.instance
+          .collection('tasks')
+          .where('clusterId', isEqualTo: clusterId)
           .get();
 
       if (!mounted) return;
 
+      print('📊 Found ${taskSnapshot.docs.length} tasks in Firestore');
+
       List<PatrolTask> allHistoryTasks = [];
       List<PatrolTask> allUpcomingTasks = [];
-      List<PatrolTask> allOngoingTasks =
-          []; // TAMBAHAN: List untuk ongoing tasks
+      List<PatrolTask> allOngoingTasks = [];
 
-      if (taskSnapshot.exists) {
-        Map<dynamic, dynamic> tasksData;
-        if (taskSnapshot.value is Map) {
-          tasksData = taskSnapshot.value as Map<dynamic, dynamic>;
-        } else {
-          _safeSetState(() {
-            _initializeOngoingPagination([]);
-            _initializeUpcomingPagination([]);
-            _initializeHistoryPagination([]);
-            _isLoading = false;
-          });
-          return;
-        }
+      int processedSuccessfully = 0;
+      int errors = 0;
 
-        // PERBAIKAN: Process tasks dengan batching untuk menghindari blocking UI
-        int processedCount = 0;
-        const batchSize = 50;
+      for (var doc in taskSnapshot.docs) {
+        final taskId = doc.id;
+        final taskData = doc.data();
 
-        for (var entry in tasksData.entries) {
-          final taskId = entry.key;
-          final taskData = entry.value;
+        try {
+          print('\n🔍 Processing task: $taskId');
+          print('   Status: ${taskData['status']}');
+          print('   Officer: ${taskData['officerName'] ?? 'N/A'}');
 
-          if (taskData is Map) {
-            try {
-              final userId = taskData['userId']?.toString() ?? '';
-              final status = taskData['status']?.toString() ?? 'unknown';
+          final userId = taskData['userId']?.toString() ?? '';
+          final status = taskData['status']?.toString() ?? 'unknown';
 
-              final task = PatrolTask(
-                taskId: taskId,
-                userId: userId,
-                status: status,
-                assignedStartTime:
-                    _parseDateTime(taskData['assignedStartTime']),
-                assignedEndTime: _parseDateTime(taskData['assignedEndTime']),
-                startTime: _parseDateTime(taskData['startTime']),
-                endTime: _parseDateTime(taskData['endTime']),
-                distance: taskData['distance'] != null
-                    ? (taskData['distance'] as num).toDouble()
-                    : null,
-                createdAt:
-                    _parseDateTime(taskData['createdAt']) ?? DateTime.now(),
-                assignedRoute: taskData['assigned_route'] != null
-                    ? (taskData['assigned_route'] as List)
-                        .map((point) => (point as List)
-                            .map((coord) => (coord as num).toDouble())
-                            .toList())
-                        .toList()
-                    : null,
-                routePath: taskData['route_path'] != null
-                    ? Map<String, dynamic>.from(taskData['route_path'] as Map)
-                    : null,
-                clusterId: taskData['clusterId'].toString(),
-                mockLocationDetected: taskData['mockLocationDetected'] == true,
-                mockLocationCount: taskData['mockLocationCount'] is num
-                    ? (taskData['mockLocationCount'] as num).toInt()
-                    : 0,
-              );
+          // ✅ FIXED: Use improved parsing method
+          final assignedRoute = _parseAssignedRoute(taskData['assigned_route']);
 
-              // Set officer info if available
-              if (officerInfo.containsKey(userId)) {
-                task.officerName = officerInfo[userId]!['name'].toString();
-                task.officerPhotoUrl =
-                    officerInfo[userId]!['photo_url'].toString();
-              }
-
-              // PERBAIKAN: Categorize tasks dengan lebih spesifik
-              if (status.toLowerCase() == 'finished' ||
-                  status.toLowerCase() == 'completed' ||
-                  status.toLowerCase() == 'cancelled' ||
-                  status.toLowerCase() == 'expired') {
-                allHistoryTasks.add(task);
-              } else if (status.toLowerCase() == 'ongoing' ||
-                  status.toLowerCase() == 'in_progress') {
-                // TAMBAHAN: Pisahkan ongoing dari upcoming
-                allOngoingTasks.add(task);
-              } else if (status.toLowerCase() == 'active') {
-                allUpcomingTasks.add(task);
-              }
-
-              processedCount++;
-
-              // TAMBAHAN: Yield control setiap batch untuk tidak blocking UI
-              if (processedCount % batchSize == 0) {
-                await Future.delayed(Duration.zero); // Yield control
-                if (!mounted) return; // Check if still mounted
-              }
-            } catch (e, stack) {
-              print('Error parsing task $taskId: $e');
+          // ✅ FIXED: Better route_path parsing
+          Map<String, dynamic>? routePath;
+          final routePathData = taskData['route_path'];
+          if (routePathData != null) {
+            if (routePathData is Map<String, dynamic>) {
+              routePath = routePathData;
+            } else if (routePathData is Map) {
+              routePath = Map<String, dynamic>.from(routePathData);
             }
           }
+
+          final task = PatrolTask(
+            taskId: taskId,
+            userId: userId,
+            status: status,
+            assignedStartTime: _parseDateTime(taskData['assignedStartTime']),
+            assignedEndTime: _parseDateTime(taskData['assignedEndTime']),
+            startTime: _parseDateTime(taskData['startTime']),
+            endTime: _parseDateTime(taskData['endTime']),
+            distance: taskData['distance'] != null
+                ? (taskData['distance'] as num).toDouble()
+                : null,
+            createdAt: _parseDateTime(taskData['createdAt']) ?? DateTime.now(),
+            assignedRoute: assignedRoute, // ✅ Use improved parsing
+            routePath: routePath,
+            clusterId: taskData['clusterId']?.toString() ?? '',
+            mockLocationDetected: taskData['mockLocationDetected'] == true,
+            mockLocationCount: taskData['mockLocationCount'] is num
+                ? (taskData['mockLocationCount'] as num).toInt()
+                : 0,
+          );
+
+          // ✅ IMPROVED: Better officer info assignment
+          if (officerInfo.containsKey(userId)) {
+            task.officerName = officerInfo[userId]!['name']?.toString() ??
+                'Petugas Tidak Diketahui';
+            task.officerPhotoUrl =
+                officerInfo[userId]!['photo_url']?.toString() ?? '';
+          } else {
+            // Use data from Firestore if officer info not found
+            task.officerName = taskData['officerName']?.toString() ??
+                'Petugas Tidak Diketahui';
+            task.officerPhotoUrl =
+                taskData['officerPhotoUrl']?.toString() ?? '';
+          }
+
+          // Set cluster name
+          task.clusterName = taskData['clusterName']?.toString() ??
+              _currentUser?.name ??
+              'Unknown Cluster';
+
+          // Categorize tasks
+          final statusLower = status.toLowerCase();
+          if (statusLower == 'finished' ||
+              statusLower == 'completed' ||
+              statusLower == 'cancelled' ||
+              statusLower == 'expired') {
+            allHistoryTasks.add(task);
+            print('   ✅ Added to history');
+          } else if (statusLower == 'ongoing' || statusLower == 'in_progress') {
+            allOngoingTasks.add(task);
+            print('   ✅ Added to ongoing');
+          } else if (statusLower == 'active') {
+            allUpcomingTasks.add(task);
+            print('   ✅ Added to upcoming');
+          } else {
+            print('   ⚠️ Unknown status: $status');
+          }
+
+          processedSuccessfully++;
+        } catch (e, stackTrace) {
+          errors++;
+          print('❌ Error processing task $taskId: $e');
+          print('   Task data keys: ${taskData.keys.toList()}');
+          print(
+              '   assigned_route type: ${taskData['assigned_route']?.runtimeType}');
+          print('   assigned_route value: ${taskData['assigned_route']}');
+          print('   Stack trace: $stackTrace');
+          continue;
         }
       }
+
+      print('\n📈 Processing complete:');
+      print('   ✅ Successfully processed: $processedSuccessfully tasks');
+      print('   ❌ Errors: $errors tasks');
+      print(
+          '   📊 Results: ${allOngoingTasks.length} ongoing, ${allUpcomingTasks.length} upcoming, ${allHistoryTasks.length} history');
 
       if (!mounted) return;
 
@@ -1214,11 +1291,10 @@ class _HomeScreenState extends State<HomeScreen> {
       allUpcomingTasks.sort((a, b) => (a.assignedStartTime ?? DateTime.now())
           .compareTo(b.assignedStartTime ?? DateTime.now()));
 
-      // TAMBAHAN: Sort ongoing tasks by start time
       allOngoingTasks.sort((a, b) => (a.startTime ?? DateTime.now())
           .compareTo(b.startTime ?? DateTime.now()));
 
-      // TAMBAHAN: Initialize pagination dengan data yang sudah diurutkan
+      // Initialize pagination
       _safeSetState(() {
         _initializeOngoingPagination(allOngoingTasks);
         _initializeUpcomingPagination(allUpcomingTasks);
@@ -1226,11 +1302,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _isLoading = false;
       });
 
-      print(
-          'Loaded total: ${allOngoingTasks.length} ongoing, ${allUpcomingTasks.length} upcoming, ${allHistoryTasks.length} history');
-    } catch (e, stack) {
-      print('Error in _loadClusterOfficerTasks: $e');
-      print('Stack trace: $stack');
+      print('🎉 Task loading complete. UI updated.');
+    } catch (e, stackTrace) {
+      print('💥 Fatal error in _loadClusterOfficerTasks: $e');
+      print('Stack trace: $stackTrace');
 
       _safeSetState(() {
         _isLoading = false;
@@ -1802,52 +1877,51 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       print('🔄 Fetching fresh task data for: $taskId');
 
-      final snapshot = await FirebaseDatabase.instance
-          .ref()
-          .child('tasks')
-          .child(taskId)
+      final snapshot = await FirebaseFirestore.instance
+          .collection('tasks')
+          .doc(taskId)
           .get();
 
       if (!snapshot.exists) {
-        print('❌ Task not found in Firebase: $taskId');
+        print('❌ Task not found in Firestore: $taskId');
         return null;
       }
 
-      final data = snapshot.value as Map<dynamic, dynamic>;
-      print('✅ Raw Firebase data loaded for task: $taskId');
+      final data = snapshot.data();
+      print('✅ Raw Firestore data loaded for task: $taskId');
 
       // Parse the task data
       final task = PatrolTask(
         taskId: taskId,
-        userId: data['userId']?.toString() ?? '',
-        status: data['status']?.toString() ?? 'unknown',
-        assignedStartTime: _parseDateTime(data['assignedStartTime']),
-        assignedEndTime: _parseDateTime(data['assignedEndTime']),
-        startTime: _parseDateTime(data['startTime']),
-        endTime: _parseDateTime(data['endTime']),
-        distance: data['distance'] != null
-            ? (data['distance'] as num).toDouble()
+        userId: data?['userId']?.toString() ?? '',
+        status: data?['status']?.toString() ?? 'unknown',
+        assignedStartTime: _parseDateTime(data?['assignedStartTime']),
+        assignedEndTime: _parseDateTime(data?['assignedEndTime']),
+        startTime: _parseDateTime(data?['startTime']),
+        endTime: _parseDateTime(data?['endTime']),
+        distance: data?['distance'] != null
+            ? (data?['distance'] as num).toDouble()
             : null,
-        createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
-        assignedRoute: data['assigned_route'] != null
-            ? (data['assigned_route'] as List)
+        createdAt: _parseDateTime(data?['createdAt']) ?? DateTime.now(),
+        assignedRoute: data?['assigned_route'] != null
+            ? (data?['assigned_route'] as List)
                 .map((point) => (point as List)
                     .map((coord) => (coord as num).toDouble())
                     .toList())
                 .toList()
             : null,
-        routePath: data['route_path'] != null
-            ? Map<String, dynamic>.from(data['route_path'] as Map)
+        routePath: data?['route_path'] != null
+            ? Map<String, dynamic>.from(data?['route_path'] as Map)
             : null,
-        clusterId: data['clusterId'].toString(),
-        mockLocationDetected: data['mockLocationDetected'] == true,
-        mockLocationCount: data['mockLocationCount'] is num
-            ? (data['mockLocationCount'] as num).toInt()
+        clusterId: data!['clusterId'].toString(),
+        mockLocationDetected: data?['mockLocationDetected'] == true,
+        mockLocationCount: data?['mockLocationCount'] is num
+            ? (data?['mockLocationCount'] as num).toInt()
             : 0,
-        initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
-        finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
-        initialReportNote: data['initialReportNote']?.toString(),
-        finalReportNote: data['finalReportNote']?.toString(),
+        initialReportPhotoUrl: data?['initialReportPhotoUrl']?.toString(),
+        finalReportPhotoUrl: data?['finalReportPhotoUrl']?.toString(),
+        initialReportNote: data?['initialReportNote']?.toString(),
+        finalReportNote: data?['finalReportNote']?.toString(),
       );
 
       // ✅ PENTING: Set officer info dari data yang sudah ada
@@ -1942,16 +2016,15 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return null;
 
     try {
-      // Ambil data task langsung dari Firebase
-      final snapshot = await FirebaseDatabase.instance
-          .ref()
-          .child('tasks')
-          .child(originalTask.taskId)
+      // Ambil data task langsung dari Firestore
+      final snapshot = await FirebaseFirestore.instance
+          .collection('tasks')
+          .doc(originalTask.taskId)
           .get();
 
       if (!mounted || !snapshot.exists) return null;
 
-      final data = snapshot.value as Map<dynamic, dynamic>;
+      final data = snapshot.data()!;
 
       // Cek apakah ada finalReportPhotoUrl
       if (data.containsKey('finalReportPhotoUrl')) {
@@ -1961,7 +2034,6 @@ class _HomeScreenState extends State<HomeScreen> {
       final updatedTask = PatrolTask(
         taskId: originalTask.taskId,
         userId: data['userId']?.toString() ?? '',
-        // vehicleId: data['vehicleId']?.toString() ?? '',
         status: data['status']?.toString() ?? '',
         assignedStartTime: _parseDateTime(data['assignedStartTime']),
         assignedEndTime: _parseDateTime(data['assignedEndTime']),
@@ -1989,6 +2061,10 @@ class _HomeScreenState extends State<HomeScreen> {
         initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
         initialReportNote: data['initialReportNote']?.toString(),
         initialReportTime: _parseDateTime(data['initialReportTime']),
+        mockLocationDetected: data['mockLocationDetected'] == true,
+        mockLocationCount: data['mockLocationCount'] is num
+            ? (data['mockLocationCount'] as num).toInt()
+            : 0,
       );
 
       // Set properti tambahan
@@ -3399,23 +3475,50 @@ class _HomeScreenState extends State<HomeScreen> {
     if (value == null) return null;
 
     try {
-      if (value is String) {
+      // Handle Firestore Timestamp
+      if (value is Timestamp) {
+        return value.toDate();
+      }
+      // Handle string format
+      else if (value is String) {
+        if (value.isEmpty) return null;
+
+        // Handle microseconds in string
         if (value.contains('.')) {
           final parts = value.split('.');
           final mainPart = parts[0];
           final microPart = parts[1];
 
-          final cleanMicroPart =
-              microPart.length > 6 ? microPart.substring(0, 6) : microPart;
+          // Clean microseconds to 6 digits max
+          final cleanMicroPart = microPart.length > 6
+              ? microPart.substring(0, 6)
+              : microPart.padRight(6, '0');
 
-          return DateTime.parse('$mainPart.$cleanMicroPart');
+          // Handle timezone
+          if (value.endsWith('Z')) {
+            return DateTime.parse('$mainPart.${cleanMicroPart}Z');
+          } else {
+            return DateTime.parse('$mainPart.$cleanMicroPart');
+          }
         }
+
         return DateTime.parse(value);
-      } else if (value is int) {
+      }
+      // Handle integer timestamp (milliseconds)
+      else if (value is int) {
         return DateTime.fromMillisecondsSinceEpoch(value);
       }
-    } catch (e) {}
-    return null;
+      // Handle double timestamp (seconds with decimal)
+      else if (value is double) {
+        return DateTime.fromMillisecondsSinceEpoch((value * 1000).round());
+      } else {
+        print('⚠️ Unknown DateTime type: ${value.runtimeType}, value: $value');
+        return null;
+      }
+    } catch (e) {
+      print('❌ Error parsing DateTime from value: $value, error: $e');
+      return null;
+    }
   }
 
   void _showExpiredTaskDetails(PatrolTask task) {

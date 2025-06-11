@@ -55,6 +55,7 @@ class DefaultFirebaseOptions {
     appId: '1:743103917081:android:c76cd3639d6e4296a78e88',
     messagingSenderId: '743103917081',
     projectId: 'trackingsystem-kbp',
+    databaseURL: 'https://trackingsystem-kbp-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'trackingsystem-kbp.firebasestorage.app',
   );
 
@@ -63,6 +64,7 @@ class DefaultFirebaseOptions {
     appId: '1:743103917081:ios:a15c55854b4e4db1a78e88',
     messagingSenderId: '743103917081',
     projectId: 'trackingsystem-kbp',
+    databaseURL: 'https://trackingsystem-kbp-default-rtdb.asia-southeast1.firebasedatabase.app',
     storageBucket: 'trackingsystem-kbp.firebasestorage.app',
     iosBundleId: 'com.example.livetrackingappMobile',
   );

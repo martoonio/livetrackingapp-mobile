@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive/hive.dart';
 import 'dart:io';
 import '../../domain/entities/report.dart';
@@ -9,12 +9,12 @@ import '../../domain/repositories/report_repository.dart';
 
 class ReportRepositoryImpl implements ReportRepository {
   final FirebaseStorage firebaseStorage;
-  final DatabaseReference databaseReference;
+  final FirebaseFirestore firestore;
   final Box<dynamic> _offlineReportsBox;
 
   ReportRepositoryImpl({
     required this.firebaseStorage,
-    required this.databaseReference,
+    required this.firestore,
     required Box<dynamic> offlineReportsBox,
   }) : _offlineReportsBox = offlineReportsBox;
 
@@ -40,7 +40,6 @@ class ReportRepositoryImpl implements ReportRepository {
       // Cek apakah ada beberapa foto (dipisahkan oleh koma)
       final photoPaths = report.photoUrl.split(',');
 
-
       // Upload setiap foto ke Firebase Storage
       for (int i = 0; i < photoPaths.length; i++) {
         final photoPath = photoPaths[i].trim();
@@ -54,8 +53,6 @@ class ReportRepositoryImpl implements ReportRepository {
 
           final photoRef =
               firebaseStorage.ref().child('reports/${report.id}/photo_$i.jpg');
-
-          // Tampilkan log untuk membantu debug
 
           // Upload foto dengan tracking progress
           try {
@@ -85,37 +82,34 @@ class ReportRepositoryImpl implements ReportRepository {
       final finalPhotoUrl =
           uploadedPhotoUrls.isNotEmpty ? uploadedPhotoUrls.join(',') : '';
 
-
-      // Format timestamp dengan benar
-      final formattedTimestamp = report.timestamp.toIso8601String();
-
       // Data untuk disimpan ke database
       final reportData = {
         'title': report.title,
         'description': report.description,
         'photoUrl': finalPhotoUrl,
-        'timestamp': formattedTimestamp,
+        'timestamp': report.timestamp.toIso8601String(),
         'officerName': report.officerName,
         'clusterName': report.clusterName,
         'latitude': report.latitude,
         'longitude': report.longitude,
         'taskId': report.taskId,
-        'createdAt': ServerValue.timestamp, // Tambahkan timestamp server
-        'userId': report.userId ?? '', // Pastikan userId selalu ada
-        'clusterId': report.clusterId ?? '', // Tambahkan clusterId jika ada
+        'createdAt': FieldValue.serverTimestamp(), // Timestamp server Firestore
+        'userId': report.userId ?? '',
+        'clusterId': report.clusterId ?? '',
       };
 
       // Hapus nilai null sebelum menulis ke database
       reportData.removeWhere((key, value) => value == null);
 
-      // Gunakan transaction untuk memastikan penulisan berhasil
-      await databaseReference.child('reports').child(report.id).set(reportData);
-
+      // Simpan ke Firestore collection 'reports' dengan document ID = report.id
+      await firestore.collection('reports').doc(report.id).set(reportData);
 
       // Verifikasi report sudah tersimpan
-      final snapshot =
-          await databaseReference.child('reports').child(report.id).get();
-      if (snapshot.exists) {
+      final docSnapshot =
+          await firestore.collection('reports').doc(report.id).get();
+
+      if (docSnapshot.exists) {
+        // Report berhasil disimpan
       } else {
         throw Exception(
             'Report verification failed - data not found in database');
@@ -128,7 +122,6 @@ class ReportRepositoryImpl implements ReportRepository {
   @override
   Future<void> saveOfflineReport(Report report) async {
     try {
-
       // Simpan report ke box Hive
       await _offlineReportsBox.put(
         'report_${report.id}',
@@ -138,7 +131,6 @@ class ReportRepositoryImpl implements ReportRepository {
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         },
       );
-
     } catch (e) {
       throw Exception('Failed to save offline report: $e');
     }
@@ -158,8 +150,8 @@ class ReportRepositoryImpl implements ReportRepository {
         final data = _offlineReportsBox.get(key);
         if (data != null && data is Map) {
           final reportId = data['id'] as String;
-          final reportJson = json.decode(data['data'] as String)
-              as Map<String, dynamic>;
+          final reportJson =
+              json.decode(data['data'] as String) as Map<String, dynamic>;
 
           // Buat objek Report
           final report = Report.fromJson(reportId, reportJson);
@@ -185,7 +177,6 @@ class ReportRepositoryImpl implements ReportRepository {
         return;
       }
 
-
       for (final report in reports) {
         try {
           // Panggil createReport dengan report dari offline storage
@@ -194,12 +185,10 @@ class ReportRepositoryImpl implements ReportRepository {
 
           // Hapus dari penyimpanan offline setelah berhasil disinkronkan
           await deleteOfflineReport(report.id);
-
         } catch (e) {
           // Lanjutkan ke report berikutnya jika gagal
         }
       }
-
     } catch (e) {
       throw Exception('Failed to sync offline reports: $e');
     }

@@ -1,90 +1,47 @@
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:livetrackingapp/domain/entities/survey/question.dart';
 import 'package:livetrackingapp/domain/entities/survey/survey.dart';
 import 'package:livetrackingapp/domain/entities/survey/survey_response.dart';
 import 'package:collection/collection.dart'; // Import for firstWhereOrNull
 
 class FirebaseSurveyDataSource {
-  final DatabaseReference _db = FirebaseDatabase.instance.ref();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   Future<List<Survey>> getActiveSurveys(
       String userId, String userRole, String? clusterId) async {
     try {
-      final snapshot = await _db.child('surveys').get();
-      if (!snapshot.exists || snapshot.value == null) return [];
+      final snapshot = await _firestore
+          .collection('surveys')
+          .where('isActive', isEqualTo: true)
+          .get();
+
+      if (snapshot.docs.isEmpty) return [];
 
       final surveys = <Survey>[];
-      final surveysMap = snapshot.value as Map<dynamic, dynamic>;
 
-      surveysMap.forEach((key, value) {
-        // PERBAIKAN: Konversi ke Map<String, dynamic> dengan cara yang sama
-        if (value is Map) {
-          final Map<String, dynamic> surveyData = {};
+      for (var doc in snapshot.docs) {
+        try {
+          final surveyData = doc.data();
+          final survey = Survey.fromMap(surveyData, doc.id);
 
-          value.forEach((k, v) {
-            surveyData[k.toString()] = v;
-
-            // Khusus untuk sections, perlu penanganan nested map
-            if (k.toString() == 'sections' && v is Map) {
-              Map<String, dynamic> cleanSections = {};
-
-              v.forEach((sectionKey, sectionValue) {
-                if (sectionValue is Map) {
-                  Map<String, dynamic> cleanSection = {};
-
-                  sectionValue.forEach((sk, sv) {
-                    cleanSection[sk.toString()] = sv;
-
-                    // Penanganan untuk nested questions
-                    if (sk.toString() == 'questions' && sv is Map) {
-                      Map<String, dynamic> cleanQuestions = {};
-
-                      sv.forEach((questionKey, questionValue) {
-                        if (questionValue is Map) {
-                          Map<String, dynamic> cleanQuestion = {};
-
-                          questionValue.forEach((qk, qv) {
-                            cleanQuestion[qk.toString()] = qv;
-                          });
-
-                          cleanQuestions[questionKey.toString()] =
-                              cleanQuestion;
-                        }
-                      });
-
-                      cleanSection['questions'] = cleanQuestions;
-                    }
-                  });
-
-                  cleanSections[sectionKey.toString()] = cleanSection;
-                }
-              });
-
-              surveyData['sections'] = cleanSections;
-            }
-          });
-
-          try {
-            final survey = Survey.fromMap(surveyData, key.toString());
-            bool canAccess = false;
-            if (survey.isActive) {
-              if (survey.targetAudience == null ||
-                  survey.targetAudience!.contains('all')) {
-                canAccess = true;
-              } else if (survey.targetAudience!.contains(userRole)) {
-                canAccess = true;
-              } else if (clusterId != null &&
-                  survey.targetAudience!.contains(clusterId)) {
-                canAccess = true;
-              }
-            }
-            if (canAccess) {
-              surveys.add(survey);
-            }
-          } catch (e) {
+          bool canAccess = false;
+          if (survey.targetAudience == null ||
+              survey.targetAudience!.contains('all')) {
+            canAccess = true;
+          } else if (survey.targetAudience!.contains(userRole)) {
+            canAccess = true;
+          } else if (clusterId != null &&
+              survey.targetAudience!.contains(clusterId)) {
+            canAccess = true;
           }
+
+          if (canAccess) {
+            surveys.add(survey);
+          }
+        } catch (e) {
+          // Continue processing other surveys
         }
-      });
+      }
 
       return surveys;
     } catch (e) {
@@ -94,55 +51,11 @@ class FirebaseSurveyDataSource {
 
   Future<Survey?> getSurveyDetails(String surveyId) async {
     try {
-      final snapshot = await _db.child('surveys').child(surveyId).get();
-      if (!snapshot.exists || snapshot.value == null) return null;
+      final doc = await _firestore.collection('surveys').doc(surveyId).get();
 
-      // PERBAIKAN: Konversi ke Map<String, dynamic>
-      final value = snapshot.value as Map<dynamic, dynamic>;
-      final Map<String, dynamic> surveyData = {};
+      if (!doc.exists) return null;
 
-      value.forEach((k, v) {
-        surveyData[k.toString()] = v;
-
-        // Khusus untuk sections, perlu penanganan nested map
-        if (k.toString() == 'sections' && v is Map) {
-          Map<String, dynamic> cleanSections = {};
-
-          v.forEach((sectionKey, sectionValue) {
-            if (sectionValue is Map) {
-              Map<String, dynamic> cleanSection = {};
-
-              sectionValue.forEach((sk, sv) {
-                cleanSection[sk.toString()] = sv;
-
-                // Penanganan untuk nested questions
-                if (sk.toString() == 'questions' && sv is Map) {
-                  Map<String, dynamic> cleanQuestions = {};
-
-                  sv.forEach((questionKey, questionValue) {
-                    if (questionValue is Map) {
-                      Map<String, dynamic> cleanQuestion = {};
-
-                      questionValue.forEach((qk, qv) {
-                        cleanQuestion[qk.toString()] = qv;
-                      });
-
-                      cleanQuestions[questionKey.toString()] = cleanQuestion;
-                    }
-                  });
-
-                  cleanSection['questions'] = cleanQuestions;
-                }
-              });
-
-              cleanSections[sectionKey.toString()] = cleanSection;
-            }
-          });
-
-          surveyData['sections'] = cleanSections;
-        }
-      });
-
+      final surveyData = doc.data()!;
       return Survey.fromMap(surveyData, surveyId);
     } catch (e) {
       rethrow;
@@ -151,10 +64,13 @@ class FirebaseSurveyDataSource {
 
   Future<void> submitSurveyResponse(SurveyResponse response) async {
     try {
-      await _db
-          .child('survey_responses')
-          .child(response.responseId)
-          .set(response.toMap());
+      await _firestore
+          .collection('survey_responses')
+          .doc(response.responseId)
+          .set({
+        ...response.toMap(),
+        'submittedAt': FieldValue.serverTimestamp(),
+      });
     } catch (e) {
       rethrow;
     }
@@ -163,124 +79,46 @@ class FirebaseSurveyDataSource {
   Future<SurveyResponse?> getUserSurveyResponse(
       String surveyId, String userId) async {
     try {
-      final snapshot = await _db
-          .child('survey_responses')
-          .orderByChild('surveyId')
-          .equalTo(surveyId)
+      final snapshot = await _firestore
+          .collection('survey_responses')
+          .where('surveyId', isEqualTo: surveyId)
+          .where('userId', isEqualTo: userId)
+          .limit(1)
           .get();
 
-      if (!snapshot.exists || snapshot.value == null) return null;
+      if (snapshot.docs.isEmpty) return null;
 
-      final responsesMap = snapshot.value as Map<dynamic, dynamic>;
-      SurveyResponse? userResponse;
-
-      responsesMap.forEach((key, value) {
-        if (value is Map) {
-          final userIdFromResponse = value['userId'];
-
-          if (userIdFromResponse == userId) {
-            // PERBAIKAN: Konversi ke Map<String, dynamic>
-            final Map<String, dynamic> responseData = {};
-
-            value.forEach((k, v) {
-              responseData[k.toString()] = v;
-
-              // Khusus untuk answers, perlu penanganan nested map
-              if (k.toString() == 'answers' && v is Map) {
-                Map<String, dynamic> cleanAnswers = {};
-
-                v.forEach((answerId, answerValue) {
-                  if (answerValue is Map) {
-                    Map<String, dynamic> cleanAnswer = {};
-
-                    answerValue.forEach((ak, av) {
-                      cleanAnswer[ak.toString()] = av;
-                    });
-
-                    cleanAnswers[answerId.toString()] = cleanAnswer;
-                  }
-                });
-
-                responseData['answers'] = cleanAnswers;
-              }
-            });
-
-            try {
-              userResponse =
-                  SurveyResponse.fromMap(responseData, key.toString());
-              return; // Keluar dari forEach setelah menemukan
-            } catch (e) {
-            }
-          }
-        }
-      });
-
-      return userResponse;
+      final doc = snapshot.docs.first;
+      final responseData = doc.data();
+      return SurveyResponse.fromMap(responseData, doc.id);
     } catch (e) {
       rethrow;
     }
-  }
-
-  // Helper method untuk mengkonversi Map dari Firebase ke Map<String, dynamic>
-  Map<String, dynamic> _convertFirebaseMap(Map<dynamic, dynamic> firebaseMap) {
-    Map<String, dynamic> result = {};
-
-    firebaseMap.forEach((key, value) {
-      if (value is Map) {
-        result[key.toString()] =
-            _convertFirebaseMap(value as Map<dynamic, dynamic>);
-      } else if (value is List) {
-        result[key.toString()] = _convertFirebaseList(value as List<dynamic>);
-      } else {
-        result[key.toString()] = value;
-      }
-    });
-
-    return result;
-  }
-
-  List<dynamic> _convertFirebaseList(List<dynamic> firebaseList) {
-    List<dynamic> result = [];
-
-    for (var item in firebaseList) {
-      if (item is Map) {
-        result.add(_convertFirebaseMap(item as Map<dynamic, dynamic>));
-      } else if (item is List) {
-        result.add(_convertFirebaseList(item));
-      } else {
-        result.add(item);
-      }
-    }
-
-    return result;
   }
 
   // --- CommandCenter Specific Methods ---
 
   Future<List<Survey>> getAllSurveys(String commandCenterId) async {
     try {
-      final snapshot = await _db
-          .child('surveys')
-          .orderByChild('createdBy')
-          .equalTo(commandCenterId)
+      final snapshot = await _firestore
+          .collection('surveys')
+          .where('createdBy', isEqualTo: commandCenterId)
+          .orderBy('createdAt', descending: true)
           .get();
-      if (!snapshot.exists || snapshot.value == null) return [];
+
+      if (snapshot.docs.isEmpty) return [];
 
       final surveys = <Survey>[];
-      final surveysMap = snapshot.value as Map<dynamic, dynamic>;
 
-      surveysMap.forEach((key, value) {
-        if (value is Map) {
-          try {
-            // Gunakan helper method untuk konversi
-            final surveyData =
-                _convertFirebaseMap(value as Map<dynamic, dynamic>);
-            final survey = Survey.fromMap(surveyData, key.toString());
-            surveys.add(survey);
-          } catch (e) {
-          }
+      for (var doc in snapshot.docs) {
+        try {
+          final surveyData = doc.data();
+          final survey = Survey.fromMap(surveyData, doc.id);
+          surveys.add(survey);
+        } catch (e) {
+          // Continue processing other surveys
         }
-      });
+      }
 
       return surveys;
     } catch (e) {
@@ -291,30 +129,38 @@ class FirebaseSurveyDataSource {
   Future<String> createSurvey(Survey survey,
       Map<String, List<Map<String, dynamic>>> sectionsAndQuestionsData) async {
     try {
-      final surveyRef = _db.child('surveys').push();
-      final surveyId = surveyRef.key!;
+      // Create survey document with auto-generated ID
+      final docRef = _firestore.collection('surveys').doc();
+      final surveyId = docRef.id;
 
-      await surveyRef.set(survey.toMap());
+      // Prepare survey data with sections and questions
+      final surveyData = survey.toMap();
 
+      // Add sections with questions to survey data
+      final sectionsMap = <String, dynamic>{};
       for (var sectionEntry in sectionsAndQuestionsData.entries) {
         final sectionId = sectionEntry.key;
         final questionsData = sectionEntry.value;
-        final sectionData = survey.sections.firstWhere((s) =>
-            s.sectionId == sectionId); // Ambil data section dari objek Survey
+        final sectionData =
+            survey.sections.firstWhere((s) => s.sectionId == sectionId);
 
-        final sectionRef =
-            _db.child('surveys/$surveyId/sections').child(sectionId);
-        await sectionRef.set(sectionData.toMap()); // Simpan data section utama
-
+        // Convert questions list to map for Firestore
+        final questionsMap = <String, dynamic>{};
         for (var questionMap in questionsData) {
-          final questionId = questionMap['questionId']
-              as String; // Asumsi Anda punya questionId di map
-          await sectionRef
-              .child('questions')
-              .child(questionId)
-              .set(questionMap);
+          final questionId = questionMap['questionId'] as String;
+          questionsMap[questionId] = questionMap;
         }
+
+        final sectionMap = sectionData.toMap();
+        sectionMap['questions'] = questionsMap;
+        sectionsMap[sectionId] = sectionMap;
       }
+
+      surveyData['sections'] = sectionsMap;
+      surveyData['createdAt'] = FieldValue.serverTimestamp();
+      surveyData['updatedAt'] = FieldValue.serverTimestamp();
+
+      await docRef.set(surveyData);
       return surveyId;
     } catch (e) {
       rethrow;
@@ -324,30 +170,36 @@ class FirebaseSurveyDataSource {
   Future<void> updateSurvey(Survey survey,
       Map<String, List<Map<String, dynamic>>> sectionsAndQuestionsData) async {
     try {
-      final surveyRef = _db.child('surveys').child(survey.surveyId);
-      await surveyRef.update(survey.toMap()); // Update data survey utama
+      // Prepare survey data with sections and questions
+      final surveyData = survey.toMap();
 
-      // Hapus sections lama dulu untuk memastikan konsistensi (atau lakukan update yang lebih granular)
-      await surveyRef.child('sections').remove();
-
-      // Tambahkan sections yang baru/diupdate
+      // Add sections with questions to survey data
+      final sectionsMap = <String, dynamic>{};
       for (var sectionEntry in sectionsAndQuestionsData.entries) {
         final sectionId = sectionEntry.key;
         final questionsData = sectionEntry.value;
         final sectionData =
             survey.sections.firstWhere((s) => s.sectionId == sectionId);
 
-        final sectionRef = surveyRef.child('sections').child(sectionId);
-        await sectionRef.set(sectionData.toMap());
-
+        // Convert questions list to map for Firestore
+        final questionsMap = <String, dynamic>{};
         for (var questionMap in questionsData) {
           final questionId = questionMap['questionId'] as String;
-          await sectionRef
-              .child('questions')
-              .child(questionId)
-              .set(questionMap);
+          questionsMap[questionId] = questionMap;
         }
+
+        final sectionMap = sectionData.toMap();
+        sectionMap['questions'] = questionsMap;
+        sectionsMap[sectionId] = sectionMap;
       }
+
+      surveyData['sections'] = sectionsMap;
+      surveyData['updatedAt'] = FieldValue.serverTimestamp();
+
+      await _firestore
+          .collection('surveys')
+          .doc(survey.surveyId)
+          .update(surveyData);
     } catch (e) {
       rethrow;
     }
@@ -355,15 +207,23 @@ class FirebaseSurveyDataSource {
 
   Future<void> deleteSurvey(String surveyId) async {
     try {
-      await _db.child('surveys').child(surveyId).remove();
-      // Pertimbangkan untuk menghapus respons terkait juga, atau arsipkan.
-      // final responsesSnapshot = await _db.child('survey_responses').orderByChild('surveyId').equalTo(surveyId).get();
-      // if (responsesSnapshot.exists) {
-      //   final responsesMap = responsesSnapshot.value as Map<dynamic, dynamic>;
-      //   for (var key in responsesMap.keys) {
-      //     await _db.child('survey_responses').child(key as String).remove();
-      //   }
-      // }
+      // Use batch to ensure atomicity
+      final batch = _firestore.batch();
+
+      // Delete survey document
+      batch.delete(_firestore.collection('surveys').doc(surveyId));
+
+      // Optional: Delete related responses (or archive them)
+      final responsesSnapshot = await _firestore
+          .collection('survey_responses')
+          .where('surveyId', isEqualTo: surveyId)
+          .get();
+
+      for (var doc in responsesSnapshot.docs) {
+        batch.delete(doc.reference);
+      }
+
+      await batch.commit();
     } catch (e) {
       rethrow;
     }
@@ -371,50 +231,24 @@ class FirebaseSurveyDataSource {
 
   Future<List<SurveyResponse>> getSurveyResponses(String surveyId) async {
     try {
-      final snapshot = await _db
-          .child('survey_responses')
-          .orderByChild('surveyId')
-          .equalTo(surveyId)
+      final snapshot = await _firestore
+          .collection('survey_responses')
+          .where('surveyId', isEqualTo: surveyId)
+          .orderBy('submittedAt', descending: true)
           .get();
-      if (!snapshot.exists || snapshot.value == null) return [];
+
+      if (snapshot.docs.isEmpty) return [];
 
       final responses = <SurveyResponse>[];
-      final responsesMap = snapshot.value as Map<dynamic, dynamic>;
 
-      responsesMap.forEach((key, value) {
-        if (value is Map) {
-          // PERBAIKAN: Konversi ke Map<String, dynamic>
-          final Map<String, dynamic> responseData = {};
-
-          value.forEach((k, v) {
-            responseData[k.toString()] = v;
-
-            // Khusus untuk answers, perlu penanganan nested map
-            if (k.toString() == 'answers' && v is Map) {
-              Map<String, dynamic> cleanAnswers = {};
-
-              v.forEach((answerId, answerValue) {
-                if (answerValue is Map) {
-                  Map<String, dynamic> cleanAnswer = {};
-
-                  answerValue.forEach((ak, av) {
-                    cleanAnswer[ak.toString()] = av;
-                  });
-
-                  cleanAnswers[answerId.toString()] = cleanAnswer;
-                }
-              });
-
-              responseData['answers'] = cleanAnswers;
-            }
-          });
-
-          try {
-            responses.add(SurveyResponse.fromMap(responseData, key.toString()));
-          } catch (e) {
-          }
+      for (var doc in snapshot.docs) {
+        try {
+          final responseData = doc.data();
+          responses.add(SurveyResponse.fromMap(responseData, doc.id));
+        } catch (e) {
+          // Continue processing other responses
         }
-      });
+      }
 
       return responses;
     } catch (e) {
@@ -437,7 +271,7 @@ class FirebaseSurveyDataSource {
           final questionId = question.questionId;
           // Ensure questionData is initialized for every question in the survey
           final questionSummary = <String, dynamic>{
-            'type': questionTypeToString(question.type), // MODIFIED LINE
+            'type': questionTypeToString(question.type),
             'text': question.text,
             'responses': 0, // Initialize responses count
           };
@@ -547,9 +381,132 @@ class FirebaseSurveyDataSource {
 
   Future<void> updateSurveyStatus(String surveyId, bool isActive) async {
     try {
-      await _db.child('surveys').child(surveyId).update({'isActive': isActive});
+      await _firestore.collection('surveys').doc(surveyId).update({
+        'isActive': isActive,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     } catch (e) {
       rethrow;
     }
+  }
+
+  // Additional helper methods for Firestore
+
+  /// Get surveys by date range
+  Future<List<Survey>> getSurveysByDateRange({
+    required DateTime startDate,
+    required DateTime endDate,
+    String? createdBy,
+  }) async {
+    try {
+      Query query = _firestore.collection('surveys');
+
+      if (createdBy != null) {
+        query = query.where('createdBy', isEqualTo: createdBy);
+      }
+
+      query = query
+          .where('createdAt',
+              isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+          .where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(endDate))
+          .orderBy('createdAt', descending: true);
+
+      final snapshot = await query.get();
+
+      final surveys = <Survey>[];
+      for (var doc in snapshot.docs) {
+        try {
+          final surveyData = doc.data() as Map<String, dynamic>;
+          surveys.add(Survey.fromMap(surveyData, doc.id));
+        } catch (e) {
+          // Continue processing other surveys
+        }
+      }
+
+      return surveys;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Get response statistics
+  Future<Map<String, dynamic>> getResponseStatistics(String surveyId) async {
+    try {
+      final responsesSnapshot = await _firestore
+          .collection('survey_responses')
+          .where('surveyId', isEqualTo: surveyId)
+          .get();
+
+      final stats = <String, dynamic>{
+        'totalResponses': responsesSnapshot.docs.length,
+        'responsesByDate': <String, int>{},
+        'responsesByUser': <String, int>{},
+      };
+
+      for (var doc in responsesSnapshot.docs) {
+        final data = doc.data();
+
+        // Count by date
+        if (data['submittedAt'] != null) {
+          final timestamp = data['submittedAt'] as Timestamp;
+          final dateKey = timestamp.toDate().toIso8601String().split('T')[0];
+          stats['responsesByDate'][dateKey] =
+              (stats['responsesByDate'][dateKey] ?? 0) + 1;
+        }
+
+        // Count by user
+        final userId = data['userId'] as String?;
+        if (userId != null) {
+          stats['responsesByUser'][userId] =
+              (stats['responsesByUser'][userId] ?? 0) + 1;
+        }
+      }
+
+      return stats;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  /// Stream surveys for real-time updates
+  Stream<List<Survey>> streamSurveys(String commandCenterId) {
+    return _firestore
+        .collection('surveys')
+        .where('createdBy', isEqualTo: commandCenterId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) {
+      final surveys = <Survey>[];
+      for (var doc in snapshot.docs) {
+        try {
+          final surveyData = doc.data();
+          surveys.add(Survey.fromMap(surveyData, doc.id));
+        } catch (e) {
+          // Continue processing other surveys
+        }
+      }
+      return surveys;
+    });
+  }
+
+  /// Stream survey responses for real-time updates
+  Stream<List<SurveyResponse>> streamSurveyResponses(String surveyId) {
+    return _firestore
+        .collection('survey_responses')
+        .where('surveyId', isEqualTo: surveyId)
+        .orderBy('submittedAt', descending: true)
+        .snapshots()
+        .map((snapshot) {
+      final responses = <SurveyResponse>[];
+      for (var doc in snapshot.docs) {
+        try {
+          final responseData = doc.data();
+          responses.add(SurveyResponse.fromMap(responseData, doc.id));
+        } catch (e) {
+          // Continue processing other responses
+        }
+      }
+      return responses;
+    });
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -25,6 +26,7 @@ import 'presentation/routing/bloc/patrol_bloc.dart';
 import 'package:livetrackingapp/presentation/component/utils.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
 
 class MapScreen extends StatefulWidget {
   final PatrolTask task;
@@ -932,6 +934,139 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  Future<void> _updateFirestoreLocation(
+      Position position, DateTime timestamp) async {
+    try {
+      final taskRef = FirebaseFirestore.instance
+          .collection('tasks')
+          .doc(widget.task.taskId);
+
+      // Create timestamp key for route path
+      final timestampKey = timestamp.millisecondsSinceEpoch.toString();
+
+      // Prepare location data
+      final locationData = {
+        'timestamp': timestamp.toIso8601String(),
+        'coordinates': [position.latitude, position.longitude],
+        'accuracy': position.accuracy,
+        'speed': position.speed,
+        'heading': position.heading,
+      };
+
+      // Prepare batch update
+      final batch = FirebaseFirestore.instance.batch();
+
+      // Update route path using map update syntax
+      batch.update(taskRef, {
+        'route_path.$timestampKey': locationData,
+        'lastLocation': locationData,
+        'distance': _totalDistance,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Optional: Also store in a subcollection for better querying
+      final routePointRef =
+          taskRef.collection('route_points').doc(timestampKey);
+      batch.set(routePointRef, {
+        ...locationData,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // Commit the batch
+      await batch.commit();
+
+      print('📡 Location updated in Firestore successfully at $timestampKey');
+    } catch (e) {
+      print('❌ Failed to update Firestore location: $e');
+
+      // Handle specific Firestore errors
+      if (e.toString().contains('unavailable')) {
+        print('⚠️ Firestore unavailable, location will be stored locally');
+      } else if (e.toString().contains('permission-denied')) {
+        print('❌ Firestore permission denied for location update');
+      } else {
+        print('❌ Unknown Firestore error: $e');
+      }
+
+      // Don't throw error to prevent location tracking from stopping
+      // Local storage should handle offline scenarios
+    }
+  }
+
+// Alternative method using nested updates for better performance
+  Future<void> _updateFirestoreLocationOptimized(
+      Position position, DateTime timestamp) async {
+    try {
+      final taskRef = FirebaseFirestore.instance
+          .collection('tasks')
+          .doc(widget.task.taskId);
+
+      // Create timestamp key
+      final timestampKey = timestamp.millisecondsSinceEpoch.toString();
+
+      // Prepare location data
+      final locationData = {
+        'timestamp': Timestamp.fromDate(timestamp), // Use Firestore Timestamp
+        'coordinates': [position.latitude, position.longitude],
+        'accuracy': position.accuracy,
+        'speed': position.speed,
+        'heading': position.heading,
+      };
+
+      // Use a single update with nested field paths
+      await taskRef.update({
+        'route_path.$timestampKey': locationData,
+        'lastLocation': locationData,
+        'distance': _totalDistance,
+        'lastLocationUpdate': FieldValue.serverTimestamp(),
+      });
+
+      print('📡 Location updated in Firestore (optimized) at $timestampKey');
+    } catch (e) {
+      print('❌ Failed to update Firestore location (optimized): $e');
+
+      // Graceful error handling
+      if (e.toString().contains('not-found')) {
+        print('⚠️ Task document not found, creating new location entry');
+        await _createTaskLocationEntry(position, timestamp);
+      }
+    }
+  }
+
+// Helper method to create task document if it doesn't exist
+  Future<void> _createTaskLocationEntry(
+      Position position, DateTime timestamp) async {
+    try {
+      final taskRef = FirebaseFirestore.instance
+          .collection('tasks')
+          .doc(widget.task.taskId);
+
+      final timestampKey = timestamp.millisecondsSinceEpoch.toString();
+      final locationData = {
+        'timestamp': Timestamp.fromDate(timestamp),
+        'coordinates': [position.latitude, position.longitude],
+        'accuracy': position.accuracy,
+        'speed': position.speed,
+        'heading': position.heading,
+      };
+
+      // Create or update with merge
+      await taskRef.set({
+        'route_path': {
+          timestampKey: locationData,
+        },
+        'lastLocation': locationData,
+        'distance': _totalDistance,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      print('📡 Task location entry created in Firestore');
+    } catch (e) {
+      print('❌ Failed to create task location entry: $e');
+    }
+  }
+
+// Update the _startLocationTracking method to use the improved function
   void _startLocationTracking() async {
     String timeNow = DateTime.now().toIso8601String();
     print('🚀 Starting location tracking at: $timeNow');
@@ -986,7 +1121,17 @@ class _MapScreenState extends State<MapScreen> {
               print('❌ Failed to save location to local storage: $e');
             }
 
-            // ✅ Try to update Firebase (don't block if it fails)
+            // ✅ Try to update Firestore (don't block if it fails)
+            try {
+              // Use the improved Firestore function
+              await _updateFirestoreLocationOptimized(position, timestamp);
+              print('📡 Location sent to Firestore');
+            } catch (e) {
+              print('❌ Failed to update Firestore location: $e');
+              // Continue with local tracking
+            }
+
+            // ✅ Also update via BLoC for consistency
             try {
               context.read<PatrolBloc>().add(UpdatePatrolLocation(
                     position: position,
@@ -994,8 +1139,7 @@ class _MapScreenState extends State<MapScreen> {
                   ));
               print('📡 Location sent to BLoC');
             } catch (e) {
-              print('❌ Failed to update Firebase location: $e');
-              // Continue with local tracking
+              print('❌ Failed to update via BLoC: $e');
             }
 
             // Handle mock location detection
@@ -1104,6 +1248,31 @@ class _MapScreenState extends State<MapScreen> {
 
       // ✅ 3. UPDATE FIREBASE ASYNC (NON-BLOCKING)
       try {
+        final taskRef = FirebaseFirestore.instance
+            .collection('tasks')
+            .doc(widget.task.taskId);
+
+        await taskRef.update({
+          'status': 'ongoing',
+          'startTime': startTime, // Store as DateTime or Timestamp
+          'initialReportPhotoUrl': initialReportPhotoUrl, // If already uploaded
+        });
+
+        // Potentially add an initial document to the 'route_path' subcollection
+        // if you want to mark the very first point of the patrol.
+        if (userCurrentLocation != null) {
+          final geoPoint = GeoPoint(
+              userCurrentLocation!.latitude, userCurrentLocation!.longitude);
+          await taskRef.collection('route_path').add({
+            'timestamp': startTime,
+            'coordinates': [
+              userCurrentLocation!.latitude,
+              userCurrentLocation!.longitude
+            ],
+            'accuracy': userCurrentLocation!.accuracy,
+            'geopoint': geoPoint,
+          });
+        }
         // Update task status in Firebase
         context.read<PatrolBloc>().add(UpdateTask(
               taskId: widget.task.taskId,
@@ -3124,7 +3293,6 @@ class _MapScreenState extends State<MapScreen> {
                                             '📍 Step 2: Setting completion state...');
                                         final completionTime = DateTime.now();
 
-                                        // Set a flag to prevent any further location updates
                                         setState(() {
                                           _localIsPatrolling = false;
                                           _localPatrollingTaskId = null;
@@ -3149,36 +3317,9 @@ class _MapScreenState extends State<MapScreen> {
                                               'Gagal upload foto: $uploadError');
                                         }
 
-                                        // ✅ STEP 4: COMPLETE PATROL IN LOCAL STORAGE (BUT DON'T DELETE YET)
+                                        // ✅ STEP 4: GET FINAL DATA BEFORE FIREBASE UPDATE
                                         print(
-                                            '📍 Step 4: Completing patrol in local storage...');
-                                        try {
-                                          await LocalPatrolService
-                                              .completePatrol(
-                                            taskId: widget.task.taskId,
-                                            endTime: completionTime,
-                                            finalPhotoUrl: photoUrl,
-                                            finalNote: noteController.text
-                                                    .trim()
-                                                    .isNotEmpty
-                                                ? noteController.text.trim()
-                                                : null,
-                                            totalDistance: _totalDistance,
-                                            elapsedSeconds:
-                                                _elapsedTime.inSeconds,
-                                          );
-                                          print(
-                                              '✅ Local storage updated successfully (marked as completed but not synced)');
-                                        } catch (localError) {
-                                          print(
-                                              '❌ Failed to update local storage: $localError');
-                                          throw Exception(
-                                              'Gagal simpan data lokal: $localError');
-                                        }
-
-                                        // ✅ STEP 5: GET FINAL DATA FOR NAVIGATION
-                                        print(
-                                            '📍 Step 5: Preparing navigation data...');
+                                            '📍 Step 4: Preparing final data...');
                                         final localData =
                                             LocalPatrolService.getPatrolData(
                                                 widget.task.taskId);
@@ -3221,22 +3362,184 @@ class _MapScreenState extends State<MapScreen> {
                                               .toList();
                                         }
 
-                                        // ✅ STEP 6: CLOSE DIALOG FIRST
-                                        print('📍 Step 6: Closing dialog...');
+                                        // ✅ STEP 5: UPDATE FIREBASE FIRST (SYNCHRONOUSLY)
+                                        print(
+                                            '📍 Step 5: Updating Firebase...');
+                                        try {
+                                          // Check connectivity
+                                          final connectivityResult =
+                                              await Connectivity()
+                                                  .checkConnectivity();
+                                          final isOnline = connectivityResult !=
+                                              ConnectivityResult.none;
+
+                                          if (isOnline) {
+                                            print(
+                                                '🔄 Updating Firebase immediately...');
+
+                                            // Update via BLoC first
+                                            if (mounted) {
+                                              context
+                                                  .read<PatrolBloc>()
+                                                  .add(StopPatrol(
+                                                    endTime: completionTime,
+                                                    distance: _totalDistance,
+                                                    finalRoutePath:
+                                                        localData?.routePath ??
+                                                            {},
+                                                  ));
+
+                                              context
+                                                  .read<PatrolBloc>()
+                                                  .add(SubmitFinalReport(
+                                                    photoUrl: photoUrl,
+                                                    note: noteController.text
+                                                            .trim()
+                                                            .isNotEmpty
+                                                        ? noteController.text
+                                                            .trim()
+                                                        : null,
+                                                    reportTime: completionTime,
+                                                  ));
+
+                                              // Wait for BLoC to process
+                                              await Future.delayed(
+                                                  Duration(seconds: 2));
+                                            }
+
+                                            // Update Firestore directly
+                                            await FirebaseFirestore.instance
+                                                .collection('tasks')
+                                                .doc(widget.task.taskId)
+                                                .update({
+                                              'status': 'finished',
+                                              'endTime': Timestamp.fromDate(
+                                                  completionTime),
+                                              'distance': _totalDistance,
+                                              'finalReportPhotoUrl': photoUrl,
+                                              'finalReportNote': noteController
+                                                      .text
+                                                      .trim()
+                                                      .isNotEmpty
+                                                  ? noteController.text.trim()
+                                                  : null,
+                                              'finalReportTime':
+                                                  Timestamp.fromDate(
+                                                      completionTime),
+                                              'updatedAt':
+                                                  FieldValue.serverTimestamp(),
+                                            });
+
+                                            print(
+                                                '✅ Firebase updated successfully');
+                                          } else {
+                                            print(
+                                                '⚠️ Offline mode - will sync later');
+                                          }
+                                        } catch (firebaseError) {
+                                          print(
+                                              '❌ Firebase update failed: $firebaseError');
+                                          // Continue with offline mode
+                                        }
+
+                                        // ✅ STEP 6: UPDATE LOCAL STORAGE
+                                        print(
+                                            '📍 Step 6: Updating local storage...');
+                                        try {
+                                          await LocalPatrolService
+                                              .completePatrol(
+                                            taskId: widget.task.taskId,
+                                            endTime: completionTime,
+                                            finalPhotoUrl: photoUrl,
+                                            finalNote: noteController.text
+                                                    .trim()
+                                                    .isNotEmpty
+                                                ? noteController.text.trim()
+                                                : null,
+                                            totalDistance: _totalDistance,
+                                            elapsedSeconds:
+                                                _elapsedTime.inSeconds,
+                                          );
+                                          print(
+                                              '✅ Local storage updated successfully');
+                                        } catch (localError) {
+                                          print(
+                                              '❌ Failed to update local storage: $localError');
+                                          throw Exception(
+                                              'Gagal simpan data lokal: $localError');
+                                        }
+
+                                        // ✅ STEP 7: PREPARE UPDATED TASK OBJECT
+                                        print(
+                                            '📍 Step 7: Preparing updated task object...');
+                                        final updatedTask = PatrolTask(
+                                          taskId: widget.task.taskId,
+                                          userId: widget.task.userId,
+                                          status:
+                                              'finished', // ✅ Set status to finished
+                                          assignedStartTime:
+                                              widget.task.assignedStartTime,
+                                          assignedEndTime:
+                                              widget.task.assignedEndTime,
+                                          startTime:
+                                              localData?.startTime != null
+                                                  ? DateTime.parse(
+                                                      localData!.startTime!)
+                                                  : widget.task.startTime,
+                                          endTime:
+                                              completionTime, // ✅ Set actual end time
+                                          distance:
+                                              _totalDistance, // ✅ Set actual distance
+                                          createdAt: widget.task.createdAt,
+                                          assignedRoute:
+                                              widget.task.assignedRoute,
+                                          routePath: localData?.routePath ??
+                                              widget.task.routePath,
+                                          clusterId: widget.task.clusterId,
+                                          mockLocationDetected:
+                                              widget.task.mockLocationDetected,
+                                          mockLocationCount:
+                                              widget.task.mockLocationCount,
+                                          finalReportPhotoUrl:
+                                              photoUrl, // ✅ Set final photo URL
+                                          finalReportNote: noteController.text
+                                                  .trim()
+                                                  .isNotEmpty
+                                              ? noteController.text.trim()
+                                              : null,
+                                          finalReportTime:
+                                              completionTime, // ✅ Set final report time
+                                          initialReportPhotoUrl:
+                                              widget.task.initialReportPhotoUrl,
+                                          initialReportNote:
+                                              widget.task.initialReportNote,
+                                          initialReportTime:
+                                              widget.task.initialReportTime,
+                                        );
+
+                                        // Set officer and cluster names
+                                        updatedTask.officerName =
+                                            widget.task.officerName;
+                                        updatedTask.clusterName =
+                                            widget.task.clusterName;
+
+                                        // ✅ STEP 8: CLOSE DIALOG
+                                        print('📍 Step 8: Closing dialog...');
                                         if (Navigator.canPop(context)) {
                                           Navigator.pop(context, true);
                                         }
 
-                                        // ✅ STEP 7: NAVIGATE TO SUMMARY IMMEDIATELY
+                                        // ✅ STEP 9: NAVIGATE TO SUMMARY WITH UPDATED DATA
                                         print(
-                                            '📍 Step 7: Navigating to summary...');
+                                            '📍 Step 9: Navigating to summary with updated data...');
                                         if (mounted) {
                                           Navigator.pushReplacement(
                                             context,
                                             MaterialPageRoute(
                                               builder: (_) =>
                                                   PatrolSummaryScreen(
-                                                task: widget.task,
+                                                task:
+                                                    updatedTask, // ✅ Pass updated task with correct status and endTime
                                                 routePath: completeRoutePath,
                                                 startTime: localData
                                                             ?.startTime !=
@@ -3245,9 +3548,10 @@ class _MapScreenState extends State<MapScreen> {
                                                         localData!.startTime!)
                                                     : DateTime.now()
                                                         .subtract(_elapsedTime),
-                                                endTime: completionTime,
-                                                distance: localData?.distance ??
-                                                    _totalDistance,
+                                                endTime:
+                                                    completionTime, // ✅ Pass actual end time
+                                                distance:
+                                                    _totalDistance, // ✅ Pass actual distance
                                                 finalReportPhotoUrl: photoUrl,
                                                 initialReportPhotoUrl: localData
                                                     ?.initialReportPhotoUrl,
@@ -3256,14 +3560,10 @@ class _MapScreenState extends State<MapScreen> {
                                           );
                                         }
 
-                                        // ✅ STEP 8: UPDATE FIREBASE ASYNC (WITH CLEANUP ONLY ON SUCCESS)
+                                        // ✅ STEP 10: BACKGROUND CLEANUP (OPTIONAL)
                                         print(
-                                            '📍 Step 8: Starting Firebase sync (background)...');
-                                        _updateFirebaseAsync(
-                                            completionTime,
-                                            photoUrl,
-                                            noteController.text.trim(),
-                                            finalRoutePath);
+                                            '📍 Step 10: Scheduling background cleanup...');
+                                        _scheduleBackgroundCleanup();
 
                                         result = true;
                                       } catch (e) {
@@ -3331,6 +3631,36 @@ class _MapScreenState extends State<MapScreen> {
     );
 
     return result;
+  }
+
+  void _scheduleBackgroundCleanup() {
+    Future.microtask(() async {
+      try {
+        print('🧹 Starting background cleanup...');
+
+        // Wait a bit to ensure everything is settled
+        await Future.delayed(Duration(seconds: 5));
+
+        // Check if sync is needed
+        final connectivityResult = await Connectivity().checkConnectivity();
+        if (connectivityResult != ConnectivityResult.none) {
+          // Force sync if online
+          final syncSuccess =
+              await SyncService.forceSyncPatrol(widget.task.taskId);
+
+          if (syncSuccess) {
+            print('✅ Background sync completed, cleaning up local data');
+            await LocalPatrolService.deletePatrolData(widget.task.taskId);
+          } else {
+            print('⚠️ Background sync failed, keeping local data');
+          }
+        } else {
+          print('📱 Offline, keeping local data for later sync');
+        }
+      } catch (e) {
+        print('❌ Error in background cleanup: $e');
+      }
+    });
   }
 
 // ✅ NEW METHOD: Background Firebase update (non-blocking)

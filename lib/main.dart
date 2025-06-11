@@ -4,7 +4,7 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -52,9 +52,10 @@ StreamSubscription<dynamic>? _connectivitySubscription;
 
 late Box offlineReportsBox;
 
-// UPDATE: Battery service dengan better error handling
+// UPDATE: Battery service dengan Firestore integration
 class BatteryService {
   static final Battery _battery = Battery();
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static Timer? _batteryTimer;
   static StreamSubscription<BatteryState>? _batteryStateSubscription;
   static bool _isInitialized = false;
@@ -126,17 +127,16 @@ class BatteryService {
         batteryState = null;
       }
 
-      // Get user's info
-      final userRef = FirebaseDatabase.instance.ref('users/${user.uid}');
-      final userSnapshot = await userRef.get();
+      // Get user's info from Firestore
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
 
-      if (userSnapshot.exists) {
-        final userData = userSnapshot.value as Map<dynamic, dynamic>;
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
         final userRole = userData['role'] as String?;
 
         // Prepare update data
         final updateData = <String, dynamic>{
-          'last_battery_update': DateTime.now().toIso8601String(),
+          'last_battery_update': FieldValue.serverTimestamp(),
           'is_online': true,
         };
 
@@ -149,16 +149,36 @@ class BatteryService {
         }
 
         // Update user's battery info
-        await userRef.update(updateData);
+        await _firestore.collection('users').doc(user.uid).update(updateData);
 
-        // If user is patrol, also update in cluster's officers data
+        // If user is patrol officer in a cluster, also update cluster's officers data
         if (userRole == 'patrol') {
           final clusterId = userData['clusterId'] as String?;
           if (clusterId != null) {
-            final clusterRef = FirebaseDatabase.instance
-                .ref('clusters/$clusterId/officers/${user.uid}');
+            // Get cluster document to update officer info
+            final clusterDoc =
+                await _firestore.collection('users').doc(clusterId).get();
 
-            await clusterRef.update(updateData);
+            if (clusterDoc.exists) {
+              final clusterData = clusterDoc.data()!;
+              final officers = List<Map<String, dynamic>>.from(
+                  clusterData['officers'] ?? []);
+
+              // Find and update this officer's data
+              final officerIndex =
+                  officers.indexWhere((officer) => officer['id'] == user.uid);
+              if (officerIndex != -1) {
+                officers[officerIndex] = {
+                  ...officers[officerIndex],
+                  ...updateData,
+                };
+
+                await _firestore.collection('users').doc(clusterId).update({
+                  'officers': officers,
+                  'updated_at': FieldValue.serverTimestamp(),
+                });
+              }
+            }
           }
         }
 
@@ -174,29 +194,46 @@ class BatteryService {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      final userRef = FirebaseDatabase.instance.ref('users/${user.uid}');
-      final userSnapshot = await userRef.get();
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
 
-      if (userSnapshot.exists) {
-        final userData = userSnapshot.value as Map<dynamic, dynamic>;
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
         final userRole = userData['role'] as String?;
 
         final updateData = {
           'battery_state': state.toString().split('.').last,
-          'last_battery_update': DateTime.now().toIso8601String(),
+          'last_battery_update': FieldValue.serverTimestamp(),
         };
 
         // Update user's battery state
-        await userRef.update(updateData);
+        await _firestore.collection('users').doc(user.uid).update(updateData);
 
         // If patrol user, also update cluster
         if (userRole == 'patrol') {
           final clusterId = userData['clusterId'] as String?;
           if (clusterId != null) {
-            final clusterRef = FirebaseDatabase.instance
-                .ref('clusters/$clusterId/officers/${user.uid}');
+            final clusterDoc =
+                await _firestore.collection('users').doc(clusterId).get();
 
-            await clusterRef.update(updateData);
+            if (clusterDoc.exists) {
+              final clusterData = clusterDoc.data()!;
+              final officers = List<Map<String, dynamic>>.from(
+                  clusterData['officers'] ?? []);
+
+              final officerIndex =
+                  officers.indexWhere((officer) => officer['id'] == user.uid);
+              if (officerIndex != -1) {
+                officers[officerIndex] = {
+                  ...officers[officerIndex],
+                  ...updateData,
+                };
+
+                await _firestore.collection('users').doc(clusterId).update({
+                  'officers': officers,
+                  'updated_at': FieldValue.serverTimestamp(),
+                });
+              }
+            }
           }
         }
       }
@@ -235,7 +272,7 @@ void setupLocator() {
   getIt.registerLazySingleton<ReportRepository>(
     () => ReportRepositoryImpl(
       firebaseStorage: FirebaseStorage.instance,
-      databaseReference: FirebaseDatabase.instance.ref(),
+      firestore: FirebaseFirestore.instance, // Changed from databaseReference
       offlineReportsBox: offlineReportsBox,
     ),
   );
@@ -298,7 +335,9 @@ void setupLocator() {
 Future<void> requestLocationPermission() async {
   final status = await Permission.location.request();
   if (status.isGranted) {
+    log('Location permission granted');
   } else if (status.isDenied) {
+    log('Location permission denied');
   } else if (status.isPermanentlyDenied) {
     await openAppSettings();
   }
@@ -307,7 +346,9 @@ Future<void> requestLocationPermission() async {
 Future<void> requestNotificationPermission() async {
   final status = await Permission.notification.request();
   if (status.isGranted) {
+    log('Notification permission granted');
   } else if (status.isDenied) {
+    log('Notification permission denied');
   } else if (status.isPermanentlyDenied) {
     await openAppSettings();
   }
@@ -371,15 +412,15 @@ Future<void> initializeApp() async {
     }
   }
 
-  // Initialize local patrol service
-  await LocalPatrolService.init();
-  offlineReportsBox = await Hive.openBox('offline_reports');
-
+  // Enable Firestore offline persistence if user is authenticated
   if (FirebaseAuth.instance.currentUser != null) {
     try {
-      FirebaseDatabase.instance.setPersistenceEnabled(true);
+      // Enable offline persistence for Firestore
+      await FirebaseFirestore.instance
+          .enablePersistence(const PersistenceSettings(synchronizeTabs: true));
+      log('✅ Firestore offline persistence enabled');
     } catch (e) {
-      log('Error setting Firebase persistence: $e');
+      log('⚠️ Firestore persistence already enabled or failed: $e');
     }
   }
 
@@ -423,16 +464,20 @@ Future<String?> getUserRole() async {
       return null;
     }
 
-    final userRef = FirebaseDatabase.instance.ref('users/${user.uid}');
-    final snapshot = await userRef.get();
+    // Use Firestore instead of Realtime Database
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
 
-    if (snapshot.exists) {
-      final data = snapshot.value as Map<dynamic, dynamic>;
+    if (userDoc.exists) {
+      final data = userDoc.data()!;
       return data['role'] as String?;
     } else {
       return null;
     }
   } catch (e) {
+    log('Error getting user role: $e');
     return null;
   }
 }
@@ -535,6 +580,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     // Clean up battery monitoring
     BatteryService.dispose();
+    // Cancel connectivity subscription
+    _connectivitySubscription?.cancel();
+    // Cancel periodic sync timer
+    _periodicSyncTimer?.cancel();
     super.dispose();
   }
 
@@ -618,7 +667,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             context.read<ReportBloc>().add(SyncOfflineReportsEvent());
           }
         });
-      } catch (e) {}
+      } catch (e) {
+        log('Error syncing offline reports: $e');
+      }
     }
   }
 

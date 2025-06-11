@@ -1,5 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
-import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:livetrackingapp/notification_utils.dart';
 import '../../domain/entities/user.dart';
@@ -7,7 +7,7 @@ import '../../domain/repositories/auth_repository.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
   final firebase_auth.FirebaseAuth _firebaseAuth;
-  final DatabaseReference _database = FirebaseDatabase.instance.ref();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
 
   AuthRepositoryImpl({
@@ -22,17 +22,16 @@ class AuthRepositoryImpl implements AuthRepository {
         password: password,
       );
 
-
       if (credential.user == null) {
         throw Exception('Login failed: No user returned');
       }
 
       // Check if user profile exists
-      final snapshot =
-          await _database.child('users').child(credential.user!.uid).get();
+      final docSnapshot =
+          await _firestore.collection('users').doc(credential.user!.uid).get();
 
       User user;
-      if (!snapshot.exists) {
+      if (!docSnapshot.exists) {
         // Return basic user info if profile doesn't exist
         user = User(
           id: credential.user!.uid,
@@ -42,7 +41,7 @@ class AuthRepositoryImpl implements AuthRepository {
         );
       } else {
         // Convert and return full user profile
-        final userData = Map<String, dynamic>.from(snapshot.value as Map);
+        final userData = docSnapshot.data()!;
         user = User(
           id: credential.user!.uid,
           email: credential.user!.email!,
@@ -66,8 +65,14 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<bool> checkUserProfile(String userId) async {
     try {
-      final snapshot = await _database.child('users').child(userId).get();
-      final isNameExist = snapshot.child('name').exists;
+      final docSnapshot =
+          await _firestore.collection('users').doc(userId).get();
+
+      if (!docSnapshot.exists) return false;
+
+      final userData = docSnapshot.data();
+      final isNameExist =
+          userData?['name'] != null && (userData!['name'] as String).isNotEmpty;
       return isNameExist;
     } catch (e) {
       return false;
@@ -87,10 +92,10 @@ class AuthRepositoryImpl implements AuthRepository {
         'name': name,
         'role': role,
         'email': currentUser.email,
-        'createdAt': DateTime.now().toIso8601String(),
+        'createdAt': FieldValue.serverTimestamp(),
       };
 
-      await _database.child('users').child(currentUser.uid).set(userData);
+      await _firestore.collection('users').doc(currentUser.uid).set(userData);
 
       return User(
         id: currentUser.uid,
@@ -107,10 +112,10 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<void> updateUserProfile(
       String userId, String name, String role) async {
     try {
-      await _database.child('users').child(userId).update({
+      await _firestore.collection('users').doc(userId).update({
         'name': name,
         'role': role,
-        'updatedAt': DateTime.now().toIso8601String(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
       throw Exception('Failed to update profile: $e');
@@ -120,19 +125,21 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<void> removePushToken(String userId) async {
     try {
-      
       // Cek apakah user ada di database
-      final snapshot = await _database.child('users').child(userId).get();
-      if (!snapshot.exists) {
+      final docSnapshot =
+          await _firestore.collection('users').doc(userId).get();
+
+      if (!docSnapshot.exists) {
         return;
       }
-      
+
       // Hapus push_token dari database
-      await _database.child('users').child(userId).child('push_token').remove();
-      
+      await _firestore.collection('users').doc(userId).update({
+        'push_token': FieldValue.delete(),
+      });
+
       // Unsubscribe dari FCM topic untuk user ini
       await _firebaseMessaging.unsubscribeFromTopic('user_$userId');
-      
     } catch (e) {
       // Tidak throw exception karena ini tidak boleh mengganggu proses logout
     }
@@ -143,7 +150,7 @@ class AuthRepositoryImpl implements AuthRepository {
     try {
       // Dapatkan userId saat ini jika tidak diberikan
       final currentUserId = userId ?? _firebaseAuth.currentUser?.uid;
-      
+
       // Hapus push token jika userId tersedia
       if (currentUserId != null) {
         try {
@@ -152,7 +159,7 @@ class AuthRepositoryImpl implements AuthRepository {
           // Log error tapi jangan gagalkan proses logout
         }
       }
-      
+
       // Lakukan logout dari Firebase Auth
       await _firebaseAuth.signOut();
     } catch (e) {
@@ -167,10 +174,10 @@ class AuthRepositoryImpl implements AuthRepository {
       final currentUser = _firebaseAuth.currentUser;
       if (currentUser == null) return null;
 
-      final snapshot =
-          await _database.child('users').child(currentUser.uid).get();
+      final docSnapshot =
+          await _firestore.collection('users').doc(currentUser.uid).get();
 
-      if (!snapshot.exists) {
+      if (!docSnapshot.exists) {
         return User(
           id: currentUser.uid,
           email: currentUser.email!,
@@ -179,7 +186,7 @@ class AuthRepositoryImpl implements AuthRepository {
         );
       }
 
-      final userData = Map<String, dynamic>.from(snapshot.value as Map);
+      final userData = docSnapshot.data()!;
       return User(
         id: currentUser.uid,
         email: currentUser.email!,
