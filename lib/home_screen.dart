@@ -1697,18 +1697,61 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MapScreen(
-                          task: task,
-                          onStart: () {
-                            // Task already started
-                          },
-                        ),
-                      ),
-                    );
+                  onPressed: () async {
+                    // ✅ PERBAIKAN: Refresh task data sebelum navigate
+                    print('🔄 Refreshing task data before navigation...');
+
+                    try {
+                      // Get fresh data from Firebase
+                      final freshTask =
+                          await _refreshTaskDataFromFirebase(task.taskId);
+
+                      if (freshTask != null && mounted) {
+                        print('✅ Fresh task data loaded: ${freshTask.status}');
+                        print('   - Start time: ${freshTask.startTime}');
+                        print('   - Distance: ${freshTask.distance}');
+                        print(
+                            '   - Route path: ${freshTask.routePath?.length ?? 0} points');
+
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => MapScreen(
+                              task: freshTask, // ✅ Pass fresh data
+                              onStart: () {
+                                // Task already started, no need to start again
+                                print('Task already started, continuing...');
+                              },
+                            ),
+                          ),
+                        );
+                      } else {
+                        // Fallback to original task if refresh fails
+                        print('⚠️ Using original task data as fallback');
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => MapScreen(
+                              task: task,
+                              onStart: () {
+                                // Task already started
+                              },
+                            ),
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      print('❌ Error refreshing task data: $e');
+                      // Show error message
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Gagal memuat data terbaru: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
                   },
                   icon: const Icon(Icons.map, size: 16),
                   label: Text(
@@ -1752,6 +1795,99 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+
+// ✅ TAMBAHAN: Method untuk refresh task data dari Firebase
+  Future<PatrolTask?> _refreshTaskDataFromFirebase(String taskId) async {
+    try {
+      print('🔄 Fetching fresh task data for: $taskId');
+
+      final snapshot = await FirebaseDatabase.instance
+          .ref()
+          .child('tasks')
+          .child(taskId)
+          .get();
+
+      if (!snapshot.exists) {
+        print('❌ Task not found in Firebase: $taskId');
+        return null;
+      }
+
+      final data = snapshot.value as Map<dynamic, dynamic>;
+      print('✅ Raw Firebase data loaded for task: $taskId');
+
+      // Parse the task data
+      final task = PatrolTask(
+        taskId: taskId,
+        userId: data['userId']?.toString() ?? '',
+        status: data['status']?.toString() ?? 'unknown',
+        assignedStartTime: _parseDateTime(data['assignedStartTime']),
+        assignedEndTime: _parseDateTime(data['assignedEndTime']),
+        startTime: _parseDateTime(data['startTime']),
+        endTime: _parseDateTime(data['endTime']),
+        distance: data['distance'] != null
+            ? (data['distance'] as num).toDouble()
+            : null,
+        createdAt: _parseDateTime(data['createdAt']) ?? DateTime.now(),
+        assignedRoute: data['assigned_route'] != null
+            ? (data['assigned_route'] as List)
+                .map((point) => (point as List)
+                    .map((coord) => (coord as num).toDouble())
+                    .toList())
+                .toList()
+            : null,
+        routePath: data['route_path'] != null
+            ? Map<String, dynamic>.from(data['route_path'] as Map)
+            : null,
+        clusterId: data['clusterId'].toString(),
+        mockLocationDetected: data['mockLocationDetected'] == true,
+        mockLocationCount: data['mockLocationCount'] is num
+            ? (data['mockLocationCount'] as num).toInt()
+            : 0,
+        initialReportPhotoUrl: data['initialReportPhotoUrl']?.toString(),
+        finalReportPhotoUrl: data['finalReportPhotoUrl']?.toString(),
+        initialReportNote: data['initialReportNote']?.toString(),
+        finalReportNote: data['finalReportNote']?.toString(),
+      );
+
+      // ✅ PENTING: Set officer info dari data yang sudah ada
+      if (_currentUser?.role == 'patrol') {
+        // Find officer info dari data yang sudah di-load
+        final existingTask = _allOngoingTasks.firstWhere(
+          (t) => t.taskId == taskId,
+          orElse: () => PatrolTask(
+            taskId: '',
+            userId: '',
+            status: '',
+            clusterId: '',
+            assignedStartTime: DateTime.now(),
+            assignedEndTime: DateTime.now(),
+            startTime: DateTime.now(),
+            endTime: DateTime.now(),
+            distance: 0.0,
+            createdAt: DateTime.now(),
+          ),
+        );
+
+        if (existingTask.taskId.isNotEmpty) {
+          task.officerName = existingTask.officerName;
+          task.officerPhotoUrl = existingTask.officerPhotoUrl;
+          task.clusterName = existingTask.clusterName;
+        }
+      }
+
+      print('✅ Task data parsed successfully:');
+      print('   - Status: ${task.status}');
+      print('   - Start time: ${task.startTime}');
+      print('   - Distance: ${task.distance}');
+      print('   - Route path points: ${task.routePath?.length ?? 0}');
+      print('   - Officer: ${task.officerName}');
+
+      return task;
+    } catch (e) {
+      print('❌ Error refreshing task data: $e');
+      return null;
+    }
   }
 
   // PERBAIKAN: Start task stream dengan proper cleanup

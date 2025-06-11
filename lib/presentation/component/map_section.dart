@@ -9,12 +9,15 @@ class MapSection extends StatefulWidget {
   final GoogleMapController? mapController;
   final Set<Marker> markers;
   final Function(LatLng) onMapTap;
+  final Function(GoogleMapController)? onMapCreated;
+  
 
   const MapSection({
     Key? key,
     required this.mapController,
     required this.markers,
     required this.onMapTap,
+    this.onMapCreated,
   }) : super(key: key);
 
   @override
@@ -99,18 +102,11 @@ class _MapSectionState extends State<MapSection> {
     }
 
     return GoogleMap(
-      onMapCreated: (controller) {
-        if (widget.mapController != null) {
-          widget.mapController!.animateCamera(
-            CameraUpdate.newCameraPosition(
-              CameraPosition(
-                target: _currentPosition!,
-                zoom: 15,
-              ),
-            ),
-          );
-        }
-      },
+      onMapCreated: (widget.onMapCreated != null)
+          ? (controller) {
+              widget.onMapCreated!(controller);
+            }
+          : null,
       initialCameraPosition: CameraPosition(
         target: _currentPosition!,
         zoom: 15,

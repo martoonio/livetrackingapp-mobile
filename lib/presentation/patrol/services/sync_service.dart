@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:livetrackingapp/presentation/patrol/services/local_patrol_data.dart';
 import 'local_patrol_service.dart';
@@ -6,6 +7,13 @@ import 'local_patrol_service.dart';
 class SyncService {
   static Future<void> syncUnsyncedPatrols() async {
     try {
+      // Check authentication first
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('❌ No authenticated user for sync');
+        return;
+      }
+
       // Check internet connection
       final connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
@@ -28,33 +36,56 @@ class SyncService {
 
   static Future<void> _syncSinglePatrol(LocalPatrolData patrol) async {
     try {
+      // Verify authentication
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('❌ No authenticated user for patrol sync: ${patrol.taskId}');
+        return;
+      }
+
       final taskRef =
           FirebaseDatabase.instance.ref().child('tasks/${patrol.taskId}');
 
-      // ✅ PREPARE COMPREHENSIVE UPDATE DATA
+      // First, verify this user has permission to update this task
+      final taskSnapshot = await taskRef.get();
+      if (!taskSnapshot.exists) {
+        print('❌ Task not found in Firebase: ${patrol.taskId}');
+        return;
+      }
+
+      final taskData = taskSnapshot.value as Map<dynamic, dynamic>;
+      final taskUserId = taskData['clusterId'];
+
+      // Only sync if current user owns this task
+      if (taskUserId != currentUser.uid) {
+        print(
+            '❌ Permission denied: User ${currentUser.uid} cannot sync task owned by $taskUserId');
+        return;
+      }
+
+      // ✅ PREPARE UPDATE DATA WITH PERMISSION-SAFE FIELDS
       final updateData = <String, dynamic>{};
 
-      // ✅ Basic patrol data with proper status mapping
+      // ✅ Core patrol data that user can always update
       if (patrol.startTime != null) {
         updateData['startTime'] = patrol.startTime;
-
-        // Map local status to Firebase status
-        if (patrol.status == 'finished') {
-          updateData['status'] = 'finished';
-        } else if (patrol.status == 'ongoing' || patrol.status == 'started') {
-          updateData['status'] = 'ongoing';
-        }
+        updateData['actualStartTime'] = patrol.startTime;
+        updateData['startedFromApp'] = true;
       }
 
       if (patrol.endTime != null) {
         updateData['endTime'] = patrol.endTime;
-        updateData['status'] = 'finished';
+        updateData['actualEndTime'] = patrol.endTime;
+        updateData['finishedFromApp'] = true;
+        updateData['status'] = 'completed';
+      } else if (patrol.status == 'ongoing' || patrol.status == 'started') {
+        updateData['status'] = 'ongoing';
       }
 
-      // ✅ Distance and time data
+      // ✅ Distance (user can update)
       updateData['distance'] = patrol.distance;
 
-      // ✅ Photo URLs
+      // ✅ Report data with proper field names
       if (patrol.initialReportPhotoUrl != null) {
         updateData['initialReportPhotoUrl'] = patrol.initialReportPhotoUrl;
       }
@@ -63,16 +94,19 @@ class SyncService {
         updateData['finalReportPhotoUrl'] = patrol.finalReportPhotoUrl;
       }
 
-      // ✅ Notes
       if (patrol.initialNote != null) {
-        updateData['initialNote'] = patrol.initialNote;
+        updateData['initialReportNote'] = patrol.initialNote;
+        updateData['initialReportTime'] =
+            patrol.startTime ?? DateTime.now().toIso8601String();
       }
 
       if (patrol.finalNote != null) {
-        updateData['finalNote'] = patrol.finalNote;
+        updateData['finalReportNote'] = patrol.finalNote;
+        updateData['finalReportTime'] =
+            patrol.endTime ?? DateTime.now().toIso8601String();
       }
 
-      // ✅ Route path - ENHANCED FORMATTING WITH VALIDATION
+      // ✅ Route path with proper validation
       if (patrol.routePath.isNotEmpty) {
         print('📍 Syncing route path with ${patrol.routePath.length} points');
 
@@ -86,14 +120,22 @@ class SyncService {
               if (coords.length >= 2 &&
                   coords[0] != null &&
                   coords[1] != null) {
-                firebaseRoutePath[key] = {
-                  'coordinates': [
-                    (coords[0] as num).toDouble(),
-                    (coords[1] as num).toDouble(),
-                  ],
-                  'timestamp':
-                      value['timestamp'] ?? DateTime.now().toIso8601String(),
-                };
+                // Ensure coordinates are valid numbers
+                try {
+                  final lat = (coords[0] as num).toDouble();
+                  final lng = (coords[1] as num).toDouble();
+
+                  // Basic validation for reasonable coordinates
+                  if (lat.abs() <= 90 && lng.abs() <= 180) {
+                    firebaseRoutePath[key] = {
+                      'coordinates': [lat, lng],
+                      'timestamp': value['timestamp'] ??
+                          DateTime.now().toIso8601String(),
+                    };
+                  }
+                } catch (e) {
+                  print('⚠️ Invalid coordinates in route point $key: $e');
+                }
               }
             }
           }
@@ -110,18 +152,15 @@ class SyncService {
       if (patrol.mockLocationDetected) {
         updateData['mockLocationDetected'] = true;
         updateData['mockLocationCount'] = patrol.mockLocationCount;
+        updateData['lastMockDetection'] = DateTime.now().toIso8601String();
       }
 
-      // ✅ Metadata
+      // ✅ Sync metadata
       updateData['lastUpdated'] = patrol.lastUpdated;
       updateData['syncedAt'] = DateTime.now().toIso8601String();
 
       print('🔄 Updating Firebase for patrol ${patrol.taskId}');
-      print('📊 Update data: ${updateData.keys.toList()}');
-      if (updateData.containsKey('route_path')) {
-        print(
-            '📍 Route path size: ${(updateData['route_path'] as Map).length} points');
-      }
+      print('📊 Update data keys: ${updateData.keys.toList()}');
 
       // ✅ UPDATE FIREBASE WITH RETRY MECHANISM
       int retryCount = 0;
@@ -142,36 +181,60 @@ class SyncService {
           print('❌ Firebase update attempt $retryCount failed: $e');
 
           if (retryCount < 3) {
-            // Wait before retry
             await Future.delayed(Duration(seconds: retryCount * 2));
           } else {
-            throw e; // Re-throw after all retries failed
+            // If all retries failed, check if it's a permission error
+            if (e.toString().contains('permission-denied')) {
+              print('❌ Permission denied error - user may not own this task');
+              return; // Don't retry permission errors
+            }
+            throw e;
           }
         }
       }
 
-      // ✅ DELETE LOCAL DATA AFTER SUCCESSFUL SYNC
+      // ✅ UPDATE LOCAL DATA TO MARK AS SYNCED AND DELETE ONLY ON SUCCESS
       if (updateSuccess) {
-        final deleteSuccess =
-            await LocalPatrolService.deletePatrolData(patrol.taskId);
-        if (deleteSuccess) {
-          print(
-              '✅ Successfully synced and deleted local data for patrol: ${patrol.taskId}');
-        } else {
-          print(
-              '⚠️ Synced to Firebase but failed to delete local data for: ${patrol.taskId}');
+        try {
+          // ✅ FIRST, MARK AS SYNCED
+          patrol.isSynced = true;
+          await patrol.save();
+          print('✅ Local data marked as synced');
+
+          // ✅ THEN, DELETE LOCAL DATA ONLY AFTER SUCCESSFUL FIREBASE UPDATE
+          final deleteSuccess =
+              await LocalPatrolService.deletePatrolData(patrol.taskId);
+          if (deleteSuccess) {
+            print(
+                '✅ Successfully synced and deleted local data for patrol: ${patrol.taskId}');
+          } else {
+            print(
+                '⚠️ Synced to Firebase but failed to delete local data for: ${patrol.taskId}');
+            // This is not critical - data is marked as synced so won't be re-synced
+          }
+        } catch (e) {
+          print('⚠️ Failed to update local sync status: $e');
+          // Data was synced to Firebase, so this is not critical
         }
+      } else {
+        print('❌ Firebase sync failed, preserving local data for retry');
       }
     } catch (e) {
       print('❌ Error syncing patrol ${patrol.taskId}: $e');
-      // Don't delete local data if there's an error
-      throw e;
+      // Don't rethrow to allow other patrols to continue syncing
     }
   }
 
-  // ✅ Enhanced force sync with auto delete
+  // ✅ Enhanced force sync with better cleanup logic
   static Future<bool> forceSyncPatrol(String taskId) async {
     try {
+      // Check authentication
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('❌ No authenticated user for force sync');
+        return false;
+      }
+
       // Check internet connection first
       final connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
@@ -185,36 +248,49 @@ class SyncService {
         return false;
       }
 
-      // ✅ DOUBLE CHECK: Verify data actually exists in Firebase before deleting local
+      // ✅ VERIFY TASK OWNERSHIP BEFORE SYNC
       try {
         final taskRef = FirebaseDatabase.instance.ref().child('tasks/$taskId');
         final snapshot = await taskRef.get();
 
         if (snapshot.exists) {
           final firebaseData = snapshot.value as Map<dynamic, dynamic>;
+          final taskUserId = firebaseData['clusterId'];
 
-          // Check if critical data exists
+          // Check ownership
+          if (taskUserId != currentUser.uid) {
+            print(
+                '❌ Permission denied: User ${currentUser.uid} cannot sync task owned by $taskUserId');
+            return false;
+          }
+
+          // Check if critical data exists and is complete
           final hasStartTime = firebaseData['startTime'] != null;
           final hasStatus = firebaseData['status'] != null;
-          final hasDistance = firebaseData['distance'] != null;
 
           if (hasStartTime && hasStatus) {
-            print('✅ Firebase data verified complete, deleting local data');
+            // Check if local data matches or is more recent
+            final localIsMoreRecent = localData.lastUpdated != null &&
+                firebaseData['lastUpdated'] != null &&
+                DateTime.parse(localData.lastUpdated!).isAfter(
+                    DateTime.parse(firebaseData['lastUpdated'].toString()));
 
-            // ✅ Delete local data since it's already in Firebase
-            final deleteSuccess =
-                await LocalPatrolService.deletePatrolData(taskId);
-            if (deleteSuccess) {
-              print('✅ Local data deleted after verification for: $taskId');
+            if (!localIsMoreRecent) {
+              print('✅ Firebase data is current, can safely delete local data');
+              final deleteSuccess =
+                  await LocalPatrolService.deletePatrolData(taskId);
+              if (deleteSuccess) {
+                print('✅ Local data deleted after verification for: $taskId');
+              }
+              return true;
+            } else {
+              print('⚠️ Local data is more recent, need to sync...');
             }
-            return true;
           } else {
             print('⚠️ Firebase data incomplete, re-syncing...');
-            // Data incomplete, need to sync again
           }
         } else {
           print('⚠️ Task not found in Firebase, need to sync');
-          // Task not in Firebase, need to sync
         }
       } catch (e) {
         print('❌ Error verifying Firebase data: $e');
@@ -238,14 +314,19 @@ class SyncService {
     await syncUnsyncedPatrols();
   }
 
-  // ✅ NEW: Method to clean up all synced data manually
+  // ✅ Enhanced cleanup with permission checking
   static Future<void> cleanupSyncedData() async {
     try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('❌ No authenticated user for cleanup');
+        return;
+      }
+
       final allPatrols = LocalPatrolService.getUnsyncedPatrols();
       int deletedCount = 0;
 
       for (LocalPatrolData patrol in allPatrols) {
-        // Check if data exists in Firebase
         try {
           final taskRef =
               FirebaseDatabase.instance.ref().child('tasks/${patrol.taskId}');
@@ -253,17 +334,23 @@ class SyncService {
 
           if (snapshot.exists) {
             final firebaseData = snapshot.value as Map<dynamic, dynamic>;
+            final taskUserId = firebaseData['userId'];
 
-            // Verify critical data exists
-            if (firebaseData['startTime'] != null &&
-                firebaseData['status'] != null) {
-              // Data verified in Firebase, safe to delete local
-              final deleteSuccess =
-                  await LocalPatrolService.deletePatrolData(patrol.taskId);
-              if (deleteSuccess) {
-                deletedCount++;
-                print('🧹 Cleaned up synced data for: ${patrol.taskId}');
+            // Only clean up if user owns the task
+            if (taskUserId == currentUser.uid) {
+              // Verify critical data exists
+              if (firebaseData['startTime'] != null &&
+                  firebaseData['status'] != null) {
+                final deleteSuccess =
+                    await LocalPatrolService.deletePatrolData(patrol.taskId);
+                if (deleteSuccess) {
+                  deletedCount++;
+                  print('🧹 Cleaned up synced data for: ${patrol.taskId}');
+                }
               }
+            } else {
+              print(
+                  '⚠️ Skipping cleanup for task not owned by current user: ${patrol.taskId}');
             }
           }
         } catch (e) {

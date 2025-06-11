@@ -149,26 +149,42 @@ class LocalPatrolService {
     }
   }
 
-  // Complete patrol
+  // Update existing method in LocalPatrolService:
+
   static Future<bool> completePatrol({
     required String taskId,
     required DateTime endTime,
-    String? finalPhotoUrl,
+    required String finalPhotoUrl,
     String? finalNote,
+    required double totalDistance,
+    required int elapsedSeconds,
   }) async {
     try {
       final existingData = _patrolBox.get(taskId);
-      if (existingData != null) {
-        existingData.status = 'completed';
-        existingData.endTime = endTime.toIso8601String();
-        existingData.finalReportPhotoUrl = finalPhotoUrl;
-        existingData.finalNote = finalNote;
-        existingData.lastUpdated = DateTime.now().toIso8601String();
-        await existingData.save();
-        print('✅ Patrol completed locally for task: $taskId');
-        return true;
+      if (existingData == null) {
+        print('❌ No existing patrol data found for completion');
+        return false;
       }
-      return false;
+
+      print('🔄 Completing patrol in local storage...');
+
+      // ✅ Update with completion data
+      existingData.status = 'finished';
+      existingData.endTime = endTime.toIso8601String();
+      existingData.finalReportPhotoUrl = finalPhotoUrl;
+      existingData.finalNote = finalNote;
+      existingData.distance = totalDistance;
+      existingData.lastUpdated = DateTime.now().toIso8601String();
+
+      await existingData.save();
+
+      print('✅ Patrol completed in local storage');
+      print('   - Status: ${existingData.status}');
+      print('   - End time: ${existingData.endTime}');
+      print('   - Distance: ${existingData.distance}');
+      print('   - Duration: ${existingData.elapsedTimeSeconds}s');
+
+      return true;
     } catch (e) {
       print('❌ Error completing patrol: $e');
       return false;

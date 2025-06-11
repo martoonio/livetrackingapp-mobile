@@ -906,19 +906,33 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     Emitter<PatrolState> emit,
   ) async {
     try {
-      final currentState = state;
-      if (currentState is! PatrolLoaded) {
-        emit(PatrolLoaded(
-          task: event.task,
-          isPatrolling: true,
-          distance: event.currentDistance,
-          isOffline: false,
-        ));
-        return;
-      }
+      print('🔄 PatrolBloc: Resuming patrol for task: ${event.task.taskId}');
 
-      // ✅ SYNC RESUMED STATE TO FIREBASE IMMEDIATELY
+      // ✅ STEP 1: Prepare updated task with all data
+      final updatedTask = event.task.copyWith(
+        status: 'ongoing',
+        startTime: event.startTime,
+        distance: event.currentDistance,
+        routePath: event.existingRoutePath,
+      );
+
+      // ✅ STEP 2: Emit state immediately for UI responsiveness
+      emit(PatrolLoaded(
+        task: updatedTask,
+        isPatrolling: true,
+        distance: event.currentDistance,
+        startTime: event.startTime,
+        routePath: event.existingRoutePath,
+        isOffline: !_isConnected,
+      ));
+
+      // ✅ STEP 3: Start location tracking immediately
+      _startLocationTracking();
+
+      // ✅ STEP 4: Sync to Firebase in background
       try {
+        print('🔄 Syncing resume state to Firebase...');
+
         DatabaseReference _firebaseDatabase = FirebaseDatabase.instance.ref();
         final taskRef = _firebaseDatabase.child('tasks/${event.task.taskId}');
 
@@ -931,10 +945,11 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         };
 
         // Include route path if available
-        if (event.existingRoutePath!.isNotEmpty) {
+        if (event.existingRoutePath != null &&
+            event.existingRoutePath!.isNotEmpty) {
           resumeUpdate['route_path'] = event.existingRoutePath!;
           print(
-              '🔄 Syncing existing route path: ${event.existingRoutePath!.length} points');
+              '🔄 Including route path: ${event.existingRoutePath!.length} points');
         }
 
         await taskRef.update(resumeUpdate).timeout(
@@ -942,29 +957,15 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               onTimeout: () => throw Exception('Resume sync timeout'),
             );
 
-        print('✅ Resume state synced to Firebase');
-      } catch (e) {
-        print('❌ Failed to sync resume state to Firebase: $e');
-        // Continue anyway - local state is more important
+        print('✅ Resume state synced to Firebase successfully');
+      } catch (firebaseError) {
+        print('❌ Failed to sync resume state to Firebase: $firebaseError');
+        // Continue anyway - local state is more important for UX
       }
 
-      // Update local state
-      final updatedTask = event.task.copyWith(
-        status: 'ongoing',
-        startTime: event.startTime,
-        distance: event.currentDistance,
-        routePath: event.existingRoutePath,
-      );
-
-      emit(currentState.copyWith(
-        task: updatedTask,
-        isPatrolling: true,
-        distance: event.currentDistance,
-      ));
-
-      print('✅ Patrol resumed successfully');
+      print('✅ Patrol resumed successfully in BLoC');
     } catch (e) {
-      print('❌ Error resuming patrol: $e');
+      print('❌ Error resuming patrol in BLoC: $e');
       emit(PatrolError('Failed to resume patrol: $e'));
     }
   }

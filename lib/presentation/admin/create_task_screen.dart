@@ -4759,23 +4759,99 @@ class _CreateTaskScreenState extends State<CreateTaskScreen>
                         formKey: _singleFormKey,
                         selectedClusterId: _selectedClusterId,
                         onClusterChanged: (value) {
+                          print('DEBUG onClusterChanged (Single) - START:');
+                          print('  - Old cluster: $_selectedClusterId');
+                          print('  - New cluster: $value');
+
                           setState(() {
                             _selectedClusterId = value;
+
+                            // Reset officer selection ketika cluster berubah
+                            _selectedOfficerId = null;
+                            _selectedOfficer = null;
+
                             if (value != null) {
                               final selectedCluster = clusters.firstWhere(
                                 (cluster) => cluster.id == value,
                                 orElse: () =>
                                     User(id: '', email: '', name: '', role: ''),
                               );
+
                               if (selectedCluster.id.isNotEmpty) {
                                 _selectedClusterName = selectedCluster.name;
+
+                                print(
+                                    'DEBUG onClusterChanged (Single) - Cluster found:');
+                                print(
+                                    '  - Cluster name: ${selectedCluster.name}');
+                                print(
+                                    '  - Has coordinates: ${selectedCluster.clusterCoordinates != null}');
+                                print(
+                                    '  - Coordinates count: ${selectedCluster.clusterCoordinates?.length ?? 0}');
+
+                                // ✅ TAMBAHAN: Auto-load cluster coordinates untuk single task
+                                if (selectedCluster.clusterCoordinates !=
+                                        null &&
+                                    selectedCluster
+                                        .clusterCoordinates!.isNotEmpty) {
+                                  print(
+                                      '  - Loading coordinates to single task...');
+
+                                  // Clear existing points first
+                                  _selectedPoints.clear();
+                                  _markers.clear();
+
+                                  // Load new coordinates
+                                  for (var coordinate
+                                      in selectedCluster.clusterCoordinates!) {
+                                    if (coordinate.length >= 2) {
+                                      final point =
+                                          LatLng(coordinate[0], coordinate[1]);
+                                      _selectedPoints.add(point);
+                                    }
+                                  }
+
+                                  // Update markers
+                                  _updateMarkers();
+
+                                  // Auto-fit map bounds if map controller is available
+                                  if (_mapController != null &&
+                                      _selectedPoints.isNotEmpty) {
+                                    Future.delayed(
+                                        const Duration(milliseconds: 500), () {
+                                      _fitMapToBounds();
+                                    });
+                                  }
+
+                                  print(
+                                      '  - Added ${_selectedPoints.length} points to single task selection');
+                                } else {
+                                  print(
+                                      '  - No coordinates found, clearing points');
+                                  // Clear points jika cluster tidak memiliki coordinates
+                                  _selectedPoints.clear();
+                                  _markers.clear();
+                                }
+                              } else {
+                                print(
+                                    'DEBUG onClusterChanged (Single) - Cluster not found');
+                                _selectedClusterName = null;
+                                _selectedPoints.clear();
+                                _markers.clear();
                               }
+                            } else {
+                              print(
+                                  'DEBUG onClusterChanged (Single) - Value is null');
+                              _selectedClusterName = null;
+                              _selectedPoints.clear();
+                              _markers.clear();
                             }
-                            _selectedOfficerId = null;
-                            _selectedOfficer = null;
-                            _selectedPoints.clear();
-                            _markers.clear();
                           });
+
+                          print('DEBUG onClusterChanged (Single) - END');
+                          print(
+                              '  - Final points count: ${_selectedPoints.length}');
+                          print('  - Final markers count: ${_markers.length}');
                         },
                         selectedOfficerId: _selectedOfficerId,
                         onOfficerChanged: (value) {
