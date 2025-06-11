@@ -1682,35 +1682,18 @@ class _MapScreenState extends State<MapScreen> {
                                       });
 
                                       try {
-                                        // ✅ 1. SET STATE PATROLI DIMULAI DULU SEBELUM UPLOAD
-                                        // Ini untuk memastikan button UI berubah ke "stop" meskipun upload gagal
-                                        if (mounted) {
-                                          this.setState(() {
-                                            _localIsPatrolling = true;
-                                            _localPatrollingTaskId =
-                                                widget.task.taskId;
-                                          });
-                                        }
-
-                                        // ✅ 2. SAVE TO LOCAL STORAGE IMMEDIATELY
+                                        // ✅ 1. SAVE TO LOCAL STORAGE FIRST
                                         await LocalPatrolService
                                             .savePatrolStart(
                                           taskId: widget.task.taskId,
                                           userId: widget.task.userId,
                                           startTime: DateTime.now(),
                                           initialPhotoUrl:
-                                              null, // Set null dulu, akan diupdate setelah upload
+                                              null, // Will be updated after upload
                                         );
 
-                                        // ✅ 3. MULAI PATROLI SYSTEMS DULU
-                                        // Jangan tunggu upload foto selesai
-                                        if (mounted) {
-                                          _startPatrol(context);
-                                        }
-
+                                        // ✅ 2. UPLOAD FOTO TERLEBIH DAHULU
                                         String? uploadedPhotoUrl;
-
-                                        // ✅ 4. UPLOAD FOTO (ASYNC, TIDAK MENGHALANGI PATROLI)
                                         try {
                                           final fileName =
                                               'initial_report_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
@@ -1718,79 +1701,63 @@ class _MapScreenState extends State<MapScreen> {
                                               await _uploadPhotoToFirebase(
                                                   capturedImage!, fileName);
 
-                                          // Update local storage dengan URL foto
-                                          final localData =
-                                              LocalPatrolService.getPatrolData(
-                                                  widget.task.taskId);
-                                          if (localData != null) {
-                                            localData.initialReportPhotoUrl =
-                                                uploadedPhotoUrl;
-                                            await localData.save();
-                                          }
-
-                                          if (mounted) {
-                                            setState(() {
-                                              initialReportPhotoUrl =
-                                                  uploadedPhotoUrl;
-                                            });
-                                          }
-
                                           print(
                                               '✅ Initial report photo uploaded successfully: $uploadedPhotoUrl');
                                         } catch (uploadError) {
                                           print(
                                               '❌ Failed to upload initial photo: $uploadError');
-                                          // Patroli tetap lanjut meskipun upload foto gagal
 
-                                          // Simpan foto ke local storage untuk diupload nanti
-                                          try {
-                                            final directory = Directory(
-                                                '${(await getApplicationDocumentsDirectory()).path}/pending_uploads');
-                                            if (!await directory.exists()) {
-                                              await directory.create(
-                                                  recursive: true);
-                                            }
+                                          // ✅ ROLLBACK LOCAL STORAGE ON UPLOAD FAILURE
+                                          await LocalPatrolService
+                                              .deletePatrolData(
+                                                  widget.task.taskId);
 
-                                            final localPhotoPath =
-                                                '${directory.path}/initial_${widget.task.taskId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                                            await capturedImage!
-                                                .copy(localPhotoPath);
-
-                                            // Update local storage dengan path lokal
-                                            final localData = LocalPatrolService
-                                                .getPatrolData(
-                                                    widget.task.taskId);
-                                            if (localData != null) {
-                                              localData.initialReportPhotoUrl =
-                                                  localPhotoPath; // Simpan path lokal
-                                              await localData.save();
-                                            }
-
-                                            print(
-                                                '📱 Initial photo saved locally: $localPhotoPath');
-                                          } catch (localSaveError) {
-                                            print(
-                                                '❌ Failed to save photo locally: $localSaveError');
-                                          }
+                                          throw Exception(
+                                              'Gagal upload foto: $uploadError');
                                         }
 
-                                        // ✅ 5. SUBMIT INITIAL REPORT TO FIREBASE (JIKA ADA FOTO)
-                                        if (uploadedPhotoUrl != null) {
-                                          try {
-                                            context
-                                                .read<PatrolBloc>()
-                                                .add(SubmitInitialReport(
-                                                  photoUrl: uploadedPhotoUrl,
-                                                  note: noteController.text
-                                                      .trim(),
-                                                  reportTime: DateTime.now(),
-                                                ));
-                                            print(
-                                                '✅ Initial report submitted to Firebase');
-                                          } catch (e) {
-                                            print(
-                                                '❌ Failed to submit initial report to Firebase: $e');
-                                          }
+                                        // ✅ 3. UPDATE LOCAL STORAGE WITH PHOTO URL
+                                        final localData =
+                                            LocalPatrolService.getPatrolData(
+                                                widget.task.taskId);
+                                        if (localData != null) {
+                                          localData.initialReportPhotoUrl =
+                                              uploadedPhotoUrl;
+                                          await localData.save();
+                                        }
+
+                                        // ✅ 4. SET UI STATE ONLY AFTER SUCCESSFUL UPLOAD
+                                        if (mounted) {
+                                          this.setState(() {
+                                            _localIsPatrolling = true;
+                                            _localPatrollingTaskId =
+                                                widget.task.taskId;
+                                            initialReportPhotoUrl =
+                                                uploadedPhotoUrl;
+                                          });
+                                        }
+
+                                        // ✅ 5. START PATROL SYSTEMS AFTER UI STATE IS SET
+                                        if (mounted) {
+                                          _startPatrol(context);
+                                        }
+
+                                        // ✅ 6. SUBMIT TO FIREBASE (NON-BLOCKING)
+                                        try {
+                                          context
+                                              .read<PatrolBloc>()
+                                              .add(SubmitInitialReport(
+                                                photoUrl: uploadedPhotoUrl!,
+                                                note:
+                                                    noteController.text.trim(),
+                                                reportTime: DateTime.now(),
+                                              ));
+                                          print(
+                                              '✅ Initial report submitted to Firebase');
+                                        } catch (e) {
+                                          print(
+                                              '❌ Failed to submit initial report to Firebase: $e');
+                                          // Don't rollback - patrol can continue offline
                                         }
 
                                         if (mounted) {
@@ -1801,37 +1768,23 @@ class _MapScreenState extends State<MapScreen> {
 
                                         result = true;
 
-                                        // ✅ 6. CLOSE DIALOG
+                                        // ✅ 7. CLOSE DIALOG
                                         if (Navigator.canPop(context)) {
                                           Navigator.pop(context, true);
                                         }
 
-                                        // ✅ 7. SHOW SUCCESS MESSAGE
+                                        // ✅ 8. SHOW SUCCESS MESSAGE
                                         if (mounted) {
                                           showCustomSnackbar(
                                             context: context,
-                                            title: uploadedPhotoUrl != null
-                                                ? 'Patroli dimulai'
-                                                : 'Patroli dimulai (foto akan diupload nanti)',
-                                            subtitle: uploadedPhotoUrl != null
-                                                ? 'Laporan awal berhasil dikirim'
-                                                : 'Foto akan dikirim saat koneksi stabil',
+                                            title: 'Patroli dimulai',
+                                            subtitle:
+                                                'Laporan awal berhasil dikirim',
                                             type: SnackbarType.success,
                                           );
-
-                                          // ✅ 8. TRANSITION FROM LOCAL STATE SETELAH DELAY
-                                          Future.delayed(Duration(seconds: 3),
-                                              () {
-                                            if (mounted) {
-                                              this.setState(() {
-                                                _localIsPatrolling = false;
-                                                _localPatrollingTaskId = null;
-                                              });
-                                            }
-                                          });
                                         }
                                       } catch (e) {
-                                        // ✅ HANDLE CRITICAL ERROR - ROLLBACK STATE
+                                        // ✅ COMPLETE ROLLBACK ON ANY ERROR
                                         print(
                                             '❌ Critical error in initial report: $e');
 
@@ -1840,20 +1793,16 @@ class _MapScreenState extends State<MapScreen> {
                                             isSubmitting = false;
                                           });
 
-                                          // Rollback local state
+                                          // Reset UI state
                                           this.setState(() {
                                             _localIsPatrolling = false;
                                             _localPatrollingTaskId = null;
                                           });
 
-                                          // Stop patrol systems
-                                          _patrolTimer?.cancel();
-                                          _positionStreamSubscription?.cancel();
-
                                           showCustomSnackbar(
                                             context: context,
                                             title: 'Gagal memulai patroli',
-                                            subtitle: 'Terjadi kesalahan: $e',
+                                            subtitle: e.toString(),
                                             type: SnackbarType.danger,
                                           );
                                         }
