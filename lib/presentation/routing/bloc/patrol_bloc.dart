@@ -616,7 +616,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           }
         }
 
-        // ✅ 3. SYNC LOCATION DATA (GROUP BY TASK)
+        // ✅ 3. SYNC LOCATION DATA (GROUP BY TASK) - PERBAIKAN UTAMA
         final locationKeys = _offlineLocationBox!.keys
             .where((k) =>
                 !k.toString().startsWith('patrol_stop_') &&
@@ -636,42 +636,89 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               final latitude = data['latitude'] as double;
               final longitude = data['longitude'] as double;
 
-              locationDataByTask[taskId] ??= {};
+              // ✅ PERBAIKAN: Validasi koordinat yang lebih realistis
+              if (latitude.abs() <= 90 &&
+                  longitude.abs() <= 180 &&
+                  latitude != 0.0 &&
+                  longitude != 0.0) {
+                locationDataByTask[taskId] ??= {};
 
-              // ✅ Format consistent with SyncService
-              locationDataByTask[taskId]![key.toString()] = {
-                'coordinates': [latitude, longitude],
-                'timestamp': timestamp,
-              };
+                // ✅ Format consistent with SyncService dan online mode
+                locationDataByTask[taskId]![key.toString()] = {
+                  'coordinates': [latitude, longitude],
+                  'timestamp': timestamp,
+                };
+              } else {
+                print(
+                    '⚠️ Invalid coordinates skipped: lat=$latitude, lng=$longitude');
+              }
             }
           } catch (e) {
             print('❌ Error processing location data $key: $e');
           }
         }
 
-        // Sync location data for each task
+        // ✅ PERBAIKAN: Sync location data untuk setiap task dengan enhanced merging
         for (final taskId in locationDataByTask.keys) {
           try {
             print(
                 '🔄 Syncing ${locationDataByTask[taskId]!.length} location points for: $taskId');
 
-            // Get existing route path from Firebase
+            // ✅ PERBAIKAN: Get existing route path dari Firebase dengan error handling
             Map<String, dynamic> existingRoutePath = {};
             try {
               final taskSnapshot = await repository.getTaskById(taskId: taskId);
               if (taskSnapshot != null && taskSnapshot.routePath != null) {
                 existingRoutePath =
                     Map<String, dynamic>.from(taskSnapshot.routePath as Map);
+                print(
+                    '📍 Found ${existingRoutePath.length} existing points in Firebase');
               }
             } catch (e) {
               print('⚠️ Could not get existing route path: $e');
             }
 
-            // Merge with offline data
-            final mergedRoutePath = {
-              ...existingRoutePath,
-              ...locationDataByTask[taskId]!
+            // ✅ PERBAIKAN: Smart merging - hindari duplicate timestamps
+            final mergedRoutePath =
+                Map<String, dynamic>.from(existingRoutePath);
+
+            // Merge offline data, tapi cek duplicate timestamp
+            locationDataByTask[taskId]!.forEach((key, value) {
+              if (!mergedRoutePath.containsKey(key)) {
+                mergedRoutePath[key] = value;
+              } else {
+                print('⚠️ Duplicate timestamp skipped: $key');
+              }
+            });
+
+            // ✅ PERBAIKAN: Update lastLocation dengan titik terbaru
+            Map<String, dynamic>? latestLocation;
+            if (mergedRoutePath.isNotEmpty) {
+              try {
+                final sortedEntries = mergedRoutePath.entries.toList()
+                  ..sort((a, b) => (b.value['timestamp'] as String)
+                      .compareTo(a.value['timestamp'] as String));
+
+                if (sortedEntries.isNotEmpty) {
+                  latestLocation = Map<String, dynamic>.from(
+                      sortedEntries.first.value as Map);
+                }
+              } catch (e) {
+                print('⚠️ Error calculating latest location: $e');
+              }
+            }
+
+            // ✅ PERBAIKAN: Enhanced update data
+            final updateData = {
+              'route_path': mergedRoutePath,
+              'syncedAt': DateTime.now().toIso8601String(),
             };
+
+            // ✅ PERBAIKAN: Update lastLocation jika ada
+            if (latestLocation != null) {
+              updateData['lastLocation'] = latestLocation;
+              print('📍 Updated lastLocation: ${latestLocation['timestamp']}');
+            }
 
             // ✅ Retry mechanism for route path update
             int retryCount = 0;
@@ -679,15 +726,13 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
             while (!updateSuccess && retryCount < 3) {
               try {
-                await repository.updateTask(taskId, {
-                  'route_path': mergedRoutePath,
-                  'syncedAt': DateTime.now().toIso8601String(),
-                }).timeout(
-                  Duration(seconds: 30),
-                  onTimeout: () => throw Exception('Route update timeout'),
-                );
+                await repository.updateTask(taskId, updateData).timeout(
+                      Duration(seconds: 30),
+                      onTimeout: () => throw Exception('Route update timeout'),
+                    );
                 updateSuccess = true;
                 print('✅ Route path synced on attempt ${retryCount + 1}');
+                print('📊 Total merged points: ${mergedRoutePath.length}');
               } catch (e) {
                 retryCount++;
                 print('❌ Route sync attempt $retryCount failed: $e');
@@ -843,6 +888,12 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           }
         }
 
+        // ✅ PERBAIKAN: Update state dengan current route path dari BLoC state
+        Map<String, dynamic>? updatedRoutePath;
+        if (currentState.task != null && currentState.routePath != null) {
+          updatedRoutePath = Map<String, dynamic>.from(currentState.routePath!);
+        }
+
         // ✅ Update finished tasks if needed
         List<PatrolTask> finishedTasks = [];
         try {
@@ -859,11 +910,14 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
           isSyncing: false,
           finishedTasks: finishedTasks,
           isOffline: false,
+          routePath: updatedRoutePath, // ✅ Preserve current route path
         ));
 
         final remainingItems = _offlineLocationBox!.length;
         if (remainingItems > 0) {
           print('⚠️ ${remainingItems} offline items remain after sync');
+          // ✅ PERBAIKAN: Debug remaining items
+          _debugRemainingOfflineData();
         } else {
           print('✅ All offline data synced successfully');
         }
@@ -874,6 +928,24 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
       if (state is PatrolLoaded) {
         emit((state as PatrolLoaded).copyWith(isSyncing: false));
+      }
+    }
+  }
+
+// ✅ PERBAIKAN: Helper method untuk debug remaining data
+  void _debugRemainingOfflineData() {
+    if (_offlineLocationBox == null) return;
+
+    print('🔍 DEBUG: Remaining offline data:');
+    for (final key in _offlineLocationBox!.keys) {
+      try {
+        final data = _offlineLocationBox!.get(key);
+        if (data is Map) {
+          print(
+              '   - $key: ${data['taskId'] ?? 'no taskId'} | ${data['timestamp'] ?? 'no timestamp'}');
+        }
+      } catch (e) {
+        print('   - $key: error reading data');
       }
     }
   }
@@ -1277,85 +1349,12 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     if (state is PatrolLoaded) {
       final currentState = state as PatrolLoaded;
 
-      // ✅ Check BOTH local state AND bloc state
       final shouldProcessLocation = isCurrentlyPatrolling &&
           currentState.task != null &&
           (currentState.isPatrolling || _localPatrollingState);
 
       if (shouldProcessLocation) {
         try {
-          final isMocked =
-              await LocationValidator.isLocationMocked(event.position);
-
-          if (isMocked) {
-            final newMockCount = currentState.mockLocationCount + 1;
-
-            final mockData = {
-              'timestamp': event.timestamp.toIso8601String(),
-              'coordinates': [
-                event.position.latitude,
-                event.position.longitude,
-              ],
-              'accuracy': event.position.accuracy,
-              'speed': event.position.speed,
-              'altitude': event.position.altitude,
-              'heading': event.position.heading,
-              'count': newMockCount,
-              'deviceInfo': await getDeviceInfo(), // Ambil info perangkat
-            };
-
-            if (_isConnected) {
-              try {
-                await repository.logMockLocationDetection(
-                  taskId: currentState.task!.taskId,
-                  userId: currentState.task!.userId,
-                  mockData: mockData,
-                );
-
-                // // --- DIHAPUS: KIRIM NOTIFIKASI MOCK LOCATION KE COMMAND CENTER ---
-                // // Logika ini dipindahkan ke MapScreen
-                // if (currentState.task != null && currentState.task!.officerName != null && currentState.task!.clusterName != null) {
-                //   await sendMockLocationNotificationToCommandCenter(
-                //     patrolTaskId: currentState.task!.taskId,
-                //     officerId: currentState.task!.userId,
-                //     officerName: currentState.task!.officerName,
-                //     clusterName: currentState.task!.clusterName,
-                //     latitude: event.position.latitude,
-                //     longitude: event.position.longitude,
-                //   );
-                //   print('Notifikasi mock location dikirim ke Command Center dari PatrolBloc.');
-                // }
-                // // --- AKHIR DIHAPUS ---
-              } catch (e) {}
-            } else {
-              if (_offlineLocationBox != null) {
-                final key =
-                    'mock_detection_${currentState.task!.taskId}_${event.timestamp.millisecondsSinceEpoch}';
-                await _offlineLocationBox!.put(key, {
-                  'taskId': currentState.task!.taskId,
-                  'userId': currentState.task!.userId,
-                  'timestamp': event.timestamp.toIso8601String(),
-                  'latitude': event.position.latitude,
-                  'longitude': event.position.longitude,
-                  'accuracy': event.position.accuracy,
-                  'speed': event.position.speed,
-                  'altitude': event.position.altitude,
-                  'heading': event.position.heading,
-                  'mockCount': newMockCount,
-                  'deviceInfo': await getDeviceInfo(),
-                });
-              }
-            }
-
-            emit(currentState.copyWith(
-              mockLocationDetected: true,
-              lastMockDetection: event.timestamp,
-              mockLocationCount: newMockCount,
-            ));
-
-            return;
-          }
-
           final List<double> coordinates = [
             event.position.latitude,
             event.position.longitude
@@ -1363,61 +1362,52 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
           final timestampKey =
               event.timestamp.millisecondsSinceEpoch.toString();
-
           final locationData = {
             'coordinates': coordinates,
             'timestamp': event.timestamp.toIso8601String(),
           };
 
-          Map<String, dynamic> currentDbRoutePath = {};
-          if (_isConnected) {
-            try {
-              final taskSnapshot = await repository.getTaskById(
-                  taskId: currentState.task!.taskId);
-              if (taskSnapshot != null && taskSnapshot.routePath != null) {
-                currentDbRoutePath =
-                    Map<String, dynamic>.from(taskSnapshot.routePath as Map);
-              }
-            } catch (e) {}
-          }
+          // ✅ PERBAIKAN: Gunakan state lokal untuk merging, bukan Firebase
+          Map<String, dynamic> currentRoutePath =
+              Map<String, dynamic>.from(currentState.routePath ?? {});
 
-          Map<String, dynamic> mergedRoutePath = {
-            ...currentDbRoutePath, // Data dari database
-            ...?currentState
-                .routePath, // Data dari state BLoC (mungkin ada yang belum disinkronkan)
-            timestampKey: locationData, // Titik lokasi terbaru
-          };
+          // ✅ Tambahkan titik baru ke route path lokal
+          currentRoutePath[timestampKey] = locationData;
 
           bool databaseUpdateSuccess = false;
           if (_isConnected) {
             try {
-              // Update ke database, sekarang mengirimkan mergedRoutePath
-              await repository.updateTask(
+              // ✅ PERBAIKAN: Kirim hanya update incremental
+              await repository.updatePatrolLocation(
                 currentState.task!.taskId,
-                {
-                  'route_path': mergedRoutePath,
-                  'lastLocation': locationData
-                }, // Update lastLocation juga
+                coordinates,
+                event.timestamp,
               );
               databaseUpdateSuccess = true;
-            } catch (e) {}
+              print('✅ Location updated to Firebase successfully');
+            } catch (e) {
+              print('❌ Failed to update Firebase location: $e');
+              databaseUpdateSuccess = false;
+            }
           }
+
+          // ✅ PERBAIKAN: Simpan ke offline storage dengan key yang konsisten
           if (!_isConnected || !databaseUpdateSuccess) {
             if (_offlineLocationBox != null) {
-              // Simpan ke offline dengan timestampKey yang unik
               await _offlineLocationBox!.put(timestampKey, {
                 'latitude': event.position.latitude,
                 'longitude': event.position.longitude,
                 'timestamp': event.timestamp.toIso8601String(),
                 'taskId': currentState.task!.taskId,
-                'lastLocation':
-                    locationData, // Simpan lastLocation untuk offline juga
+                'coordinates':
+                    coordinates, // ✅ Tambahkan koordinat dalam format yang sama
+                'locationData': locationData,
               });
-
-              if (_offlineLocationBox!.length % 10 == 0) {}
+              print('💾 Location saved to offline storage: $timestampKey');
             }
           }
 
+          // ✅ Update distance calculation
           double newDistance = currentState.distance ?? 0.0;
           if (currentState.currentPatrolPath != null &&
               currentState.currentPatrolPath!.isNotEmpty) {
@@ -1434,8 +1424,9 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             }
           }
 
+          // ✅ Update task dengan route path yang sudah dimerge
           final updatedTask = currentState.task!.copyWith(
-            routePath: mergedRoutePath, // Pastikan menggunakan mergedRoutePath
+            routePath: currentRoutePath,
             distance: newDistance,
             lastLocation: locationData,
           );
@@ -1445,16 +1436,19 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               ...?currentState.currentPatrolPath,
               event.position
             ],
-            routePath: mergedRoutePath, // Pastikan menggunakan mergedRoutePath
+            routePath: currentRoutePath,
             distance: newDistance,
             task: updatedTask,
             isOffline: !_isConnected,
-            mockLocationDetected: false,
             isPatrolling: true,
           ));
 
-          // Gunakan mergedRoutePath
-        } catch (e, stackTrace) {}
+          print(
+              '✅ Location processed: ${coordinates}, total points: ${currentRoutePath.length}');
+        } catch (e, stackTrace) {
+          print('❌ Error processing location: $e');
+          print('Stack trace: $stackTrace');
+        }
       }
     }
   }

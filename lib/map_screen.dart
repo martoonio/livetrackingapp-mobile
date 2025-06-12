@@ -317,7 +317,7 @@ class _MapScreenState extends State<MapScreen> {
         }
 
         // ✅ SYNC TO BLOC AND FIREBASE
-        Future.delayed(Duration(seconds: 1), () async {
+        Future.delayed(const Duration(seconds: 1), () async {
           try {
             print('🔄 Syncing recovery data to BLoC...');
 
@@ -370,7 +370,7 @@ class _MapScreenState extends State<MapScreen> {
 
         // ✅ ZOOM TO POLYLINE
         if (_routePoints.isNotEmpty && mapController != null) {
-          Future.delayed(Duration(milliseconds: 1000), () {
+          Future.delayed(const Duration(milliseconds: 1000), () {
             if (mounted) {
               _zoomToPolyline();
             }
@@ -582,7 +582,7 @@ class _MapScreenState extends State<MapScreen> {
 
       // ✅ Resume patrol after a frame to ensure UI is stable
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        await Future.delayed(Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 100));
         if (mounted && _hasResumedPatrol && !hasLocalPatrolData) {
           _resumeExistingPatrol(task);
         }
@@ -855,7 +855,7 @@ class _MapScreenState extends State<MapScreen> {
                                     backgroundColor: kbpBlue100,
                                     color: kbpBlue900,
                                   ),
-                                  Icon(
+                                  const Icon(
                                     Icons.cloud_upload,
                                     size: 36,
                                     color: kbpBlue900,
@@ -940,7 +940,7 @@ class _MapScreenState extends State<MapScreen> {
     _positionStreamSubscription?.cancel();
 
     // ✅ ADD DELAY TO ENSURE SYSTEMS ARE READY
-    await Future.delayed(Duration(milliseconds: 500));
+    await Future.delayed(const Duration(milliseconds: 500));
 
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
@@ -1068,7 +1068,7 @@ class _MapScreenState extends State<MapScreen> {
           type: SnackbarType.danger,
         );
 
-        Future.delayed(Duration(seconds: 6), () {
+        Future.delayed(const Duration(seconds: 6), () {
           _snackbarShown = false;
         });
       }
@@ -1510,7 +1510,7 @@ class _MapScreenState extends State<MapScreen> {
                             ? Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(
+                                  const Icon(
                                     Icons.camera_alt,
                                     size: 48,
                                     color: kbpBlue700,
@@ -1656,7 +1656,7 @@ class _MapScreenState extends State<MapScreen> {
                                     },
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: neutral700,
-                                side: BorderSide(color: neutral700),
+                                side: const BorderSide(color: neutral700),
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(
@@ -2417,8 +2417,8 @@ class _MapScreenState extends State<MapScreen> {
     if (coordinates.isEmpty) {
       // Return default bounds if no coordinates
       return LatLngBounds(
-        southwest: LatLng(-6.927872391717073, 107.76910906700982),
-        northeast: LatLng(-6.927872391717073, 107.76910906700982),
+        southwest: const LatLng(-6.927872391717073, 107.76910906700982),
+        northeast: const LatLng(-6.927872391717073, 107.76910906700982),
       );
     }
 
@@ -2738,7 +2738,7 @@ class _MapScreenState extends State<MapScreen> {
           await _addRouteMarkers(widget.task.assignedRoute!);
 
           // Focus camera to route after small delay
-          await Future.delayed(Duration(milliseconds: 500));
+          await Future.delayed(const Duration(milliseconds: 500));
           _focusCameraToAssignedRoute();
         });
       } else {
@@ -2890,7 +2890,7 @@ class _MapScreenState extends State<MapScreen> {
                             ? Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(
+                                  const Icon(
                                     Icons.camera_alt,
                                     size: 48,
                                     color: kbpBlue700,
@@ -3032,7 +3032,7 @@ class _MapScreenState extends State<MapScreen> {
                                     },
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: neutral700,
-                                side: BorderSide(color: neutral700),
+                                side: const BorderSide(color: neutral700),
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(
@@ -3324,7 +3324,7 @@ class _MapScreenState extends State<MapScreen> {
           }
 
           // Wait a bit for BLoC to process
-          await Future.delayed(Duration(seconds: 2));
+          await Future.delayed(const Duration(seconds: 2));
 
           // Force sync via SyncService
           final syncSuccess =

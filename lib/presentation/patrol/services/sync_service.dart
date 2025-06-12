@@ -106,45 +106,84 @@ class SyncService {
             patrol.endTime ?? DateTime.now().toIso8601String();
       }
 
-      // ✅ Route path with proper validation
       if (patrol.routePath.isNotEmpty) {
         print('📍 Syncing route path with ${patrol.routePath.length} points');
 
-        Map<String, dynamic> firebaseRoutePath = {};
+        // ✅ Get existing route path from Firebase first
+        Map<String, dynamic> existingFirebaseRoutePath = {};
+        try {
+          final existingSnapshot = await taskRef.child('route_path').get();
+          if (existingSnapshot.exists && existingSnapshot.value != null) {
+            final existingData =
+                existingSnapshot.value as Map<dynamic, dynamic>;
+            existingData.forEach((key, value) {
+              if (value is Map) {
+                existingFirebaseRoutePath[key.toString()] =
+                    Map<String, dynamic>.from(value as Map);
+              }
+            });
+            print(
+                '📍 Found ${existingFirebaseRoutePath.length} existing points in Firebase');
+          }
+        } catch (e) {
+          print('⚠️ Could not get existing route path: $e');
+        }
 
+        Map<String, dynamic> firebaseRoutePath =
+            Map<String, dynamic>.from(existingFirebaseRoutePath);
+
+        // ✅ Merge local route path dengan existing Firebase data
         patrol.routePath.forEach((key, value) {
           if (value is Map<String, dynamic>) {
-            // Validate coordinates
-            if (value['coordinates'] != null && value['coordinates'] is List) {
-              final coords = value['coordinates'] as List;
-              if (coords.length >= 2 &&
-                  coords[0] != null &&
-                  coords[1] != null) {
-                // Ensure coordinates are valid numbers
-                try {
+            try {
+              // ✅ PERBAIKAN: Validasi koordinat yang lebih fleksibel
+              if (value['coordinates'] != null &&
+                  value['coordinates'] is List) {
+                final coords = value['coordinates'] as List;
+                if (coords.length >= 2 &&
+                    coords[0] != null &&
+                    coords[1] != null) {
                   final lat = (coords[0] as num).toDouble();
                   final lng = (coords[1] as num).toDouble();
 
-                  // Basic validation for reasonable coordinates
-                  if (lat.abs() <= 90 && lng.abs() <= 180) {
+                  // ✅ PERBAIKAN: Validasi koordinat yang lebih realistis
+                  if (lat.abs() <= 90 &&
+                      lng.abs() <= 180 &&
+                      lat != 0.0 &&
+                      lng != 0.0) {
+                    // Hindari koordinat (0,0)
                     firebaseRoutePath[key] = {
                       'coordinates': [lat, lng],
                       'timestamp': value['timestamp'] ??
                           DateTime.now().toIso8601String(),
                     };
+                  } else {
+                    print('⚠️ Invalid coordinates skipped: lat=$lat, lng=$lng');
                   }
-                } catch (e) {
-                  print('⚠️ Invalid coordinates in route point $key: $e');
                 }
               }
+            } catch (e) {
+              print('⚠️ Error processing route point $key: $e');
             }
           }
         });
 
         if (firebaseRoutePath.isNotEmpty) {
           updateData['route_path'] = firebaseRoutePath;
+
+          // ✅ PERBAIKAN: Update lastLocation dengan titik terbaru
+          final sortedEntries = firebaseRoutePath.entries.toList()
+            ..sort((a, b) => (b.value['timestamp'] as String)
+                .compareTo(a.value['timestamp'] as String));
+
+          if (sortedEntries.isNotEmpty) {
+            updateData['lastLocation'] = sortedEntries.first.value;
+          }
+
           print(
               '📍 Route path prepared for sync: ${firebaseRoutePath.length} valid points');
+          print(
+              '📍 Latest timestamp: ${sortedEntries.isNotEmpty ? sortedEntries.first.value['timestamp'] : 'none'}');
         }
       }
 
