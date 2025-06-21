@@ -16,7 +16,6 @@ import 'package:livetrackingapp/presentation/patrol/services/local_patrol_servic
 import 'package:livetrackingapp/presentation/patrol/services/sync_service.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
-import 'package:livetrackingapp/presentation/report/bloc/report_state.dart';
 import 'package:livetrackingapp/services/location_validator.dart';
 import 'package:livetrackingapp/notification_utils.dart'; // Import notification_utils
 import 'package:path_provider/path_provider.dart';
@@ -108,6 +107,7 @@ class _MapScreenState extends State<MapScreen> {
       await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
       // Untuk memastikan clusterName juga terisi jika belum
       await widget.task.fetchClusterName(FirebaseDatabase.instance.ref());
+    await _initializeAppWithLocalRecovery();
       if (mounted) {
         setState(() {}); // Refresh UI after name is loaded
       }
