@@ -1,4 +1,5 @@
 import 'package:hive/hive.dart';
+import 'package:livetrackingapp/presentation/patrol/services/local_patrol_service.dart';
 
 part 'local_patrol_data.g.dart';
 
@@ -14,10 +15,10 @@ class LocalPatrolData extends HiveObject {
   String status; // 'started', 'ongoing', 'completed'
 
   @HiveField(3)
-  String? startTime; // Changed to String for better Hive compatibility
+  String? startTime;
 
   @HiveField(4)
-  String? endTime; // Changed to String for better Hive compatibility
+  String? endTime;
 
   @HiveField(5)
   double distance;
@@ -44,7 +45,7 @@ class LocalPatrolData extends HiveObject {
   bool isSynced;
 
   @HiveField(13)
-  String lastUpdated; // Changed to String for better Hive compatibility
+  String lastUpdated;
 
   @HiveField(14)
   bool mockLocationDetected;
@@ -71,6 +72,41 @@ class LocalPatrolData extends HiveObject {
     this.mockLocationCount = 0,
   });
 
+  // ✅ Enhanced save method using HiveObject capabilities
+  @override
+  Future<void> save() async {
+    try {
+      if (isInBox) {
+        // ✅ Object already in box, just save changes
+        await super.save();
+        print('✅ LocalPatrolData updated in box: $taskId');
+      } else {
+        // ✅ Object not in box, add to box
+        await LocalPatrolService.saveLocalPatrolDataToBox(this);
+        print('✅ LocalPatrolData added to box: $taskId');
+      }
+    } catch (e) {
+      print('❌ Error saving LocalPatrolData: $e');
+      throw e;
+    }
+  }
+
+  // ✅ Enhanced delete method
+  @override
+  Future<void> delete() async {
+    try {
+      if (isInBox) {
+        await super.delete();
+        print('✅ LocalPatrolData deleted from box: $taskId');
+      } else {
+        print('⚠️ LocalPatrolData not in box, cannot delete: $taskId');
+      }
+    } catch (e) {
+      print('❌ Error deleting LocalPatrolData: $e');
+      throw e;
+    }
+  }
+
   // Helper getters to convert strings back to DateTime
   DateTime? get startDateTime =>
       startTime != null ? DateTime.tryParse(startTime!) : null;
@@ -89,6 +125,76 @@ class LocalPatrolData extends HiveObject {
 
   set lastUpdatedDateTime(DateTime dateTime) {
     lastUpdated = dateTime.toIso8601String();
+  }
+
+  // ✅ Enhanced copyWith method
+  LocalPatrolData copyWith({
+    String? taskId,
+    String? userId,
+    String? status,
+    String? startTime,
+    String? endTime,
+    double? distance,
+    int? elapsedTimeSeconds,
+    String? initialReportPhotoUrl,
+    String? finalReportPhotoUrl,
+    String? initialNote,
+    String? finalNote,
+    Map<String, dynamic>? routePath,
+    bool? isSynced,
+    String? lastUpdated,
+    bool? mockLocationDetected,
+    int? mockLocationCount,
+  }) {
+    return LocalPatrolData(
+      taskId: taskId ?? this.taskId,
+      userId: userId ?? this.userId,
+      status: status ?? this.status,
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
+      distance: distance ?? this.distance,
+      elapsedTimeSeconds: elapsedTimeSeconds ?? this.elapsedTimeSeconds,
+      initialReportPhotoUrl: initialReportPhotoUrl ?? this.initialReportPhotoUrl,
+      finalReportPhotoUrl: finalReportPhotoUrl ?? this.finalReportPhotoUrl,
+      initialNote: initialNote ?? this.initialNote,
+      finalNote: finalNote ?? this.finalNote,
+      routePath: routePath ?? this.routePath,
+      isSynced: isSynced ?? this.isSynced,
+      lastUpdated: lastUpdated ?? this.lastUpdated,
+      mockLocationDetected: mockLocationDetected ?? this.mockLocationDetected,
+      mockLocationCount: mockLocationCount ?? this.mockLocationCount,
+    );
+  }
+
+  // ✅ Update specific fields and save
+  Future<void> updateAndSave(Map<String, dynamic> updates) async {
+    try {
+      // Update fields
+      if (updates.containsKey('status')) status = updates['status'];
+      if (updates.containsKey('startTime')) startTime = updates['startTime'];
+      if (updates.containsKey('endTime')) endTime = updates['endTime'];
+      if (updates.containsKey('distance')) distance = updates['distance'];
+      if (updates.containsKey('elapsedTimeSeconds')) elapsedTimeSeconds = updates['elapsedTimeSeconds'];
+      if (updates.containsKey('initialReportPhotoUrl')) initialReportPhotoUrl = updates['initialReportPhotoUrl'];
+      if (updates.containsKey('finalReportPhotoUrl')) finalReportPhotoUrl = updates['finalReportPhotoUrl'];
+      if (updates.containsKey('initialNote')) initialNote = updates['initialNote'];
+      if (updates.containsKey('finalNote')) finalNote = updates['finalNote'];
+      if (updates.containsKey('routePath')) routePath = Map<String, dynamic>.from(updates['routePath']);
+      if (updates.containsKey('isSynced')) isSynced = updates['isSynced'];
+      if (updates.containsKey('mockLocationDetected')) mockLocationDetected = updates['mockLocationDetected'];
+      if (updates.containsKey('mockLocationCount')) mockLocationCount = updates['mockLocationCount'];
+      
+      // Always update lastUpdated
+      lastUpdated = DateTime.now().toIso8601String();
+      
+      // Save to box
+      await save();
+      
+      print('✅ LocalPatrolData updated and saved: $taskId');
+    } catch (e) {
+      print('❌ Error updating and saving LocalPatrolData: $e');
+      throw e;
+    }
   }
 
   Map<String, dynamic> toJson() {
@@ -131,5 +237,10 @@ class LocalPatrolData extends HiveObject {
       mockLocationDetected: json['mockLocationDetected'] ?? false,
       mockLocationCount: json['mockLocationCount'] ?? 0,
     );
+  }
+
+  @override
+  String toString() {
+    return 'LocalPatrolData(taskId: $taskId, status: $status, distance: $distance, routePoints: ${routePath.length}, isSynced: $isSynced)';
   }
 }

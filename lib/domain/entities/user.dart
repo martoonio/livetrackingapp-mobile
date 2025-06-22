@@ -13,7 +13,7 @@ class User {
   final String? updatedBy;
 
   // TAMBAHAN BARU: Radius validasi checkpoint dalam meter
-  final double? checkpointValidationRadius;
+  final double? _checkpointValidationRadius;
 
   // NEW: Battery monitoring fields untuk user (patrol)
   final int? batteryLevel;
@@ -32,16 +32,33 @@ class User {
     this.createdAt,
     this.updatedAt,
     this.updatedBy,
-    this.checkpointValidationRadius, // Default akan 50 meter jika null
+    double? checkpointValidationRadius, // ✅ Parameter tetap sama
     // NEW: Battery fields
     this.batteryLevel,
     this.batteryState,
     this.lastBatteryUpdate,
     this.isOnline,
-  });
+  }) : _checkpointValidationRadius =
+            checkpointValidationRadius; // ✅ Assign ke private field
 
   // Getter untuk mendapatkan radius dengan default value
-  // double get validationRadius => checkpointValidationRadius ?? 50.0;
+  double get checkpointValidationRadius => _checkpointValidationRadius ?? 50.0;
+
+  // NEW: Additional getters for validation radius
+
+  /// Gets the validation radius in meters with default fallback
+  /// Returns 50.0 meters if not set
+  double get validationRadiusMeters => checkpointValidationRadius;
+
+  /// Gets the validation radius as a string with unit
+  String get validationRadiusDisplay =>
+      '${checkpointValidationRadius.toStringAsFixed(0)}m';
+
+  /// Checks if custom validation radius is set
+  bool get hasCustomValidationRadius => _checkpointValidationRadius != null;
+
+  /// Gets the raw validation radius value (can be null)
+  double? get rawValidationRadius => _checkpointValidationRadius;
 
   // Cek apakah user memiliki profil lengkap
   bool get hasProfile => name.isNotEmpty && role.isNotEmpty;
@@ -80,7 +97,7 @@ class User {
     return difference.inMinutes <= 10;
   }
 
-  // Konversi ke Map untuk Firebase
+  // ✅ UPDATE: toMap method
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -93,7 +110,8 @@ class User {
       'created_at': createdAt?.toIso8601String(),
       'updated_at': updatedAt?.toIso8601String(),
       'updated_by': updatedBy,
-      'checkpoint_validation_radius': checkpointValidationRadius,
+      'checkpoint_validation_radius':
+          _checkpointValidationRadius, // ✅ Use private field
       // NEW: Battery fields
       'battery_level': batteryLevel,
       'battery_state': batteryState,
@@ -272,8 +290,8 @@ class User {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       updatedBy: updatedBy ?? this.updatedBy,
-      checkpointValidationRadius:
-          checkpointValidationRadius ?? this.checkpointValidationRadius,
+      checkpointValidationRadius: checkpointValidationRadius ??
+          this._checkpointValidationRadius, // ✅ Use private field
       // NEW: Battery fields
       batteryLevel: batteryLevel ?? this.batteryLevel,
       batteryState: batteryState ?? this.batteryState,

@@ -241,12 +241,11 @@ class SyncService {
           print('✅ Local data marked as synced');
 
           // ✅ THEN, DELETE LOCAL DATA ONLY AFTER SUCCESSFUL FIREBASE UPDATE
-          final deleteSuccess =
-              await LocalPatrolService.deletePatrolData(patrol.taskId);
-          if (deleteSuccess) {
+          try {
+            await LocalPatrolService.deletePatrolData(patrol.taskId);
             print(
                 '✅ Successfully synced and deleted local data for patrol: ${patrol.taskId}');
-          } else {
+          } catch (e) {
             print(
                 '⚠️ Synced to Firebase but failed to delete local data for: ${patrol.taskId}');
             // This is not critical - data is marked as synced so won't be re-synced
@@ -316,12 +315,13 @@ class SyncService {
 
             if (!localIsMoreRecent) {
               print('✅ Firebase data is current, can safely delete local data');
-              final deleteSuccess =
-                  await LocalPatrolService.deletePatrolData(taskId);
-              if (deleteSuccess) {
+              print('✅ Firebase data is current, can safely delete local data');
+              try {
+                await LocalPatrolService.deletePatrolData(taskId);
                 print('✅ Local data deleted after verification for: $taskId');
+              } catch (e) {
+                print('❌ Failed to delete local data for: $taskId');
               }
-              return true;
             } else {
               print('⚠️ Local data is more recent, need to sync...');
             }
@@ -380,11 +380,12 @@ class SyncService {
               // Verify critical data exists
               if (firebaseData['startTime'] != null &&
                   firebaseData['status'] != null) {
-                final deleteSuccess =
-                    await LocalPatrolService.deletePatrolData(patrol.taskId);
-                if (deleteSuccess) {
+                try {
+                  await LocalPatrolService.deletePatrolData(patrol.taskId);
                   deletedCount++;
                   print('🧹 Cleaned up synced data for: ${patrol.taskId}');
+                } catch (e) {
+                  print('❌ Failed to delete local data for: ${patrol.taskId}');
                 }
               }
             } else {

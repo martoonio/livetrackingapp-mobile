@@ -1,100 +1,189 @@
 import 'package:hive/hive.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:livetrackingapp/presentation/patrol/services/local_patrol_data.dart';
+import 'dart:math' as math;
+import 'local_patrol_data.dart';
 
 class LocalPatrolService {
-  static const String _boxName = 'patrol_data';
-  static Box<LocalPatrolData>? _box;
+  static const String _patrolBoxName = 'patrol_data';
+  static const String _locationBoxName = 'location_data';
+  static const String _logBoxName = 'patrol_logs';
+
+  // ✅ UPDATED: Use TypedBox for LocalPatrolData
+  static Box<LocalPatrolData>? _patrolBox;
+  static Box<dynamic>? _locationBox;
+  static Box<dynamic>? _logBox;
 
   static Future<void> init() async {
     try {
-      // Clear any existing corrupted box first
-      if (await Hive.boxExists(_boxName)) {
-        try {
-          _box = await Hive.openBox<LocalPatrolData>(_boxName);
-          print('✅ Existing LocalPatrolService box opened');
-        } catch (e) {
-          print('⚠️ Corrupted box detected, deleting and recreating: $e');
-          await Hive.deleteBoxFromDisk(_boxName);
-          _box = await Hive.openBox<LocalPatrolData>(_boxName);
-          print('✅ New LocalPatrolService box created');
-        }
-      } else {
-        _box = await Hive.openBox<LocalPatrolData>(_boxName);
-        print('✅ LocalPatrolService initialized with new box');
+      print('🔄 Initializing LocalPatrolService...');
+
+      // ✅ Register adapter if not already registered
+      if (!Hive.isAdapterRegistered(0)) {
+        Hive.registerAdapter(LocalPatrolDataAdapter());
       }
+
+      // ✅ Open TypedBox for LocalPatrolData
+      _patrolBox = await Hive.openBox<LocalPatrolData>(_patrolBoxName);
+      _locationBox = await Hive.openBox<dynamic>(_locationBoxName);
+      _logBox = await Hive.openBox<dynamic>(_logBoxName);
+
+      print('✅ LocalPatrolService initialized successfully');
+      print('   - Patrol box: ${_patrolBox!.length} items');
+      print('   - Location box: ${_locationBox!.length} items');
     } catch (e) {
       print('❌ Error initializing LocalPatrolService: $e');
-      // Try to create with a different name as fallback
-      try {
-        _box = await Hive.openBox<LocalPatrolData>('${_boxName}_backup');
-        print('✅ LocalPatrolService initialized with backup box');
-      } catch (fallbackError) {
-        print('❌ Failed to initialize backup box: $fallbackError');
-        throw Exception(
-            'Failed to initialize LocalPatrolService: $fallbackError');
+      throw Exception('Failed to initialize LocalPatrolService: $e');
+    }
+  }
+
+  static Future<void> updatePatrolField({
+    required String taskId,
+    required Map<String, dynamic> updates,
+  }) async {
+    try {
+      if (_patrolBox == null) {
+        throw Exception('Patrol box not initialized');
       }
+
+      final existingData = _patrolBox!.get(taskId);
+      if (existingData == null) {
+        throw Exception('No patrol data found to update: $taskId');
+      }
+
+      // ✅ Update fields using HiveObject methods
+      await existingData.updateAndSave(updates);
+
+      print('✅ Patrol field updated: $taskId');
+    } catch (e) {
+      print('❌ Error updating patrol field: $e');
+      throw e;
     }
   }
 
-  static Box<LocalPatrolData> get _patrolBox {
-    if (_box == null || !_box!.isOpen) {
-      throw Exception('LocalPatrolService not initialized. Call init() first.');
+// ✅ ENHANCED: Update mock location detection using HiveObject
+  static Future<void> updateMockLocationDetection({
+    required String taskId,
+    required bool detected,
+    required int count,
+  }) async {
+    try {
+      if (_patrolBox == null) {
+        throw Exception('Patrol box not initialized');
+      }
+
+      final existingData = _patrolBox!.get(taskId);
+      if (existingData != null) {
+        await existingData.updateAndSave({
+          'mockLocationDetected': detected,
+          'mockLocationCount': count,
+        });
+        print('✅ Updated mock location detection: $taskId (count: $count)');
+      } else {
+        print('⚠️ No patrol data found to update mock detection: $taskId');
+      }
+    } catch (e) {
+      print('❌ Error updating mock location detection: $e');
     }
-    return _box!;
   }
 
-  // Save patrol start data
-  static Future<bool> savePatrolStart({
+  // ✅ UPDATED: Save LocalPatrolData object to TypedBox
+  static Future<void> saveLocalPatrolDataToBox(LocalPatrolData data) async {
+    try {
+      if (_patrolBox == null) {
+        throw Exception('Patrol box not initialized');
+      }
+
+      print('💾 Saving LocalPatrolData to TypedBox: ${data.taskId}');
+
+      // ✅ Use key-based storage in TypedBox
+      await _patrolBox!.put(data.taskId, data);
+
+      print('✅ LocalPatrolData saved successfully: ${data.taskId}');
+    } catch (e) {
+      print('❌ Error saving LocalPatrolData: $e');
+      throw e;
+    }
+  }
+
+  // ✅ UPDATED: Get patrol data from TypedBox
+  static LocalPatrolData? getPatrolData(String taskId) {
+    try {
+      if (_patrolBox == null) {
+        print('❌ Patrol box not initialized');
+        return null;
+      }
+
+      final data = _patrolBox!.get(taskId);
+
+      if (data != null) {
+        print(
+            '📱 Retrieved LocalPatrolData: ${data.taskId} (${data.status}, ${data.routePath.length} points)');
+        return data;
+      } else {
+        print('⚠️ No LocalPatrolData found: $taskId');
+        return null;
+      }
+    } catch (e) {
+      print('❌ Error getting LocalPatrolData: $e');
+      return null;
+    }
+  }
+
+  // ✅ UPDATED: Save patrol start using TypedBox
+  static Future<void> savePatrolStart({
     required String taskId,
     required String userId,
     required DateTime startTime,
     String? initialPhotoUrl,
     String? initialNote,
   }) async {
+    await logLocalStorageState('BEFORE_SAVE_PATROL_START', taskId);
+
     try {
-      final patrolData = LocalPatrolData(
+      if (_patrolBox == null) {
+        throw Exception('Patrol box not initialized');
+      }
+
+      final localData = LocalPatrolData(
         taskId: taskId,
         userId: userId,
         status: 'started',
         startTime: startTime.toIso8601String(),
+        endTime: null,
         distance: 0.0,
-        elapsedTimeSeconds: 0,
+        routePath: <String, dynamic>{},
         initialReportPhotoUrl: initialPhotoUrl,
         initialNote: initialNote,
-        routePath: {},
+        finalReportPhotoUrl: null,
+        finalNote: null,
+        mockLocationDetected: false,
+        mockLocationCount: 0,
         lastUpdated: DateTime.now().toIso8601String(),
+        isSynced: false,
+        elapsedTimeSeconds: 0,
       );
 
-      await _patrolBox.put(taskId, patrolData);
-      print('✅ Patrol start data saved locally for task: $taskId');
-      return true;
+      // ✅ Save to TypedBox
+      await _patrolBox!.put(taskId, localData);
+      print('✅ Patrol start data saved locally: $taskId');
+
+      // ✅ BACKUP: Also save to location box for redundancy
+      await _locationBox!.put('patrol_meta_$taskId', {
+        'taskId': taskId,
+        'status': 'started',
+        'startTime': startTime.toIso8601String(),
+        'lastUpdated': DateTime.now().toIso8601String(),
+      });
     } catch (e) {
       print('❌ Error saving patrol start: $e');
-      return false;
+      throw e;
     }
+
+    await logLocalStorageState('AFTER_SAVE_PATROL_START', taskId);
   }
 
-  // Update patrol status to ongoing
-  static Future<bool> updatePatrolToOngoing(String taskId) async {
-    try {
-      final existingData = _patrolBox.get(taskId);
-      if (existingData != null) {
-        existingData.status = 'ongoing';
-        existingData.lastUpdated = DateTime.now().toIso8601String();
-        await existingData.save();
-        print('✅ Patrol status updated to ongoing for task: $taskId');
-        return true;
-      }
-      return false;
-    } catch (e) {
-      print('❌ Error updating patrol to ongoing: $e');
-      return false;
-    }
-  }
-
-  // Update location and route data
-  static Future<bool> updatePatrolLocation({
+  // ✅ UPDATED: Update patrol location using TypedBox
+  static Future<void> updatePatrolLocation({
     required String taskId,
     required Position position,
     required DateTime timestamp,
@@ -102,205 +191,410 @@ class LocalPatrolService {
     required int elapsedSeconds,
   }) async {
     try {
-      final existingData = _patrolBox.get(taskId);
-      if (existingData != null) {
-        // Update basic data
-        existingData.distance = totalDistance;
-        existingData.elapsedTimeSeconds = elapsedSeconds;
-        existingData.lastUpdated = DateTime.now().toIso8601String();
-
-        // Add location to route path
-        final routeKey = timestamp.millisecondsSinceEpoch.toString();
-        existingData.routePath[routeKey] = {
-          'coordinates': [position.latitude, position.longitude],
-          'timestamp': timestamp.toIso8601String(),
-          'accuracy': position.accuracy,
-        };
-
-        await existingData.save();
-        return true;
+      if (_patrolBox == null) {
+        throw Exception('Patrol box not initialized');
       }
-      return false;
+
+      final existingData = _patrolBox!.get(taskId);
+      if (existingData == null) {
+        print('⚠️ No existing patrol data found for location update: $taskId');
+        return;
+      }
+
+      // ✅ Add location to route path
+      final locationKey = timestamp.millisecondsSinceEpoch.toString();
+      existingData.routePath[locationKey] = {
+        'coordinates': [position.latitude, position.longitude],
+        'timestamp': timestamp.toIso8601String(),
+        'accuracy': position.accuracy,
+        'altitude': position.altitude,
+        'heading': position.heading,
+        'speed': position.speed,
+      };
+
+      // ✅ Update other fields
+      existingData.distance = totalDistance;
+      existingData.elapsedTimeSeconds = elapsedSeconds;
+      existingData.lastUpdated = DateTime.now().toIso8601String();
+      existingData.status = 'ongoing';
+
+      // ✅ Save using HiveObject.save()
+      await existingData.save();
+
+      // ✅ BACKUP: Save individual location data
+      await _locationBox!.put('location_${taskId}_$locationKey', {
+        'taskId': taskId,
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'timestamp': timestamp.toIso8601String(),
+        'accuracy': position.accuracy,
+        'totalDistance': totalDistance,
+        'elapsedSeconds': elapsedSeconds,
+      });
+
+      // ✅ Log periodically
+      if (existingData.routePath.length % 10 == 0) {
+        print(
+            '✅ Location updated for patrol $taskId: ${existingData.routePath.length} points, ${totalDistance.toStringAsFixed(1)}m');
+      }
     } catch (e) {
       print('❌ Error updating patrol location: $e');
-      return false;
+      throw e;
     }
   }
 
-  // Update mock location detection
-  static Future<bool> updateMockLocationDetection({
-    required String taskId,
-    required bool detected,
-    required int count,
-  }) async {
-    try {
-      final existingData = _patrolBox.get(taskId);
-      if (existingData != null) {
-        existingData.mockLocationDetected = detected;
-        existingData.mockLocationCount = count;
-        existingData.lastUpdated = DateTime.now().toIso8601String();
-        await existingData.save();
-        return true;
-      }
-      return false;
-    } catch (e) {
-      print('❌ Error updating mock location: $e');
-      return false;
-    }
-  }
+  // lib/presentation/patrol/services/local_patrol_service.dart
+// Update method completePatrol dengan better error handling:
 
-  // Update existing method in LocalPatrolService:
-
-  static Future<bool> completePatrol({
+// ✅ UPDATED: Complete patrol using TypedBox with defensive programming
+  static Future<void> completePatrol({
     required String taskId,
     required DateTime endTime,
-    required String finalPhotoUrl,
+    String? finalPhotoUrl,
     String? finalNote,
     required double totalDistance,
     required int elapsedSeconds,
   }) async {
+    await logLocalStorageState('BEFORE_COMPLETE_PATROL', taskId);
+
     try {
-      final existingData = _patrolBox.get(taskId);
-      if (existingData == null) {
-        print('❌ No existing patrol data found for completion');
-        return false;
+      if (_patrolBox == null) {
+        throw Exception('Patrol box not initialized');
       }
 
-      print('🔄 Completing patrol in local storage...');
+      final existingData = _patrolBox!.get(taskId);
 
-      // ✅ Update with completion data
+      if (existingData == null) {
+        print('⚠️ No patrol data found for completion. Attempting recovery...');
+
+        // ✅ RECOVERY: Try to create minimal patrol data if none exists
+        await _attemptPatrolDataRecovery(
+          taskId: taskId,
+          endTime: endTime,
+          totalDistance: totalDistance,
+          elapsedSeconds: elapsedSeconds,
+          finalPhotoUrl: finalPhotoUrl,
+          finalNote: finalNote,
+        );
+
+        return;
+      }
+
+      // ✅ Update completion data
       existingData.status = 'finished';
       existingData.endTime = endTime.toIso8601String();
       existingData.finalReportPhotoUrl = finalPhotoUrl;
       existingData.finalNote = finalNote;
       existingData.distance = totalDistance;
+      existingData.elapsedTimeSeconds = elapsedSeconds;
       existingData.lastUpdated = DateTime.now().toIso8601String();
+      existingData.isSynced = false;
 
+      // ✅ Save using HiveObject.save()
       await existingData.save();
 
-      print('✅ Patrol completed in local storage');
-      print('   - Status: ${existingData.status}');
-      print('   - End time: ${existingData.endTime}');
-      print('   - Distance: ${existingData.distance}');
-      print('   - Duration: ${existingData.elapsedTimeSeconds}s');
+      // ✅ BACKUP: Create completion marker
+      await _locationBox!.put('completion_$taskId', {
+        'taskId': taskId,
+        'completedAt': endTime.toIso8601String(),
+        'totalDistance': totalDistance,
+        'routePointsCount': existingData.routePath.length,
+        'isSynced': false,
+      });
 
-      return true;
+      print(
+          '✅ Patrol finished locally: $taskId (${existingData.routePath.length} points, ${totalDistance.toStringAsFixed(1)}m)');
     } catch (e) {
       print('❌ Error completing patrol: $e');
-      return false;
+      throw e;
     }
+
+    await logLocalStorageState('AFTER_COMPLETE_PATROL', taskId);
   }
 
-  // Get patrol data
-  static LocalPatrolData? getPatrolData(String taskId) {
+// ✅ NEW: Recovery method untuk data yang hilang
+  static Future<void> _attemptPatrolDataRecovery({
+    required String taskId,
+    required DateTime endTime,
+    required double totalDistance,
+    required int elapsedSeconds,
+    String? finalPhotoUrl,
+    String? finalNote,
+  }) async {
     try {
-      return _patrolBox.get(taskId);
+      print('🔄 Attempting patrol data recovery for: $taskId');
+
+      // Check if there's backup data in location box
+      final metaData = _locationBox?.get('patrol_meta_$taskId');
+      String? userId;
+      String? startTime;
+      Map<String, dynamic> routePath = {};
+
+      if (metaData != null && metaData is Map) {
+        startTime = metaData['startTime'];
+        print('📱 Found backup meta data: start time = $startTime');
+      }
+
+      // Try to recover route path from location box
+      if (_locationBox != null) {
+        for (final key in _locationBox!.keys) {
+          if (key.toString().startsWith('location_$taskId')) {
+            final locationData = _locationBox!.get(key);
+            if (locationData != null && locationData is Map) {
+              final timestamp = locationData['timestamp'] as String?;
+              final latitude = locationData['latitude'];
+              final longitude = locationData['longitude'];
+
+              if (timestamp != null && latitude != null && longitude != null) {
+                final locationKey =
+                    DateTime.parse(timestamp).millisecondsSinceEpoch.toString();
+                routePath[locationKey] = {
+                  'coordinates': [latitude, longitude],
+                  'timestamp': timestamp,
+                  'accuracy': locationData['accuracy'] ?? 0.0,
+                };
+              }
+            }
+          }
+        }
+      }
+
+      // Create recovery patrol data
+      final recoveryData = LocalPatrolData(
+        taskId: taskId,
+        userId: userId ?? 'unknown_user', // Will be updated from UI context
+        status: 'finished',
+        startTime: startTime ??
+            endTime
+                .subtract(Duration(seconds: elapsedSeconds))
+                .toIso8601String(),
+        endTime: endTime.toIso8601String(),
+        distance: totalDistance,
+        routePath: routePath,
+        initialReportPhotoUrl: null,
+        initialNote: null,
+        finalReportPhotoUrl: finalPhotoUrl,
+        finalNote: finalNote,
+        mockLocationDetected: false,
+        mockLocationCount: 0,
+        lastUpdated: DateTime.now().toIso8601String(),
+        isSynced: false,
+        elapsedTimeSeconds: elapsedSeconds,
+      );
+
+      // Save recovery data
+      await _patrolBox!.put(taskId, recoveryData);
+
+      print('✅ Patrol data recovered and saved: $taskId');
+      print('   - Route points: ${routePath.length}');
+      print('   - Distance: ${totalDistance.toStringAsFixed(1)}m');
+      print('   - Duration: ${elapsedSeconds}s');
     } catch (e) {
-      print('❌ Error getting patrol data: $e');
-      return null;
+      print('❌ Failed to recover patrol data: $e');
+      throw Exception('Data patroli hilang dan gagal dipulihkan: $e');
     }
   }
 
-  // Check if patrol is active
-  static bool isPatrolActive(String taskId) {
+  // ✅ UPDATED: Update patrol to ongoing using TypedBox
+  static Future<void> updatePatrolToOngoing(String taskId) async {
     try {
-      final data = _patrolBox.get(taskId);
-      return data != null &&
-          (data.status == 'started' || data.status == 'ongoing');
+      if (_patrolBox == null) {
+        throw Exception('Patrol box not initialized');
+      }
+
+      final existingData = _patrolBox!.get(taskId);
+
+      if (existingData != null) {
+        existingData.status = 'ongoing';
+        existingData.lastUpdated = DateTime.now().toIso8601String();
+
+        await existingData.save();
+        print('✅ Updated patrol status to ongoing: $taskId');
+      } else {
+        print('⚠️ No patrol data found to update status: $taskId');
+      }
     } catch (e) {
-      print('❌ Error checking patrol status: $e');
-      return false;
+      print('❌ Error updating patrol to ongoing: $e');
     }
   }
 
-  // Get all unsynced patrols
+  // ✅ UPDATED: Get unsynced patrols using TypedBox
   static List<LocalPatrolData> getUnsyncedPatrols() {
     try {
-      return _patrolBox.values.where((patrol) => !patrol.isSynced).toList();
+      if (_patrolBox == null) return [];
+
+      final List<LocalPatrolData> unsyncedData = [];
+
+      for (final patrol in _patrolBox!.values) {
+        if (!patrol.isSynced) {
+          unsyncedData.add(patrol);
+        }
+      }
+
+      print('📊 Found ${unsyncedData.length} unsynced patrols');
+      return unsyncedData;
     } catch (e) {
       print('❌ Error getting unsynced patrols: $e');
       return [];
     }
   }
 
-  // Mark patrol as synced
-  static Future<bool> markAsSynced(String taskId) async {
-    try {
-      final existingData = _patrolBox.get(taskId);
-      if (existingData != null) {
-        existingData.isSynced = true;
-        existingData.lastUpdated = DateTime.now().toIso8601String();
-        await existingData.save();
-        return true;
-      }
-      return false;
-    } catch (e) {
-      print('❌ Error marking as synced: $e');
-      return false;
-    }
-  }
-
-  // Delete patrol data
-  static Future<bool> deletePatrolData(String taskId) async {
-    try {
-      await _patrolBox.delete(taskId);
-      print('✅ Patrol data deleted for task: $taskId');
-      return true;
-    } catch (e) {
-      print('❌ Error deleting patrol data: $e');
-      return false;
-    }
-  }
-
-  // Clear all synced patrols (untuk cleanup)
-  static Future<void> clearSyncedPatrols() async {
-    try {
-      final syncedKeys = _patrolBox.values
-          .where((patrol) => patrol.isSynced)
-          .map((patrol) => patrol.taskId)
-          .toList();
-
-      for (String key in syncedKeys) {
-        await _patrolBox.delete(key);
-      }
-      print('✅ Cleared ${syncedKeys.length} synced patrols');
-    } catch (e) {
-      print('❌ Error clearing synced patrols: $e');
-    }
-  }
-
-  // Get statistics
+  // ✅ UPDATED: Get statistics using TypedBox
   static Map<String, int> getStatistics() {
     try {
-      final allPatrols = _patrolBox.values;
-      return {
-        'total': allPatrols.length,
-        'synced': allPatrols.where((p) => p.isSynced).length,
-        'unsynced': allPatrols.where((p) => !p.isSynced).length,
-        'active': allPatrols
-            .where((p) => p.status == 'ongoing' || p.status == 'started')
-            .length,
-        'completed': allPatrols.where((p) => p.status == 'completed').length,
+      if (_patrolBox == null) {
+        return {
+          'total': 0,
+          'unsynced': 0,
+          'synced': 0,
+          'ongoing': 0,
+          'finished': 0,
+          'started': 0,
+        };
+      }
+
+      int total = _patrolBox!.length;
+      int unsynced = 0;
+      int synced = 0;
+      int ongoing = 0;
+      int finished = 0;
+      int started = 0;
+
+      for (final patrol in _patrolBox!.values) {
+        if (patrol.isSynced) {
+          synced++;
+        } else {
+          unsynced++;
+        }
+
+        switch (patrol.status) {
+          case 'started':
+            started++;
+            break;
+          case 'ongoing':
+            ongoing++;
+            break;
+          case 'finished':
+            finished++;
+            break;
+        }
+      }
+
+      final stats = {
+        'total': total,
+        'unsynced': unsynced,
+        'synced': synced,
+        'ongoing': ongoing,
+        'finished': finished,
+        'started': started,
       };
+
+      print('📊 LocalPatrolService Statistics: $stats');
+      return stats;
     } catch (e) {
       print('❌ Error getting statistics: $e');
       return {
         'total': 0,
-        'synced': 0,
         'unsynced': 0,
-        'active': 0,
-        'completed': 0
+        'synced': 0,
+        'ongoing': 0,
+        'finished': 0,
+        'started': 0,
       };
     }
   }
 
-  // Clear all data (untuk reset)
-  static Future<void> clearAllData() async {
+  // ✅ UPDATED: Mark as synced using TypedBox
+  static Future<void> markAsSynced(String taskId) async {
     try {
-      await _patrolBox.clear();
-      print('✅ All patrol data cleared');
+      if (_patrolBox == null) return;
+
+      final existingData = _patrolBox!.get(taskId);
+
+      if (existingData != null) {
+        existingData.isSynced = true;
+        existingData.lastUpdated = DateTime.now().toIso8601String();
+
+        await existingData.save();
+        print('✅ Marked patrol as synced: $taskId');
+      }
     } catch (e) {
-      print('❌ Error clearing all data: $e');
+      print('❌ Error marking as synced: $e');
+    }
+  }
+
+  // ✅ UPDATED: Delete patrol data using TypedBox
+  static Future<void> deletePatrolData(String taskId) async {
+    try {
+      if (_patrolBox == null) return;
+
+      final existingData = _patrolBox!.get(taskId);
+      if (existingData != null) {
+        await existingData.delete();
+        print('✅ Force deleted patrol data: $taskId');
+      }
+    } catch (e) {
+      print('❌ Error force deleting patrol data: $e');
+    }
+  }
+
+  // ✅ Check if boxes are initialized
+  static bool get isInitialized {
+    return _patrolBox != null &&
+        _locationBox != null &&
+        _patrolBox!.isOpen &&
+        _locationBox!.isOpen;
+  }
+
+  // ✅ Enhanced logging with TypedBox
+  static Future<void> logLocalStorageState(String action,
+      [String? taskId]) async {
+    try {
+      final timestamp = DateTime.now().toIso8601String();
+
+      print('📊 =============== LOCAL STORAGE DEBUG ===============');
+      print('⏰ Timestamp: $timestamp');
+      print('🎯 Action: $action');
+      if (taskId != null) print('🆔 Task ID: $taskId');
+
+      if (_patrolBox == null || _locationBox == null) {
+        print('❌ Boxes not initialized!');
+        return;
+      }
+
+      print('📦 Patrol Box Status:');
+      print('   - Name: ${_patrolBox!.name}');
+      print('   - Length: ${_patrolBox!.length}');
+      print('   - Is Open: ${_patrolBox!.isOpen}');
+      print('   - Is Empty: ${_patrolBox!.isEmpty}');
+
+      if (_patrolBox!.isNotEmpty) {
+        print('   📋 All Patrol Data:');
+        for (final patrol in _patrolBox!.values) {
+          print('     🔹 Task: ${patrol.taskId}');
+          print('       - Status: ${patrol.status}');
+          print('       - Distance: ${patrol.distance}m');
+          print('       - Route Points: ${patrol.routePath.length}');
+          print('       - Is Synced: ${patrol.isSynced}');
+        }
+      }
+
+      if (taskId != null) {
+        print('🎯 Specific Task Data ($taskId):');
+        final taskData = _patrolBox!.get(taskId);
+        if (taskData != null) {
+          print('   ✅ Task data exists in patrol box');
+          print('   📊 Route Points: ${taskData.routePath.length}');
+          print('   💾 Status: ${taskData.status}');
+          print('   🔄 Is Synced: ${taskData.isSynced}');
+        } else {
+          print('   ⚠️ Task data NOT found in patrol box');
+        }
+      }
+
+      print('📊 =============== END DEBUG LOG ===============\n');
+    } catch (e) {
+      print('❌ Error in logLocalStorageState: $e');
     }
   }
 }

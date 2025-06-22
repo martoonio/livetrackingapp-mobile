@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_svg/svg.dart';
@@ -18,6 +19,7 @@ import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
 import 'package:livetrackingapp/services/location_validator.dart';
 import 'package:livetrackingapp/notification_utils.dart'; // Import notification_utils
+import 'package:livetrackingapp/services/missed_checkpoint_service.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../domain/entities/patrol_task.dart';
 import 'presentation/routing/bloc/patrol_bloc.dart';
@@ -107,7 +109,7 @@ class _MapScreenState extends State<MapScreen> {
       await widget.task.fetchOfficerName(FirebaseDatabase.instance.ref());
       // Untuk memastikan clusterName juga terisi jika belum
       await widget.task.fetchClusterName(FirebaseDatabase.instance.ref());
-    await _initializeAppWithLocalRecovery();
+      await _initializeAppWithLocalRecovery();
       if (mounted) {
         setState(() {}); // Refresh UI after name is loaded
       }
@@ -1682,7 +1684,10 @@ class _MapScreenState extends State<MapScreen> {
                                       });
 
                                       try {
-                                        // ✅ 1. SAVE TO LOCAL STORAGE FIRST
+                                        print(
+                                            '🔄 Starting patrol completion sequence...');
+
+                                        // ✅ STEP 1: SAVE TO LOCAL STORAGE FIRST
                                         await LocalPatrolService
                                             .savePatrolStart(
                                           taskId: widget.task.taskId,
@@ -1692,7 +1697,7 @@ class _MapScreenState extends State<MapScreen> {
                                               null, // Will be updated after upload
                                         );
 
-                                        // ✅ 2. UPLOAD FOTO TERLEBIH DAHULU
+                                        // ✅ STEP 2: UPLOAD FOTO TERLEBIH DAHULU
                                         String? uploadedPhotoUrl;
                                         try {
                                           final fileName =
@@ -1700,7 +1705,6 @@ class _MapScreenState extends State<MapScreen> {
                                           uploadedPhotoUrl =
                                               await _uploadPhotoToFirebase(
                                                   capturedImage!, fileName);
-
                                           print(
                                               '✅ Initial report photo uploaded successfully: $uploadedPhotoUrl');
                                         } catch (uploadError) {
@@ -1711,22 +1715,34 @@ class _MapScreenState extends State<MapScreen> {
                                           await LocalPatrolService
                                               .deletePatrolData(
                                                   widget.task.taskId);
-
                                           throw Exception(
                                               'Gagal upload foto: $uploadError');
                                         }
 
-                                        // ✅ 3. UPDATE LOCAL STORAGE WITH PHOTO URL
-                                        final localData =
-                                            LocalPatrolService.getPatrolData(
-                                                widget.task.taskId);
-                                        if (localData != null) {
-                                          localData.initialReportPhotoUrl =
-                                              uploadedPhotoUrl;
-                                          await localData.save();
+                                        // ✅ STEP 3: UPDATE LOCAL STORAGE WITH PHOTO URL USING updatePatrolField
+                                        try {
+                                          await LocalPatrolService
+                                              .updatePatrolField(
+                                            taskId: widget.task.taskId,
+                                            updates: {
+                                              'initialReportPhotoUrl':
+                                                  uploadedPhotoUrl,
+                                              'initialNote': noteController.text
+                                                      .trim()
+                                                      .isNotEmpty
+                                                  ? noteController.text.trim()
+                                                  : null,
+                                            },
+                                          );
+                                          print(
+                                              '✅ Local storage updated with photo URL');
+                                        } catch (localError) {
+                                          print(
+                                              '❌ Failed to update local storage with photo: $localError');
+                                          // Don't throw - continue with patrol
                                         }
 
-                                        // ✅ 4. SET UI STATE ONLY AFTER SUCCESSFUL UPLOAD
+                                        // ✅ STEP 4: SET UI STATE ONLY AFTER SUCCESSFUL UPLOAD
                                         if (mounted) {
                                           this.setState(() {
                                             _localIsPatrolling = true;
@@ -1737,12 +1753,12 @@ class _MapScreenState extends State<MapScreen> {
                                           });
                                         }
 
-                                        // ✅ 5. START PATROL SYSTEMS AFTER UI STATE IS SET
+                                        // ✅ STEP 5: START PATROL SYSTEMS AFTER UI STATE IS SET
                                         if (mounted) {
                                           _startPatrol(context);
                                         }
 
-                                        // ✅ 6. SUBMIT TO FIREBASE (NON-BLOCKING)
+                                        // ✅ STEP 6: SUBMIT TO FIREBASE (NON-BLOCKING)
                                         try {
                                           context
                                               .read<PatrolBloc>()
@@ -1768,12 +1784,12 @@ class _MapScreenState extends State<MapScreen> {
 
                                         result = true;
 
-                                        // ✅ 7. CLOSE DIALOG
+                                        // ✅ STEP 7: CLOSE DIALOG
                                         if (Navigator.canPop(context)) {
                                           Navigator.pop(context, true);
                                         }
 
-                                        // ✅ 8. SHOW SUCCESS MESSAGE
+                                        // ✅ STEP 8: SHOW SUCCESS MESSAGE
                                         if (mounted) {
                                           showCustomSnackbar(
                                             context: context,
@@ -3047,7 +3063,6 @@ class _MapScreenState extends State<MapScreen> {
                           ),
                           const SizedBox(width: 12),
 
-                          // ✅ FIXED: Tombol Selesaikan Patroli dengan Sequential Processing
                           Expanded(
                             child: ElevatedButton(
                               onPressed: isSubmitting || capturedImage == null
@@ -3091,6 +3106,17 @@ class _MapScreenState extends State<MapScreen> {
                                                   capturedImage!, fileName);
                                           print(
                                               '✅ Photo uploaded successfully: $photoUrl');
+                                          // ubah status jadi finished
+                                          context
+                                              .read<PatrolBloc>()
+                                              .add(UpdateTask(
+                                                taskId: widget.task.taskId,
+                                                updates: {
+                                                  'status': 'finished',
+                                                  'endTime': completionTime
+                                                      .toIso8601String(),
+                                                },
+                                              ));
                                         } catch (uploadError) {
                                           print(
                                               '❌ Failed to upload photo: $uploadError');
@@ -3098,10 +3124,11 @@ class _MapScreenState extends State<MapScreen> {
                                               'Gagal upload foto: $uploadError');
                                         }
 
-                                        // ✅ STEP 4: COMPLETE PATROL IN LOCAL STORAGE (BUT DON'T DELETE YET)
+                                        // ✅ STEP 4: COMPLETE PATROL IN LOCAL STORAGE - USE CORRECT METHOD
                                         print(
                                             '📍 Step 4: Completing patrol in local storage...');
                                         try {
+                                          // ✅ FIXED: Use LocalPatrolService.completePatrol (correct method)
                                           await LocalPatrolService
                                               .completePatrol(
                                             taskId: widget.task.taskId,
@@ -3195,11 +3222,7 @@ class _MapScreenState extends State<MapScreen> {
                                                     : DateTime.now()
                                                         .subtract(_elapsedTime),
                                                 endTime: completionTime,
-                                                distance: localData?.distance ??
-                                                    _totalDistance,
-                                                finalReportPhotoUrl: photoUrl,
-                                                initialReportPhotoUrl: localData
-                                                    ?.initialReportPhotoUrl,
+                                                distance: _totalDistance,
                                               ),
                                             ),
                                           );
@@ -3208,11 +3231,27 @@ class _MapScreenState extends State<MapScreen> {
                                         // ✅ STEP 8: UPDATE FIREBASE ASYNC (WITH CLEANUP ONLY ON SUCCESS)
                                         print(
                                             '📍 Step 8: Starting Firebase sync (background)...');
-                                        _updateFirebaseAsync(
-                                            completionTime,
-                                            photoUrl,
-                                            noteController.text.trim(),
-                                            finalRoutePath);
+
+                                        // ✅ FIXED: Prepare final route path correctly
+                                        Map<String, dynamic> finalRoutePath =
+                                            {};
+                                        if (localData != null &&
+                                            localData.routePath.isNotEmpty) {
+                                          finalRoutePath =
+                                              Map<String, dynamic>.from(
+                                                  localData.routePath);
+                                        } else {
+                                          // Fallback to current route
+                                          finalRoutePath =
+                                              _convertCurrentRouteToMap();
+                                        }
+
+                                        _updateFirebaseAsyncSafe(
+                                          completionTime,
+                                          photoUrl,
+                                          noteController.text.trim(),
+                                          finalRoutePath,
+                                        );
 
                                         result = true;
                                       } catch (e) {
@@ -3282,40 +3321,133 @@ class _MapScreenState extends State<MapScreen> {
     return result;
   }
 
-// ✅ NEW METHOD: Background Firebase update (non-blocking)
-  void _updateFirebaseAsync(
+  void _updateFirebaseAsyncSafe(
     DateTime endTime,
     String photoUrl,
     String note,
     Map<String, dynamic> finalRoutePath,
   ) async {
     try {
-      print('🔄 Starting background Firebase sync...');
+      print('🔄 Starting SAFE Firebase sync...');
+      print('📊 Syncing ${finalRoutePath.length} route points');
 
-      // Check connectivity first
+      // ✅ PERBAIKAN: Collect ALL possible route data sources
+      Map<String, dynamic> comprehensiveRoutePath = {};
+
+      // 1. Start with current UI route points (most recent)
+      if (_routePoints.isNotEmpty) {
+        print('📱 Adding ${_routePoints.length} UI route points');
+        for (int i = 0; i < _routePoints.length; i++) {
+          final point = _routePoints[i];
+          final timestamp = DateTime.now()
+              .subtract(Duration(minutes: _routePoints.length - i))
+              .millisecondsSinceEpoch
+              .toString();
+
+          comprehensiveRoutePath[timestamp] = {
+            'coordinates': [point.latitude, point.longitude],
+            'timestamp': DateTime.now()
+                .subtract(Duration(minutes: _routePoints.length - i))
+                .toIso8601String(),
+          };
+        }
+      }
+
+      // 2. Merge with local storage data
+      final localData = LocalPatrolService.getPatrolData(widget.task.taskId);
+      if (localData != null && localData.routePath.isNotEmpty) {
+        print('💾 Merging ${localData.routePath.length} local storage points');
+        localData.routePath.forEach((key, value) {
+          if (!comprehensiveRoutePath.containsKey(key)) {
+            comprehensiveRoutePath[key] = value;
+          }
+        });
+      }
+
+      // 3. Merge with provided finalRoutePath
+      if (finalRoutePath.isNotEmpty) {
+        print('📊 Merging ${finalRoutePath.length} provided route points');
+        finalRoutePath.forEach((key, value) {
+          if (!comprehensiveRoutePath.containsKey(key)) {
+            comprehensiveRoutePath[key] = value;
+          }
+        });
+      }
+
+      // 4. Try to get from Firebase as backup
+      try {
+        final firebaseTask = await FirebaseDatabase.instance
+            .ref('tasks/${widget.task.taskId}')
+            .get()
+            .timeout(Duration(seconds: 5));
+
+        if (firebaseTask.exists) {
+          final taskData = firebaseTask.value as Map<dynamic, dynamic>;
+          final fbRoutePath = taskData['route_path'] as Map<dynamic, dynamic>?;
+
+          if (fbRoutePath != null && fbRoutePath.isNotEmpty) {
+            print('🔥 Merging ${fbRoutePath.length} Firebase route points');
+            fbRoutePath.forEach((key, value) {
+              final keyStr = key.toString();
+              if (!comprehensiveRoutePath.containsKey(keyStr)) {
+                comprehensiveRoutePath[keyStr] =
+                    Map<String, dynamic>.from(value as Map);
+              }
+            });
+          }
+        }
+      } catch (e) {
+        print('⚠️ Could not get Firebase route data: $e');
+      }
+
+      print(
+          '📊 COMPREHENSIVE route data: ${comprehensiveRoutePath.length} total points');
+
+      // Check connectivity
       final connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
-        print('❌ No internet for Firebase sync, will retry later');
+        print('❌ No internet - data preserved for later sync');
+        await _triggerMissedCheckpointsCheck(endTime, comprehensiveRoutePath);
         return;
       }
 
-      // ✅ Update Firebase with retry mechanism
-      int retryCount = 0;
-      bool firebaseSuccess = false;
+      // Test Firebase connection
+      bool isFirebaseConnected = false;
+      try {
+        final testResponse = await FirebaseDatabase.instance
+            .ref('.info/connected')
+            .get()
+            .timeout(Duration(seconds: 5));
+        isFirebaseConnected =
+            testResponse.exists && (testResponse.value == true);
+      } catch (e) {
+        print('❌ Firebase connection test failed: $e');
+      }
 
-      while (!firebaseSuccess && retryCount < 3) {
+      if (!isFirebaseConnected) {
+        print('❌ Firebase not connected - data preserved');
+        await _triggerMissedCheckpointsCheck(endTime, comprehensiveRoutePath);
+        return;
+      }
+
+      // ✅ ENHANCED SYNC WITH DATA VERIFICATION
+      int retryCount = 0;
+      bool syncSuccess = false;
+
+      while (!syncSuccess && retryCount < 3) {
         try {
-          print('🔄 Firebase sync attempt ${retryCount + 1}...');
+          retryCount++;
+          print('🔄 Firebase sync attempt $retryCount/3...');
 
           // Stop patrol in BLoC
           if (mounted) {
             context.read<PatrolBloc>().add(StopPatrol(
                   endTime: endTime,
                   distance: _totalDistance,
-                  finalRoutePath: finalRoutePath,
+                  finalRoutePath:
+                      comprehensiveRoutePath, // ✅ Use comprehensive data
                 ));
 
-            // Submit final report
             context.read<PatrolBloc>().add(SubmitFinalReport(
                   photoUrl: photoUrl,
                   note: note.isNotEmpty ? note : null,
@@ -3323,119 +3455,189 @@ class _MapScreenState extends State<MapScreen> {
                 ));
           }
 
-          // Wait a bit for BLoC to process
-          await Future.delayed(const Duration(seconds: 2));
+          // Wait for BLoC processing
+          await Future.delayed(
+              const Duration(seconds: 3)); // ✅ Increased wait time
 
-          // Force sync via SyncService
-          final syncSuccess =
-              await SyncService.forceSyncPatrol(widget.task.taskId);
+          // ✅ VERIFY DATA BEFORE CLEANUP
+          final verifyTask = await FirebaseDatabase.instance
+              .ref('tasks/${widget.task.taskId}')
+              .get()
+              .timeout(Duration(seconds: 15)); // ✅ Increased timeout
 
-          if (syncSuccess) {
-            firebaseSuccess = true;
-            print('✅ Firebase sync completed successfully');
+          if (verifyTask.exists) {
+            final taskData = verifyTask.value as Map<dynamic, dynamic>;
+            final fbRoutePath =
+                taskData['route_path'] as Map<dynamic, dynamic>?;
+            final fbStatus = taskData['status'] as String?;
+            final fbEndTime = taskData['endTime'] as String?;
 
-            // ✅ ONLY DELETE LOCAL DATA AFTER SUCCESSFUL SYNC
-            await LocalPatrolService.deletePatrolData(widget.task.taskId);
-            print('✅ Local data cleaned up after successful sync');
+            print('🔍 Firebase verification:');
+            print('   - Status: $fbStatus');
+            print('   - End time: $fbEndTime');
+            print('   - Route points: ${fbRoutePath?.length ?? 0}');
+            print('   - Expected points: ${comprehensiveRoutePath.length}');
+
+            // ✅ STRICTER VERIFICATION
+            bool dataIntegrityOk =
+                (fbStatus == 'finished' || fbStatus == 'completed') &&
+                    fbEndTime != null &&
+                    (fbRoutePath?.length ?? 0) >=
+                        (comprehensiveRoutePath.length * 0.9); // 90% tolerance
+
+            if (dataIntegrityOk) {
+              syncSuccess = true;
+              print('✅ Firebase sync verified successfully');
+
+              // ✅ TRIGGER MISSED CHECKPOINTS WITH COMPREHENSIVE DATA
+              await _triggerMissedCheckpointsCheck(
+                  endTime, comprehensiveRoutePath);
+
+              // ✅ FORCE HOME SCREEN UPDATE
+              _forceHomeScreenUpdate();
+
+              // ✅ DELAY BEFORE LOCAL DATA CLEANUP
+              await Future.delayed(Duration(seconds: 1));
+              await LocalPatrolService.deletePatrolData(widget.task.taskId);
+              print('✅ Local data cleaned up after verification');
+            } else {
+              throw Exception(
+                  'Data integrity check failed - FB: ${fbRoutePath?.length ?? 0}, Expected: ${comprehensiveRoutePath.length}');
+            }
           } else {
-            throw Exception('SyncService returned false');
+            throw Exception('Task not found in Firebase after sync');
           }
         } catch (e) {
-          retryCount++;
           print('❌ Firebase sync attempt $retryCount failed: $e');
 
           if (retryCount < 3) {
-            await Future.delayed(Duration(seconds: retryCount * 2));
+            await Future.delayed(Duration(seconds: retryCount * 3));
           }
         }
       }
 
-      if (!firebaseSuccess) {
+      if (!syncSuccess) {
         print(
-            '⚠️ All Firebase sync attempts failed, local data preserved for later sync');
+            '⚠️ All sync attempts failed - preserving data for manual recovery');
 
-        // ✅ SHOW USER NOTIFICATION THAT DATA WILL BE SYNCED LATER
+        // ✅ STILL TRIGGER MISSED CHECKPOINTS WITH COMPREHENSIVE DATA
+        await _triggerMissedCheckpointsCheck(endTime, comprehensiveRoutePath);
+
         if (mounted) {
           showCustomSnackbar(
             context: context,
-            title: 'Data disimpan untuk sinkronisasi',
-            subtitle: 'Patroli selesai, data akan dikirim saat koneksi stabil',
+            title: 'Data disimpan untuk recovery',
+            subtitle: 'Sync gagal, data akan dipulihkan secara manual',
             type: SnackbarType.warning,
           );
         }
       }
     } catch (e) {
-      print('❌ Error in background Firebase sync: $e');
-    }
-  }
+      print('❌ Error in safe Firebase sync: $e');
 
-// ✅ REMOVE THE IMMEDIATE CLEANUP FROM _performImmediateSync
-  void _performImmediateSync(String taskId) {
-    // Don't await this - let it run in background
-    Future.microtask(() async {
+      // ✅ ALWAYS TRIGGER MISSED CHECKPOINTS
       try {
-        print('🔄 Performing immediate sync for completed patrol...');
-
-        // Check connection
-        final connectivityResult = await Connectivity().checkConnectivity();
-        if (connectivityResult == ConnectivityResult.none) {
-          print('❌ No internet for immediate sync');
-          return;
-        }
-
-        // Force sync without delay
-        final success = await SyncService.forceSyncPatrol(taskId);
-
-        if (success) {
-          print('✅ Immediate sync completed successfully');
-          // ✅ ONLY DELETE AFTER SUCCESSFUL SYNC
-          await LocalPatrolService.deletePatrolData(taskId);
-          print('✅ Local data deleted after successful immediate sync');
-        } else {
-          print(
-              '⚠️ Immediate sync failed, local data preserved for later sync');
-        }
-      } catch (e) {
-        print('❌ Error in immediate sync: $e');
+        await _triggerMissedCheckpointsCheck(endTime, finalRoutePath);
+      } catch (checkpointError) {
+        print('❌ Error in missed checkpoints check: $checkpointError');
       }
-    });
+    }
   }
 
-// ✅ UPDATE _cleanupCompletedPatrol TO BE MORE CAREFUL
-  Future<void> _cleanupCompletedPatrol() async {
+  void _forceHomeScreenUpdate() async {
     try {
-      final localData = LocalPatrolService.getPatrolData(widget.task.taskId);
-      if (localData != null && localData.status == 'completed') {
-        print('🧹 Checking completed patrol data for: ${widget.task.taskId}');
+      // Wait a bit for Firebase to process
+      await Future.delayed(Duration(seconds: 2));
 
-        // ✅ ONLY DELETE IF SUCCESSFULLY SYNCED
-        if (localData.isSynced) {
-          await LocalPatrolService.deletePatrolData(widget.task.taskId);
-          print('✅ Deleted synced completed patrol data');
-        } else {
-          print('⚠️ Completed patrol not synced yet, preserving local data');
+      // Force refresh home screen data
+      final database = FirebaseDatabase.instance.ref();
+      await database.child('tasks/${widget.task.taskId}').update({
+        'status': 'finished',
+        'lastUpdated': DateTime.now().toIso8601String(),
+      });
 
-          // ✅ ATTEMPT TO SYNC AGAIN
-          try {
-            final connectivityResult = await Connectivity().checkConnectivity();
-            if (connectivityResult != ConnectivityResult.none) {
-              print('🔄 Attempting to sync unsynchronized completed patrol...');
-              final syncSuccess =
-                  await SyncService.forceSyncPatrol(widget.task.taskId);
-
-              if (syncSuccess) {
-                print('✅ Late sync successful, now deleting local data');
-                await LocalPatrolService.deletePatrolData(widget.task.taskId);
-              }
-            }
-          } catch (e) {
-            print('❌ Error in late sync attempt: $e');
-          }
-        }
-      }
+      print('✅ Forced home screen update trigger');
     } catch (e) {
-      print('❌ Error cleaning up completed patrol: $e');
+      print('❌ Error forcing home screen update: $e');
     }
+  }
+
+  Future<void> _triggerMissedCheckpointsCheck(
+      DateTime endTime, Map<String, dynamic> finalRoutePath) async {
+    try {
+      print('🔍 Triggering missed checkpoints check...');
+
+      // Prepare final task data
+      final completedTask = widget.task.copyWith(
+        status: 'finished',
+        endTime: endTime,
+        distance: _totalDistance,
+        routePath: finalRoutePath.isNotEmpty
+            ? finalRoutePath
+            : _convertCurrentRouteToMap(),
+      );
+
+      print('📊 Task for checkpoint validation:');
+      print('   - Task ID: ${completedTask.taskId}');
+      print('   - Status: ${completedTask.status}');
+      print('   - Route points: ${completedTask.routePath?.length ?? 0}');
+      print(
+          '   - Assigned checkpoints: ${completedTask.assignedRoute?.length ?? 0}');
+      print('   - Distance: ${completedTask.distance}');
+
+      // ✅ SAFE: Only trigger BLoC if widget is still mounted
+      if (mounted) {
+        try {
+          context
+              .read<PatrolBloc>()
+              .add(CheckMissedCheckpoints(task: completedTask));
+          print('✅ CheckMissedCheckpoints event triggered via BLoC');
+        } catch (blocError) {
+          print('❌ Error triggering BLoC event: $blocError');
+        }
+      } else {
+        print('⚠️ Widget unmounted, skipping BLoC trigger');
+      }
+
+      // ✅ INDEPENDENT SERVICE CALL (no widget dependency)
+      print('🔄 Starting independent missed checkpoints validation...');
+
+      // Run in separate isolate/future to avoid widget lifecycle issues
+      Future.microtask(() async {
+        try {
+          await MissedCheckpointService.validateAndNotify(
+            completedTask: completedTask,
+          );
+          print('✅ Independent validation completed');
+        } catch (serviceError) {
+          print('❌ Independent validation failed: $serviceError');
+        }
+      });
+    } catch (e) {
+      print('❌ Error triggering missed checkpoints check: $e');
+    }
+  }
+
+// ✅ Helper method to convert current route to map format
+  Map<String, dynamic> _convertCurrentRouteToMap() {
+    final Map<String, dynamic> routeMap = {};
+
+    for (int i = 0; i < _routePoints.length; i++) {
+      final point = _routePoints[i];
+      final timestamp = DateTime.now()
+          .subtract(Duration(minutes: _routePoints.length - i))
+          .millisecondsSinceEpoch
+          .toString();
+
+      routeMap[timestamp] = {
+        'coordinates': [point.latitude, point.longitude],
+        'timestamp': DateTime.now()
+            .subtract(Duration(minutes: _routePoints.length - i))
+            .toIso8601String(),
+      };
+    }
+
+    return routeMap;
   }
 
   void _showMockLocationInfoDialog(BuildContext context, int detectionCount) {

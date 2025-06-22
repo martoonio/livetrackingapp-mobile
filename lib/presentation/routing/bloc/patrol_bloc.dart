@@ -3,6 +3,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:livetrackingapp/presentation/patrol/services/local_patrol_service.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_bloc.dart';
 import 'package:livetrackingapp/presentation/report/bloc/report_event.dart';
 import '../../../domain/entities/patrol_task.dart';
@@ -453,38 +454,97 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
   }
 
   void _setupConnectivityMonitoring() {
-    Connectivity().checkConnectivity().then((result) {
-      _isConnected = (result != ConnectivityResult.none);
-    });
+    // ✅ Initial connectivity check dengan validation
+    // _checkInitialConnectivity();
 
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
-      (List<ConnectivityResult> results) {
+      (List<ConnectivityResult> results) async {
         final result =
             results.isNotEmpty ? results.first : ConnectivityResult.none;
-
         final wasConnected = _isConnected;
+
+        // ✅ Basic connectivity check
         _isConnected = (result != ConnectivityResult.none);
 
+        // ✅ Only trigger sync if truly reconnected dan ada data
+        if (!wasConnected && _isConnected) {
+          print('🌐 Connectivity restored, checking if sync needed...');
+
+          // Delay sync untuk stabilkan koneksi
+          await Future.delayed(Duration(seconds: 3));
+
+          // Double-check connectivity masih stabil
+          try {
+            final testResponse = await FirebaseDatabase.instance
+                .ref('.info/connected')
+                .get()
+                .timeout(Duration(seconds: 5));
+
+            final reallyConnected =
+                testResponse.exists && (testResponse.value == true);
+
+            if (reallyConnected &&
+                _offlineLocationBox != null &&
+                _offlineLocationBox!.isNotEmpty) {
+              print('✅ Stable connection confirmed, triggering sync...');
+              add(SyncOfflineData());
+            } else {
+              print('⚠️ Connection not stable or no data to sync');
+            }
+          } catch (e) {
+            print('❌ Connection test failed: $e');
+          }
+        }
+
+        // Update state
         if (state is PatrolLoaded) {
           final currentState = state as PatrolLoaded;
           emit(currentState.copyWith(isOffline: !_isConnected));
-        }
-
-        if (!wasConnected && _isConnected) {
-          add(SyncOfflineData());
         }
       },
     );
   }
 
+  // lib/presentation/routing/bloc/patrol_bloc.dart
+// Update method _onSyncOfflineData:
+
   Future<void> _onSyncOfflineData(
     SyncOfflineData event,
     Emitter<PatrolState> emit,
   ) async {
-    // ✅ Consistent connectivity check with SyncService
-    final connectivityResult = await Connectivity().checkConnectivity();
-    if (connectivityResult == ConnectivityResult.none) {
-      print('❌ No internet connection for sync');
+    print('🔄 Starting offline data sync...');
+
+    // ✅ PERBAIKAN: Enhanced connectivity validation
+    bool isReallyConnected = false;
+
+    try {
+      // 1. Check basic connectivity
+      final connectivityResult = await Connectivity().checkConnectivity();
+      if (connectivityResult == ConnectivityResult.none) {
+        print('❌ No connectivity detected - aborting sync');
+        return;
+      }
+
+      // 2. Test actual internet connection with quick ping
+      try {
+        final testResponse = await FirebaseDatabase.instance
+            .ref('.info/connected')
+            .get()
+            .timeout(Duration(seconds: 5));
+
+        isReallyConnected = testResponse.exists && (testResponse.value == true);
+        print('🌐 Firebase connection test: $isReallyConnected');
+      } catch (e) {
+        print('❌ Firebase connection test failed: $e');
+        isReallyConnected = false;
+      }
+
+      if (!isReallyConnected) {
+        print('❌ No stable internet connection - aborting sync');
+        return;
+      }
+    } catch (e) {
+      print('❌ Connectivity check failed: $e');
       return;
     }
 
@@ -493,430 +553,51 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
       return;
     }
 
-    try {
-      if (_offlineLocationBox!.isEmpty) {
-        print('ℹ️ No offline data to sync');
-        return;
-      }
+    if (_offlineLocationBox!.isEmpty) {
+      print('ℹ️ No offline data to sync');
+      return;
+    }
 
+    try {
       if (state is PatrolLoaded) {
         final currentState = state as PatrolLoaded;
         emit(currentState.copyWith(isSyncing: true));
 
-        print('🔄 Starting offline data sync...');
+        print('🔄 Starting sync with stable connection...');
         print('📊 Total offline items: ${_offlineLocationBox!.length}');
 
-        // ✅ 1. SYNC PATROL START DATA
-        final startKeys = _offlineLocationBox!.keys
-            .where((k) => k.toString().startsWith('patrol_start_'))
-            .toList();
+        // ✅ PERBAIKAN: Collect all successful syncs untuk batch delete
+        List<String> successfulSyncs = [];
 
-        for (final key in startKeys) {
-          try {
-            final data = _offlineLocationBox!.get(key);
-            if (data != null && data is Map) {
-              final taskId = data['taskId'] as String;
-              final updateData = Map<String, dynamic>.from(data)
-                ..remove('taskId');
-
-              print('🔄 Syncing patrol start for: $taskId');
-
-              // ✅ Retry mechanism like SyncService
-              int retryCount = 0;
-              bool updateSuccess = false;
-
-              while (!updateSuccess && retryCount < 3) {
-                try {
-                  await repository.updateTask(taskId, updateData).timeout(
-                        Duration(seconds: 30),
-                        onTimeout: () => throw Exception('Update timeout'),
-                      );
-                  updateSuccess = true;
-                  print('✅ Patrol start synced on attempt ${retryCount + 1}');
-                } catch (e) {
-                  retryCount++;
-                  print('❌ Start sync attempt $retryCount failed: $e');
-                  if (retryCount < 3) {
-                    await Future.delayed(Duration(seconds: retryCount * 2));
-                  } else {
-                    throw e;
-                  }
-                }
-              }
-
-              // ✅ Delete after successful sync (like SyncService)
-              if (updateSuccess) {
-                await _offlineLocationBox!.delete(key);
-                print('✅ Deleted offline start data: $key');
-              }
-            }
-          } catch (e) {
-            print('❌ Error syncing patrol start $key: $e');
-          }
-        }
+        // ✅ 1. SYNC PATROL START DATA dengan enhanced error handling
+        await _syncPatrolStartData(successfulSyncs);
 
         // ✅ 2. SYNC PATROL STOP DATA
-        final stopKeys = _offlineLocationBox!.keys
-            .where((k) => k.toString().startsWith('patrol_stop_'))
-            .toList();
+        await _syncPatrolStopData(successfulSyncs);
 
-        for (final key in stopKeys) {
-          try {
-            final data = _offlineLocationBox!.get(key);
-            if (data != null && data is Map) {
-              final taskId = data['taskId'] as String;
-              final endTime = DateTime.parse(data['endTime'] as String);
-              final distance = data['distance'] as double;
-
-              print('🔄 Syncing patrol stop for: $taskId');
-
-              // ✅ Retry mechanism
-              int retryCount = 0;
-              bool updateSuccess = false;
-
-              while (!updateSuccess && retryCount < 3) {
-                try {
-                  await repository.updateTaskStatus(taskId, 'finished').timeout(
-                        Duration(seconds: 30),
-                        onTimeout: () =>
-                            throw Exception('Status update timeout'),
-                      );
-
-                  await repository.updateTask(taskId, {
-                    'endTime': endTime.toIso8601String(),
-                    'distance': distance,
-                    'status': 'finished',
-                    'syncedAt': DateTime.now().toIso8601String(),
-                  }).timeout(
-                    Duration(seconds: 30),
-                    onTimeout: () => throw Exception('Task update timeout'),
-                  );
-
-                  updateSuccess = true;
-                  print('✅ Patrol stop synced on attempt ${retryCount + 1}');
-                } catch (e) {
-                  retryCount++;
-                  print('❌ Stop sync attempt $retryCount failed: $e');
-                  if (retryCount < 3) {
-                    await Future.delayed(Duration(seconds: retryCount * 2));
-                  } else {
-                    throw e;
-                  }
-                }
-              }
-
-              // ✅ Delete after successful sync
-              if (updateSuccess) {
-                await _offlineLocationBox!.delete(key);
-                print('✅ Deleted offline stop data: $key');
-              }
-            }
-          } catch (e) {
-            print('❌ Error syncing patrol stop $key: $e');
-          }
-        }
-
-        // ✅ 3. SYNC LOCATION DATA (GROUP BY TASK) - PERBAIKAN UTAMA
-        final locationKeys = _offlineLocationBox!.keys
-            .where((k) =>
-                !k.toString().startsWith('patrol_stop_') &&
-                !k.toString().startsWith('task_update_') &&
-                !k.toString().startsWith('patrol_start_') &&
-                !k.toString().startsWith('mock_detection_'))
-            .toList();
-
-        final locationDataByTask = <String, Map<String, dynamic>>{};
-
-        for (final key in locationKeys) {
-          try {
-            final data = _offlineLocationBox!.get(key);
-            if (data != null && data is Map && data['taskId'] != null) {
-              final taskId = data['taskId'] as String;
-              final timestamp = data['timestamp'] as String;
-              final latitude = data['latitude'] as double;
-              final longitude = data['longitude'] as double;
-
-              // ✅ PERBAIKAN: Validasi koordinat yang lebih realistis
-              if (latitude.abs() <= 90 &&
-                  longitude.abs() <= 180 &&
-                  latitude != 0.0 &&
-                  longitude != 0.0) {
-                locationDataByTask[taskId] ??= {};
-
-                // ✅ Format consistent with SyncService dan online mode
-                locationDataByTask[taskId]![key.toString()] = {
-                  'coordinates': [latitude, longitude],
-                  'timestamp': timestamp,
-                };
-              } else {
-                print(
-                    '⚠️ Invalid coordinates skipped: lat=$latitude, lng=$longitude');
-              }
-            }
-          } catch (e) {
-            print('❌ Error processing location data $key: $e');
-          }
-        }
-
-        // ✅ PERBAIKAN: Sync location data untuk setiap task dengan enhanced merging
-        for (final taskId in locationDataByTask.keys) {
-          try {
-            print(
-                '🔄 Syncing ${locationDataByTask[taskId]!.length} location points for: $taskId');
-
-            // ✅ PERBAIKAN: Get existing route path dari Firebase dengan error handling
-            Map<String, dynamic> existingRoutePath = {};
-            try {
-              final taskSnapshot = await repository.getTaskById(taskId: taskId);
-              if (taskSnapshot != null && taskSnapshot.routePath != null) {
-                existingRoutePath =
-                    Map<String, dynamic>.from(taskSnapshot.routePath as Map);
-                print(
-                    '📍 Found ${existingRoutePath.length} existing points in Firebase');
-              }
-            } catch (e) {
-              print('⚠️ Could not get existing route path: $e');
-            }
-
-            // ✅ PERBAIKAN: Smart merging - hindari duplicate timestamps
-            final mergedRoutePath =
-                Map<String, dynamic>.from(existingRoutePath);
-
-            // Merge offline data, tapi cek duplicate timestamp
-            locationDataByTask[taskId]!.forEach((key, value) {
-              if (!mergedRoutePath.containsKey(key)) {
-                mergedRoutePath[key] = value;
-              } else {
-                print('⚠️ Duplicate timestamp skipped: $key');
-              }
-            });
-
-            // ✅ PERBAIKAN: Update lastLocation dengan titik terbaru
-            Map<String, dynamic>? latestLocation;
-            if (mergedRoutePath.isNotEmpty) {
-              try {
-                final sortedEntries = mergedRoutePath.entries.toList()
-                  ..sort((a, b) => (b.value['timestamp'] as String)
-                      .compareTo(a.value['timestamp'] as String));
-
-                if (sortedEntries.isNotEmpty) {
-                  latestLocation = Map<String, dynamic>.from(
-                      sortedEntries.first.value as Map);
-                }
-              } catch (e) {
-                print('⚠️ Error calculating latest location: $e');
-              }
-            }
-
-            // ✅ PERBAIKAN: Enhanced update data
-            final updateData = {
-              'route_path': mergedRoutePath,
-              'syncedAt': DateTime.now().toIso8601String(),
-            };
-
-            // ✅ PERBAIKAN: Update lastLocation jika ada
-            if (latestLocation != null) {
-              updateData['lastLocation'] = latestLocation;
-              print('📍 Updated lastLocation: ${latestLocation['timestamp']}');
-            }
-
-            // ✅ Retry mechanism for route path update
-            int retryCount = 0;
-            bool updateSuccess = false;
-
-            while (!updateSuccess && retryCount < 3) {
-              try {
-                await repository.updateTask(taskId, updateData).timeout(
-                      Duration(seconds: 30),
-                      onTimeout: () => throw Exception('Route update timeout'),
-                    );
-                updateSuccess = true;
-                print('✅ Route path synced on attempt ${retryCount + 1}');
-                print('📊 Total merged points: ${mergedRoutePath.length}');
-              } catch (e) {
-                retryCount++;
-                print('❌ Route sync attempt $retryCount failed: $e');
-                if (retryCount < 3) {
-                  await Future.delayed(Duration(seconds: retryCount * 2));
-                } else {
-                  throw e;
-                }
-              }
-            }
-
-            // ✅ Delete location data after successful sync
-            if (updateSuccess) {
-              for (final key in locationDataByTask[taskId]!.keys) {
-                await _offlineLocationBox!.delete(key);
-              }
-              print(
-                  '✅ Deleted ${locationDataByTask[taskId]!.length} location points for: $taskId');
-            }
-          } catch (e) {
-            print('❌ Error syncing location data for $taskId: $e');
-          }
-        }
+        // ✅ 3. SYNC LOCATION DATA dengan improved batching
+        await _syncLocationData(successfulSyncs);
 
         // ✅ 4. SYNC MOCK DETECTION DATA
-        final mockDetectionKeys = _offlineLocationBox!.keys
-            .where((k) => k.toString().startsWith('mock_detection_'))
-            .toList();
-
-        if (mockDetectionKeys.isNotEmpty) {
-          print(
-              '🔄 Syncing ${mockDetectionKeys.length} mock detection records...');
-
-          for (final key in mockDetectionKeys) {
-            try {
-              final data = _offlineLocationBox!.get(key);
-              if (data != null && data is Map) {
-                final taskId = data['taskId'] as String;
-
-                // ✅ Retry mechanism for mock detection
-                int retryCount = 0;
-                bool updateSuccess = false;
-
-                while (!updateSuccess && retryCount < 3) {
-                  try {
-                    await repository.updateTask(taskId, {
-                      'mockLocationDetected': true,
-                      'mockLocationCount': data['mockCount'] ?? 1,
-                      'lastMockDetection': data['timestamp'],
-                      'syncedAt': DateTime.now().toIso8601String(),
-                    }).timeout(
-                      Duration(seconds: 30),
-                      onTimeout: () =>
-                          throw Exception('Mock detection update timeout'),
-                    );
-
-                    // Also log to Firebase
-                    final database = FirebaseDatabase.instance.ref();
-                    await database
-                        .child('tasks/$taskId/mock_detections')
-                        .push()
-                        .set({
-                      'timestamp': data['timestamp'],
-                      'coordinates': [data['latitude'], data['longitude']],
-                      'accuracy': data['accuracy'],
-                      'speed': data['speed'],
-                      'altitude': data['altitude'],
-                      'heading': data['heading'],
-                      'count': data['mockCount'],
-                      'syncedFromOffline': true,
-                    }).timeout(
-                      Duration(seconds: 30),
-                      onTimeout: () => throw Exception('Mock log timeout'),
-                    );
-
-                    updateSuccess = true;
-                    print(
-                        '✅ Mock detection synced on attempt ${retryCount + 1}');
-                  } catch (e) {
-                    retryCount++;
-                    print('❌ Mock sync attempt $retryCount failed: $e');
-                    if (retryCount < 3) {
-                      await Future.delayed(Duration(seconds: retryCount * 2));
-                    } else {
-                      throw e;
-                    }
-                  }
-                }
-
-                // ✅ Delete after successful sync
-                if (updateSuccess) {
-                  await _offlineLocationBox!.delete(key);
-                  print('✅ Deleted mock detection data: $key');
-                }
-              }
-            } catch (e) {
-              print('❌ Error syncing mock detection $key: $e');
-            }
-          }
-        }
+        await _syncMockDetectionData(successfulSyncs);
 
         // ✅ 5. SYNC TASK UPDATE DATA
-        final updateKeys = _offlineLocationBox!.keys
-            .where((k) => k.toString().startsWith('task_update_'))
-            .toList();
+        await _syncTaskUpdateData(successfulSyncs);
 
-        for (final key in updateKeys) {
-          try {
-            final data = _offlineLocationBox!.get(key);
-            if (data != null && data is Map) {
-              final taskId = data['taskId'] as String;
-              final updates = data['updates'] as Map<dynamic, dynamic>;
+        // ✅ PERBAIKAN: Batch delete only successful syncs
+        await _batchDeleteSuccessfulSyncs(successfulSyncs);
 
-              print('🔄 Syncing task update for: $taskId');
-
-              // ✅ Retry mechanism
-              int retryCount = 0;
-              bool updateSuccess = false;
-
-              while (!updateSuccess && retryCount < 3) {
-                try {
-                  await repository.updateTask(
-                    taskId,
-                    {
-                      ...Map<String, dynamic>.from(updates),
-                      'syncedAt': DateTime.now().toIso8601String(),
-                    },
-                  ).timeout(
-                    Duration(seconds: 30),
-                    onTimeout: () => throw Exception('Task update timeout'),
-                  );
-                  updateSuccess = true;
-                  print('✅ Task update synced on attempt ${retryCount + 1}');
-                } catch (e) {
-                  retryCount++;
-                  print('❌ Task update attempt $retryCount failed: $e');
-                  if (retryCount < 3) {
-                    await Future.delayed(Duration(seconds: retryCount * 2));
-                  } else {
-                    throw e;
-                  }
-                }
-              }
-
-              // ✅ Delete after successful sync
-              if (updateSuccess) {
-                await _offlineLocationBox!.delete(key);
-                print('✅ Deleted task update data: $key');
-              }
-            }
-          } catch (e) {
-            print('❌ Error syncing task update $key: $e');
-          }
-        }
-
-        // ✅ PERBAIKAN: Update state dengan current route path dari BLoC state
-        Map<String, dynamic>? updatedRoutePath;
-        if (currentState.task != null && currentState.routePath != null) {
-          updatedRoutePath = Map<String, dynamic>.from(currentState.routePath!);
-        }
-
-        // ✅ Update finished tasks if needed
-        List<PatrolTask> finishedTasks = [];
-        try {
-          if (currentState.task != null) {
-            finishedTasks =
-                await repository.getFinishedTasks(currentState.task!.userId);
-          }
-        } catch (e) {
-          print('⚠️ Could not refresh finished tasks: $e');
-          finishedTasks = currentState.finishedTasks;
-        }
-
+        // ✅ Update state
         emit(currentState.copyWith(
           isSyncing: false,
-          finishedTasks: finishedTasks,
           isOffline: false,
-          routePath: updatedRoutePath, // ✅ Preserve current route path
         ));
 
         final remainingItems = _offlineLocationBox!.length;
+        print('📊 Sync completed. Remaining items: $remainingItems');
+
         if (remainingItems > 0) {
-          print('⚠️ ${remainingItems} offline items remain after sync');
-          // ✅ PERBAIKAN: Debug remaining items
+          print('⚠️ Some items failed to sync and were preserved');
           _debugRemainingOfflineData();
         } else {
           print('✅ All offline data synced successfully');
@@ -930,6 +611,476 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
         emit((state as PatrolLoaded).copyWith(isSyncing: false));
       }
     }
+  }
+
+// ✅ PERBAIKAN: Enhanced sync methods dengan better error handling
+
+  Future<void> _syncPatrolStartData(List<String> successfulSyncs) async {
+    final startKeys = _offlineLocationBox!.keys
+        .where((k) => k.toString().startsWith('patrol_start_'))
+        .toList();
+
+    print('🔄 Syncing ${startKeys.length} patrol start records...');
+
+    for (final key in startKeys) {
+      try {
+        final data = _offlineLocationBox!.get(key);
+        if (data != null && data is Map) {
+          final taskId = data['taskId'] as String;
+          final updateData = Map<String, dynamic>.from(data)..remove('taskId');
+
+          print('🔄 Syncing patrol start for: $taskId');
+
+          // ✅ PERBAIKAN: Realistic timeout dan better retry
+          bool syncSuccess = await _performReliableUpdate(
+            taskId,
+            updateData,
+            operation: 'patrol_start',
+          );
+
+          if (syncSuccess) {
+            successfulSyncs.add(key.toString());
+            print('✅ Patrol start synced: $taskId');
+          } else {
+            print('❌ Failed to sync patrol start: $taskId - preserving data');
+          }
+        }
+      } catch (e) {
+        print('❌ Error syncing patrol start $key: $e');
+      }
+    }
+  }
+
+  Future<void> _syncPatrolStopData(List<String> successfulSyncs) async {
+    final stopKeys = _offlineLocationBox!.keys
+        .where((k) => k.toString().startsWith('patrol_stop_'))
+        .toList();
+
+    print('🔄 Syncing ${stopKeys.length} patrol stop records...');
+
+    for (final key in stopKeys) {
+      try {
+        final data = _offlineLocationBox!.get(key);
+        if (data != null && data is Map) {
+          final taskId = data['taskId'] as String;
+          final endTime = DateTime.parse(data['endTime'] as String);
+          final distance = data['distance'] as double;
+
+          print('🔄 Syncing patrol stop for: $taskId');
+
+          bool syncSuccess = await _performReliableTaskStatusUpdate(
+            taskId,
+            endTime,
+            distance,
+          );
+
+          if (syncSuccess) {
+            successfulSyncs.add(key.toString());
+            print('✅ Patrol stop synced: $taskId');
+          } else {
+            print('❌ Failed to sync patrol stop: $taskId - preserving data');
+          }
+        }
+      } catch (e) {
+        print('❌ Error syncing patrol stop $key: $e');
+      }
+    }
+  }
+
+  Future<void> _syncLocationData(List<String> successfulSyncs) async {
+    final locationKeys = _offlineLocationBox!.keys
+        .where((k) =>
+            !k.toString().startsWith('patrol_stop_') &&
+            !k.toString().startsWith('task_update_') &&
+            !k.toString().startsWith('patrol_start_') &&
+            !k.toString().startsWith('mock_detection_'))
+        .toList();
+
+    print('🔄 Syncing ${locationKeys.length} location records...');
+
+    // ✅ PERBAIKAN: Group by task dan batch process
+    final locationDataByTask = <String, Map<String, dynamic>>{};
+
+    for (final key in locationKeys) {
+      try {
+        final data = _offlineLocationBox!.get(key);
+        if (data != null && data is Map && data['taskId'] != null) {
+          final taskId = data['taskId'] as String;
+          final timestamp = data['timestamp'] as String;
+          final latitude = data['latitude'] as double;
+          final longitude = data['longitude'] as double;
+
+          // ✅ Enhanced coordinate validation
+          if (_isValidCoordinate(latitude, longitude)) {
+            locationDataByTask[taskId] ??= {};
+            locationDataByTask[taskId]![key.toString()] = {
+              'coordinates': [latitude, longitude],
+              'timestamp': timestamp,
+            };
+          } else {
+            print(
+                '⚠️ Invalid coordinates skipped: lat=$latitude, lng=$longitude');
+            // Mark for deletion since it's invalid data
+            successfulSyncs.add(key.toString());
+          }
+        }
+      } catch (e) {
+        print('❌ Error processing location data $key: $e');
+      }
+    }
+
+    // ✅ Sync location data per task dengan enhanced merging
+    for (final taskId in locationDataByTask.keys) {
+      try {
+        print(
+            '🔄 Syncing ${locationDataByTask[taskId]!.length} location points for: $taskId');
+
+        bool syncSuccess = await _performReliableLocationSync(
+          taskId,
+          locationDataByTask[taskId]!,
+        );
+
+        if (syncSuccess) {
+          // Mark all location points for this task as successful
+          successfulSyncs.addAll(locationDataByTask[taskId]!.keys);
+          print('✅ Location data synced for task: $taskId');
+        } else {
+          print(
+              '❌ Failed to sync location data for task: $taskId - preserving data');
+        }
+      } catch (e) {
+        print('❌ Error syncing location data for $taskId: $e');
+      }
+    }
+  }
+
+  Future<void> _syncMockDetectionData(List<String> successfulSyncs) async {
+    final mockDetectionKeys = _offlineLocationBox!.keys
+        .where((k) => k.toString().startsWith('mock_detection_'))
+        .toList();
+
+    if (mockDetectionKeys.isEmpty) return;
+
+    print('🔄 Syncing ${mockDetectionKeys.length} mock detection records...');
+
+    for (final key in mockDetectionKeys) {
+      try {
+        final data = _offlineLocationBox!.get(key);
+        if (data != null && data is Map) {
+          final taskId = data['taskId'] as String;
+
+          bool syncSuccess =
+              await _performReliableMockDetectionSync(taskId, data);
+
+          if (syncSuccess) {
+            successfulSyncs.add(key.toString());
+            print('✅ Mock detection synced: $taskId');
+          } else {
+            print('❌ Failed to sync mock detection: $taskId - preserving data');
+          }
+        }
+      } catch (e) {
+        print('❌ Error syncing mock detection $key: $e');
+      }
+    }
+  }
+
+  Future<void> _syncTaskUpdateData(List<String> successfulSyncs) async {
+    final updateKeys = _offlineLocationBox!.keys
+        .where((k) => k.toString().startsWith('task_update_'))
+        .toList();
+
+    print('🔄 Syncing ${updateKeys.length} task update records...');
+
+    for (final key in updateKeys) {
+      try {
+        final data = _offlineLocationBox!.get(key);
+        if (data != null && data is Map) {
+          final taskId = data['taskId'] as String;
+          final updates = data['updates'] as Map<dynamic, dynamic>;
+
+          bool syncSuccess = await _performReliableUpdate(
+            taskId,
+            Map<String, dynamic>.from(updates),
+            operation: 'task_update',
+          );
+
+          if (syncSuccess) {
+            successfulSyncs.add(key.toString());
+            print('✅ Task update synced: $taskId');
+          } else {
+            print('❌ Failed to sync task update: $taskId - preserving data');
+          }
+        }
+      } catch (e) {
+        print('❌ Error syncing task update $key: $e');
+      }
+    }
+  }
+
+// ✅ PERBAIKAN: Batch delete dengan error handling
+  Future<void> _batchDeleteSuccessfulSyncs(List<String> successfulSyncs) async {
+    if (successfulSyncs.isEmpty) {
+      print('ℹ️ No successful syncs to delete');
+      return;
+    }
+
+    print(
+        '🗑️ Batch deleting ${successfulSyncs.length} successfully synced items...');
+
+    int deletedCount = 0;
+    for (final key in successfulSyncs) {
+      try {
+        await _offlineLocationBox!.delete(key);
+        deletedCount++;
+      } catch (e) {
+        print('❌ Error deleting key $key: $e');
+      }
+    }
+
+    print(
+        '✅ Successfully deleted $deletedCount/${successfulSyncs.length} items');
+  }
+
+// ✅ PERBAIKAN: Reliable update dengan proper error handling
+  Future<bool> _performReliableUpdate(
+      String taskId, Map<String, dynamic> updateData,
+      {required String operation}) async {
+    const maxRetries = 2; // Reduced retries untuk koneksi buruk
+    const baseTimeout = 8; // Shorter timeout
+
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        print('🔄 $operation attempt $attempt/$maxRetries for $taskId');
+
+        await repository.updateTask(taskId, {
+          ...updateData,
+          'syncedAt': DateTime.now().toIso8601String(),
+        }).timeout(
+          Duration(seconds: baseTimeout * attempt), // Progressive timeout
+          onTimeout: () => throw Exception(
+              '$operation timeout after ${baseTimeout * attempt}s'),
+        );
+
+        print('✅ $operation successful on attempt $attempt');
+        return true;
+      } catch (e) {
+        print('❌ $operation attempt $attempt failed: $e');
+
+        if (attempt < maxRetries) {
+          // Shorter delay untuk koneksi buruk
+          await Future.delayed(Duration(seconds: attempt));
+        }
+      }
+    }
+
+    print('❌ All $operation attempts failed for $taskId');
+    return false;
+  }
+
+// ✅ PERBAIKAN: Reliable task status update
+  Future<bool> _performReliableTaskStatusUpdate(
+    String taskId,
+    DateTime endTime,
+    double distance,
+  ) async {
+    const maxRetries = 2;
+    const baseTimeout = 8;
+
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        print('🔄 Task status update attempt $attempt/$maxRetries for $taskId');
+
+        // Update status first
+        await repository.updateTaskStatus(taskId, 'finished').timeout(
+              Duration(seconds: baseTimeout),
+              onTimeout: () => throw Exception('Status update timeout'),
+            );
+
+        // Then update details
+        await repository.updateTask(taskId, {
+          'endTime': endTime.toIso8601String(),
+          'distance': distance,
+          'status': 'finished',
+          'syncedAt': DateTime.now().toIso8601String(),
+        }).timeout(
+          Duration(seconds: baseTimeout),
+          onTimeout: () => throw Exception('Task update timeout'),
+        );
+
+        print('✅ Task status update successful on attempt $attempt');
+        return true;
+      } catch (e) {
+        print('❌ Task status update attempt $attempt failed: $e');
+
+        if (attempt < maxRetries) {
+          await Future.delayed(Duration(seconds: attempt));
+        }
+      }
+    }
+
+    return false;
+  }
+
+// ✅ PERBAIKAN: Reliable location sync dengan smart merging
+  Future<bool> _performReliableLocationSync(
+    String taskId,
+    Map<String, dynamic> locationData,
+  ) async {
+    const maxRetries = 2;
+    const baseTimeout = 10;
+
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        print('🔄 Location sync attempt $attempt/$maxRetries for $taskId');
+
+        // ✅ Get existing route path dengan timeout
+        Map<String, dynamic> existingRoutePath = {};
+        try {
+          final taskSnapshot = await repository
+              .getTaskById(taskId: taskId)
+              .timeout(Duration(seconds: 5));
+
+          if (taskSnapshot?.routePath != null) {
+            existingRoutePath =
+                Map<String, dynamic>.from(taskSnapshot!.routePath as Map);
+            print(
+                '📍 Found ${existingRoutePath.length} existing points in Firebase');
+          }
+        } catch (e) {
+          print('⚠️ Could not get existing route path: $e');
+          // Continue with empty existing path
+        }
+
+        // ✅ Smart merging - avoid duplicates
+        final mergedRoutePath = Map<String, dynamic>.from(existingRoutePath);
+        int newPointsAdded = 0;
+
+        locationData.forEach((key, value) {
+          if (!mergedRoutePath.containsKey(key)) {
+            mergedRoutePath[key] = value;
+            newPointsAdded++;
+          }
+        });
+
+        if (newPointsAdded == 0) {
+          print('ℹ️ No new points to add - all already exist');
+          return true; // Consider this successful
+        }
+
+        // ✅ Calculate latest location
+        Map<String, dynamic>? latestLocation;
+        if (mergedRoutePath.isNotEmpty) {
+          try {
+            final sortedEntries = mergedRoutePath.entries.toList()
+              ..sort((a, b) => (b.value['timestamp'] as String)
+                  .compareTo(a.value['timestamp'] as String));
+
+            if (sortedEntries.isNotEmpty) {
+              latestLocation =
+                  Map<String, dynamic>.from(sortedEntries.first.value as Map);
+            }
+          } catch (e) {
+            print('⚠️ Error calculating latest location: $e');
+          }
+        }
+
+        // ✅ Prepare update data
+        final updateData = {
+          'route_path': mergedRoutePath,
+          'syncedAt': DateTime.now().toIso8601String(),
+        };
+
+        if (latestLocation != null) {
+          updateData['lastLocation'] = latestLocation;
+        }
+
+        // ✅ Perform update dengan timeout
+        await repository.updateTask(taskId, updateData).timeout(
+              Duration(seconds: baseTimeout),
+              onTimeout: () => throw Exception('Route update timeout'),
+            );
+
+        print('✅ Location sync successful on attempt $attempt');
+        print(
+            '📊 Added $newPointsAdded new points, total: ${mergedRoutePath.length}');
+        return true;
+      } catch (e) {
+        print('❌ Location sync attempt $attempt failed: $e');
+
+        if (attempt < maxRetries) {
+          await Future.delayed(Duration(seconds: attempt));
+        }
+      }
+    }
+
+    return false;
+  }
+
+// ✅ PERBAIKAN: Reliable mock detection sync
+  Future<bool> _performReliableMockDetectionSync(
+    String taskId,
+    Map<dynamic, dynamic> data,
+  ) async {
+    const maxRetries = 2;
+    const baseTimeout = 8;
+
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        print(
+            '🔄 Mock detection sync attempt $attempt/$maxRetries for $taskId');
+
+        // Update task
+        await repository.updateTask(taskId, {
+          'mockLocationDetected': true,
+          'mockLocationCount': data['mockCount'] ?? 1,
+          'lastMockDetection': data['timestamp'],
+          'syncedAt': DateTime.now().toIso8601String(),
+        }).timeout(
+          Duration(seconds: baseTimeout),
+          onTimeout: () => throw Exception('Mock detection update timeout'),
+        );
+
+        // Log to Firebase
+        final database = FirebaseDatabase.instance.ref();
+        await database.child('tasks/$taskId/mock_detections').push().set({
+          'timestamp': data['timestamp'],
+          'coordinates': [data['latitude'], data['longitude']],
+          'accuracy': data['accuracy'],
+          'speed': data['speed'],
+          'altitude': data['altitude'],
+          'heading': data['heading'],
+          'count': data['mockCount'],
+          'syncedFromOffline': true,
+        }).timeout(
+          Duration(seconds: baseTimeout),
+          onTimeout: () => throw Exception('Mock log timeout'),
+        );
+
+        print('✅ Mock detection sync successful on attempt $attempt');
+        return true;
+      } catch (e) {
+        print('❌ Mock detection sync attempt $attempt failed: $e');
+
+        if (attempt < maxRetries) {
+          await Future.delayed(Duration(seconds: attempt));
+        }
+      }
+    }
+
+    return false;
+  }
+
+// ✅ PERBAIKAN: Enhanced coordinate validation
+  bool _isValidCoordinate(double latitude, double longitude) {
+    return latitude.abs() <= 90 &&
+        longitude.abs() <= 180 &&
+        latitude != 0.0 &&
+        longitude != 0.0 &&
+        !latitude.isNaN &&
+        !longitude.isNaN &&
+        !latitude.isInfinite &&
+        !longitude.isInfinite;
   }
 
 // ✅ PERBAIKAN: Helper method untuk debug remaining data
@@ -1355,6 +1506,14 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
 
       if (shouldProcessLocation) {
         try {
+          // ✅ Validate coordinates before processing
+          if (!_isValidCoordinate(
+              event.position.latitude, event.position.longitude)) {
+            print(
+                '⚠️ Invalid coordinates received, skipping: ${event.position.latitude}, ${event.position.longitude}');
+            return;
+          }
+
           final List<double> coordinates = [
             event.position.latitude,
             event.position.longitude
@@ -1367,22 +1526,32 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             'timestamp': event.timestamp.toIso8601String(),
           };
 
-          // ✅ PERBAIKAN: Gunakan state lokal untuk merging, bukan Firebase
+          // ✅ Update local route path
           Map<String, dynamic> currentRoutePath =
               Map<String, dynamic>.from(currentState.routePath ?? {});
 
-          // ✅ Tambahkan titik baru ke route path lokal
+          // ✅ Check duplicate timestamps
+          if (currentRoutePath.containsKey(timestampKey)) {
+            print('⚠️ Duplicate timestamp detected, skipping: $timestampKey');
+            return;
+          }
+
           currentRoutePath[timestampKey] = locationData;
 
           bool databaseUpdateSuccess = false;
           if (_isConnected) {
             try {
-              // ✅ PERBAIKAN: Kirim hanya update incremental
-              await repository.updatePatrolLocation(
-                currentState.task!.taskId,
-                coordinates,
-                event.timestamp,
-              );
+              // ✅ PERBAIKAN: More robust Firebase update dengan timeout
+              await repository
+                  .updatePatrolLocation(
+                    currentState.task!.taskId,
+                    coordinates,
+                    event.timestamp,
+                  )
+                  .timeout(
+                    Duration(seconds: 8),
+                    onTimeout: () => throw Exception('Location update timeout'),
+                  );
               databaseUpdateSuccess = true;
               print('✅ Location updated to Firebase successfully');
             } catch (e) {
@@ -1391,43 +1560,28 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
             }
           }
 
-          // ✅ PERBAIKAN: Simpan ke offline storage dengan key yang konsisten
-          if (!_isConnected || !databaseUpdateSuccess) {
-            if (_offlineLocationBox != null) {
+          // ✅ PERBAIKAN: Always save to offline storage sebagai backup
+          if (_offlineLocationBox != null) {
+            try {
               await _offlineLocationBox!.put(timestampKey, {
                 'latitude': event.position.latitude,
                 'longitude': event.position.longitude,
                 'timestamp': event.timestamp.toIso8601String(),
                 'taskId': currentState.task!.taskId,
-                'coordinates':
-                    coordinates, // ✅ Tambahkan koordinat dalam format yang sama
+                'coordinates': coordinates,
                 'locationData': locationData,
+                'synced': databaseUpdateSuccess, // ✅ Mark sync status
               });
               print('💾 Location saved to offline storage: $timestampKey');
+            } catch (e) {
+              print('❌ Failed to save to offline storage: $e');
             }
           }
 
-          // ✅ Update distance calculation
-          double newDistance = currentState.distance ?? 0.0;
-          if (currentState.currentPatrolPath != null &&
-              currentState.currentPatrolPath!.isNotEmpty) {
-            final lastPosition = currentState.currentPatrolPath!.last;
-            final distanceInMeters = Geolocator.distanceBetween(
-              lastPosition.latitude,
-              lastPosition.longitude,
-              event.position.latitude,
-              event.position.longitude,
-            );
-
-            if (distanceInMeters > 1.0) {
-              newDistance += distanceInMeters;
-            }
-          }
-
-          // ✅ Update task dengan route path yang sudah dimerge
+          // ✅ Update state
           final updatedTask = currentState.task!.copyWith(
             routePath: currentRoutePath,
-            distance: newDistance,
+            distance: _calculateNewDistance(currentState, event.position),
             lastLocation: locationData,
           );
 
@@ -1437,7 +1591,7 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
               event.position
             ],
             routePath: currentRoutePath,
-            distance: newDistance,
+            distance: updatedTask.distance,
             task: updatedTask,
             isOffline: !_isConnected,
             isPatrolling: true,
@@ -1453,89 +1607,148 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     }
   }
 
+// ✅ Helper method untuk calculate distance
+  double _calculateNewDistance(
+      PatrolLoaded currentState, Position newPosition) {
+    double newDistance = currentState.distance ?? 0.0;
+
+    if (currentState.currentPatrolPath != null &&
+        currentState.currentPatrolPath!.isNotEmpty) {
+      final lastPosition = currentState.currentPatrolPath!.last;
+      final distanceInMeters = Geolocator.distanceBetween(
+        lastPosition.latitude,
+        lastPosition.longitude,
+        newPosition.latitude,
+        newPosition.longitude,
+      );
+
+      if (distanceInMeters > 1.0 && distanceInMeters < 1000.0) {
+        // Reasonable distance
+        newDistance += distanceInMeters;
+      }
+    }
+
+    return newDistance;
+  }
+
   Future<void> _onStopPatrol(
       StopPatrol event, Emitter<PatrolState> emit) async {
     try {
-      final currentState = state;
-      if (currentState is! PatrolLoaded) {
-        return;
-      }
+      // print('🛑 Stopping patrol for task: ${event.taskId ?? "unknown"}');
 
-      // ✅ PREPARE COMPREHENSIVE FIREBASE UPDATE
-      Map<String, dynamic> firebaseUpdate = {
-        'status': 'finished',
-        'endTime': event.endTime.toIso8601String(),
-        'distance': event.distance,
-        'lastUpdated': DateTime.now().toIso8601String(),
-      };
+      if (state is PatrolLoaded) {
+        final currentState = state as PatrolLoaded;
 
-      // ✅ Include route path if available
-      if (event.finalRoutePath!.isNotEmpty) {
-        Map<String, dynamic> routePathForFirebase = {};
-        event.finalRoutePath!.forEach((key, value) {
-          if (value is Map && value['coordinates'] != null) {
-            routePathForFirebase[key] = {
-              'coordinates': value['coordinates'],
-              'timestamp': value['timestamp'],
-            };
-          }
-        });
+        // Emit stopping state first
+        emit(currentState.copyWith(
+          isSyncing: true,
+          isPatrolling: false,
+        ));
 
-        if (routePathForFirebase.isNotEmpty) {
-          firebaseUpdate['route_path'] = routePathForFirebase;
-          print(
-              '🔄 Including route path in Firebase update: ${routePathForFirebase.length} points');
-        }
-      }
+        if (currentState.task != null) {
+          final taskId = currentState.task!.taskId;
 
-      DatabaseReference _firebaseDatabase = FirebaseDatabase.instance.ref();
+          // ✅ ENHANCED: Multiple status update attempts
+          for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+              print('🔄 Status update attempt $attempt/3');
 
-      // ✅ PERFORM FIREBASE UPDATE WITH RETRY
-      final taskRef =
-          _firebaseDatabase.child('tasks/${currentState.task!.taskId}');
+              // Update task status to finished
+              await repository.updateTaskStatus(taskId, 'finished').timeout(
+                    Duration(seconds: 10),
+                    onTimeout: () => throw Exception('Status update timeout'),
+                  );
 
-      int retryCount = 0;
-      bool updateSuccess = false;
-
-      while (!updateSuccess && retryCount < 3) {
-        try {
-          print('🔄 Attempting Firebase update (attempt ${retryCount + 1})...');
-          await taskRef.update(firebaseUpdate).timeout(
-                Duration(seconds: 30),
-                onTimeout: () => throw Exception('Firebase update timeout'),
+              // Update additional fields
+              await repository.updateTask(taskId, {
+                'endTime': event.endTime.toIso8601String(),
+                'distance': event.distance,
+                'status': 'finished',
+                'route_path': event.finalRoutePath,
+                // 'completedAt': DateTime.now().toIso8601String(),
+                'lastUpdated': DateTime.now().toIso8601String(),
+                // 'syncVersion': DateTime.now().millisecondsSinceEpoch,
+              }).timeout(
+                Duration(seconds: 15),
+                onTimeout: () => throw Exception('Task update timeout'),
               );
-          updateSuccess = true;
-          print('✅ Firebase update successful');
-        } catch (e) {
-          retryCount++;
-          print('❌ Firebase update attempt $retryCount failed: $e');
 
-          if (retryCount < 3) {
-            await Future.delayed(Duration(seconds: retryCount * 2));
-          } else {
-            print('❌ All Firebase update attempts failed');
-            // Don't throw - continue with local state update
+              // ✅ CRITICAL: Force immediate status verification
+              await Future.delayed(Duration(seconds: 1));
+
+              final verifyTask = await repository
+                  .getTaskById(taskId: taskId)
+                  .timeout(Duration(seconds: 10));
+
+              if (verifyTask?.status == 'finished') {
+                print('✅ Status update verified on attempt $attempt');
+                break;
+              } else {
+                throw Exception(
+                    'Status verification failed: ${verifyTask?.status}');
+              }
+            } catch (e) {
+              print('❌ Status update attempt $attempt failed: $e');
+
+              if (attempt == 3) {
+                throw Exception('All status update attempts failed');
+              }
+
+              await Future.delayed(Duration(seconds: attempt));
+            }
           }
+
+          // ✅ ENHANCED: Update local storage to completed immediately
+          try {
+            await LocalPatrolService.updatePatrolField(
+              taskId: taskId,
+              updates: {
+                'status': 'finished',
+                'endTime': event.endTime.toIso8601String(),
+                'distance': event.distance,
+                'syncedToFirebase': true,
+                'completedAt': DateTime.now().toIso8601String(),
+              },
+            );
+          } catch (localError) {
+            print('❌ Error updating local status: $localError');
+          }
+
+          // Update state
+          final updatedTask = currentState.task!.copyWith(
+            status: 'finished',
+            endTime: event.endTime,
+            distance: event.distance,
+            routePath: event.finalRoutePath,
+          );
+
+          emit(PatrolLoaded(
+            task: updatedTask,
+            isPatrolling: false,
+            distance: event.distance,
+            routePath: event.finalRoutePath,
+            isSyncing: false,
+            isOffline: false,
+          ));
+
+          print('✅ Patrol stopped successfully and status updated to finished');
+        } else {
+          print('⚠️ No task found in current state for stopping');
+          emit(currentState.copyWith(
+            isPatrolling: false,
+            isSyncing: false,
+          ));
         }
       }
-
-      // ✅ UPDATE LOCAL STATE REGARDLESS OF FIREBASE SUCCESS
-      final updatedTask = currentState.task!.copyWith(
-        status: 'finished',
-        endTime: event.endTime,
-        distance: event.distance,
-        routePath: event.finalRoutePath,
-      );
-
-      emit(currentState.copyWith(
-        task: updatedTask,
-        isPatrolling: false,
-      ));
-
-      print('✅ Patrol stopped successfully');
     } catch (e) {
       print('❌ Error stopping patrol: $e');
-      emit(PatrolError('Failed to stop patrol: $e'));
+
+      if (state is PatrolLoaded) {
+        emit((state as PatrolLoaded).copyWith(
+          isSyncing: false,
+          isPatrolling: false,
+        ));
+      }
     }
   }
 
@@ -1804,57 +2017,246 @@ class PatrolBloc extends Bloc<PatrolEvent, PatrolState> {
     }
   }
 
+  // Di patrol_bloc.dart
   Future<void> _onCheckMissedCheckpoints(
     CheckMissedCheckpoints event,
     Emitter<PatrolState> emit,
   ) async {
-    // Hanya jalankan jika online dan patroli sudah selesai (untuk validasi akhir)
-    if (!_isConnected) return;
+    // ✅ Enhanced logging
+    print('🔍 Checking missed checkpoints for task: ${event.task.taskId}');
+    print('   - Task status: ${event.task.status}');
+    print('   - Is connected: $_isConnected');
+    print(
+        '   - Assigned route points: ${event.task.assignedRoute?.length ?? 0}');
+
+    // ✅ Check jika patroli sudah selesai dan online
+    if (!_isConnected) {
+      print('⚠️ Offline - skipping missed checkpoints check');
+      return;
+    }
+
+    if (event.task.status != 'finished') {
+      print('⚠️ Task not finished - skipping missed checkpoints check');
+      return;
+    }
 
     try {
       final task = event.task;
 
-      if (event.task.clusterId.isNotEmpty) {
-        await _loadClusterValidationRadius(event.task.clusterId);
+      // ✅ Load cluster validation radius
+      if (task.clusterId.isNotEmpty) {
+        await _loadClusterValidationRadius(task.clusterId);
+        print(
+            '📏 Loaded cluster validation radius: $_clusterValidationRadius m');
       }
-      final double requiredRadius =
-          _clusterValidationRadius ?? task.validationRadius;
 
-      // Dapatkan semua titik yang dilalui petugas
-      final List<LatLng> actualRoutePath =
-          task.getRoutePathAsLatLng(); // Use the new method
+      // ✅ Get validation radius with proper priority
+      final double validationRadius = _getValidationRadius(task);
+      print('📏 Using validation radius: $validationRadius m');
 
-      // Validasi jika semua titik telah dikunjungi (dalam radius 5m)
-      final List<List<double>> missedCheckpoints = task.getMissedCheckpoints(
-          actualRoutePath, requiredRadius); // Use the new method
+      // ✅ Validate assigned route exists
+      if (task.assignedRoute == null || task.assignedRoute!.isEmpty) {
+        print('⚠️ No assigned route found - skipping validation');
+        return;
+      }
 
+      // ✅ Get actual route path from task
+      List<LatLng> actualRoutePath = [];
+
+      // ✅ PERBAIKAN: Get route path dari berbagai sumber
+      if (task.routePath != null && task.routePath!.isNotEmpty) {
+        try {
+          // Convert route_path to LatLng list
+          final sortedEntries = task.routePath!.entries.toList()
+            ..sort((a, b) => (a.value['timestamp'] as String)
+                .compareTo(b.value['timestamp'] as String));
+
+          for (var entry in sortedEntries) {
+            if (entry.value is Map && entry.value['coordinates'] != null) {
+              final coordinates = entry.value['coordinates'] as List;
+              if (coordinates.length >= 2) {
+                final lat = (coordinates[0] as num).toDouble();
+                final lng = (coordinates[1] as num).toDouble();
+
+                // ✅ Validate coordinates
+                if (lat.abs() <= 90 &&
+                    lng.abs() <= 180 &&
+                    lat != 0.0 &&
+                    lng != 0.0) {
+                  actualRoutePath.add(LatLng(lat, lng));
+                }
+              }
+            }
+          }
+
+          print(
+              '📍 Extracted ${actualRoutePath.length} valid route points from task.routePath');
+        } catch (e) {
+          print('❌ Error extracting route path: $e');
+        }
+      }
+
+      // ✅ Fallback: Try to get from current state
+      if (actualRoutePath.isEmpty && state is PatrolLoaded) {
+        final currentState = state as PatrolLoaded;
+        if (currentState.routePath != null &&
+            currentState.routePath!.isNotEmpty) {
+          try {
+            final sortedEntries = currentState.routePath!.entries.toList()
+              ..sort((a, b) => (a.value['timestamp'] as String)
+                  .compareTo(b.value['timestamp'] as String));
+
+            for (var entry in sortedEntries) {
+              if (entry.value is Map && entry.value['coordinates'] != null) {
+                final coordinates = entry.value['coordinates'] as List;
+                if (coordinates.length >= 2) {
+                  final lat = (coordinates[0] as num).toDouble();
+                  final lng = (coordinates[1] as num).toDouble();
+
+                  if (lat.abs() <= 90 &&
+                      lng.abs() <= 180 &&
+                      lat != 0.0 &&
+                      lng != 0.0) {
+                    actualRoutePath.add(LatLng(lat, lng));
+                  }
+                }
+              }
+            }
+
+            print(
+                '📍 Extracted ${actualRoutePath.length} valid route points from state.routePath');
+          } catch (e) {
+            print('❌ Error extracting route path from state: $e');
+          }
+        }
+      }
+
+      if (actualRoutePath.isEmpty) {
+        print('⚠️ No actual route path found - cannot validate checkpoints');
+        return;
+      }
+
+      // ✅ Convert assigned route to LatLng for validation
+      List<LatLng> assignedCheckpoints = [];
+      for (var checkpoint in task.assignedRoute!) {
+        if (checkpoint.length >= 2) {
+          assignedCheckpoints.add(LatLng(
+            checkpoint[0].toDouble(),
+            checkpoint[1].toDouble(),
+          ));
+        }
+      }
+
+      print(
+          '🎯 Validating ${assignedCheckpoints.length} checkpoints against ${actualRoutePath.length} route points');
+
+      // ✅ Check each assigned checkpoint
+      List<List<double>> missedCheckpoints = [];
+
+      for (int i = 0; i < assignedCheckpoints.length; i++) {
+        final checkpoint = assignedCheckpoints[i];
+        bool checkpointVisited = false;
+
+        // ✅ Check if any actual route point is within validation radius
+        for (final routePoint in actualRoutePath) {
+          final distance = Geolocator.distanceBetween(
+            checkpoint.latitude,
+            checkpoint.longitude,
+            routePoint.latitude,
+            routePoint.longitude,
+          );
+
+          if (distance <= validationRadius) {
+            checkpointVisited = true;
+            print(
+                '✅ Checkpoint ${i + 1} visited (distance: ${distance.toStringAsFixed(1)}m)');
+            break;
+          }
+        }
+
+        if (!checkpointVisited) {
+          missedCheckpoints.add([checkpoint.latitude, checkpoint.longitude]);
+          print(
+              '❌ Checkpoint ${i + 1} MISSED (lat: ${checkpoint.latitude}, lng: ${checkpoint.longitude})');
+        }
+      }
+
+      print(
+          '📊 Validation result: ${missedCheckpoints.length} missed out of ${assignedCheckpoints.length} checkpoints');
+
+      // ✅ Send notification if there are missed checkpoints
       if (missedCheckpoints.isNotEmpty) {
-        // Kirim notifikasi ke command center
-        await sendMissedCheckpointsNotification(
-          patrolTaskId: task.taskId,
-          officerName: task.officerName,
-          clusterName: task.clusterName,
-          officerId: task.userId,
-          missedCheckpoints: missedCheckpoints,
-          customRadius: requiredRadius,
-        );
+        print('🚨 Sending missed checkpoints notification...');
 
-        // Update task dengan flag missedCheckpoints = true
-        // await repository.updateTask(
-        //   task.taskId,
-        //   {
-        //     'missedCheckpoints': true,
-        //     'missedCheckpointsCount': missedCheckpoints.length,
-        //     'missedCheckpointsList': missedCheckpoints,
-        //   },
-        // );
-      } else {}
-    } catch (e) {}
+        try {
+          // ✅ PERBAIKAN: Use correct function name and enhanced parameters
+          await sendMissedCheckpointsNotificationWithRadius(
+            patrolTaskId: task.taskId,
+            officerName:
+                task.officerName.isNotEmpty ? task.officerName : 'Petugas',
+            clusterName:
+                task.clusterName.isNotEmpty ? task.clusterName : 'Tatar',
+            officerId: task.userId,
+            missedCheckpoints: missedCheckpoints,
+            clusterId: task.clusterId,
+          );
+
+          print('✅ Missed checkpoints notification sent successfully');
+
+          // ✅ Update task with missed checkpoints info
+          try {
+            await repository.updateTask(
+              task.taskId,
+              {
+                'missedCheckpoints': true,
+                'missedCheckpointsCount': missedCheckpoints.length,
+                'missedCheckpointsList': missedCheckpoints,
+                'validationRadius': validationRadius,
+                'checkpointsValidatedAt': DateTime.now().toIso8601String(),
+              },
+            );
+            print('✅ Task updated with missed checkpoints info');
+          } catch (updateError) {
+            print(
+                '❌ Failed to update task with missed checkpoints: $updateError');
+          }
+        } catch (notificationError) {
+          print(
+              '❌ Failed to send missed checkpoints notification: $notificationError');
+        }
+      } else {
+        print('✅ All checkpoints visited - no notification needed');
+
+        // ✅ Update task to indicate successful validation
+        try {
+          await repository.updateTask(
+            task.taskId,
+            {
+              'missedCheckpoints': false,
+              'missedCheckpointsCount': 0,
+              'allCheckpointsVisited': true,
+              'validationRadius': validationRadius,
+              'checkpointsValidatedAt': DateTime.now().toIso8601String(),
+            },
+          );
+          print('✅ Task updated - all checkpoints validated');
+        } catch (updateError) {
+          print('❌ Failed to update task validation: $updateError');
+        }
+      }
+    } catch (e, stackTrace) {
+      print('❌ Error in missed checkpoints check: $e');
+      print('📍 Stack trace: $stackTrace');
+    }
   }
 
+// ✅ Enhanced validation radius method
   double _getValidationRadius(PatrolTask? task) {
-    // Prioritas: Cluster radius → Task radius → Default
-    return _clusterValidationRadius ?? task?.validationRadius ?? 50.0;
+    // Priority: Cluster radius → Task radius → Default
+    final radius = _clusterValidationRadius ?? task?.validationRadius ?? 50.0;
+    print(
+        '📏 Validation radius determined: $radius m (cluster: $_clusterValidationRadius, task: ${task?.validationRadius})');
+    return radius;
   }
 }
 
